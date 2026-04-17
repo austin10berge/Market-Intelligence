@@ -63,7 +63,7 @@ class MarketPosture(str, Enum):
 class Digest(BaseModel):
     """The final evening digest delivered to the user."""
 
-    date: date = Field(default_factory=date.today)
+    report_date: date = Field(default_factory=date.today)
     posture: MarketPosture
     composite_score: float = Field(description="Aggregate score from all signals")
     scored_signals: list[ScoredSignal] = Field(default_factory=list)

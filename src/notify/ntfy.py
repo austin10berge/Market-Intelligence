@@ -31,11 +31,14 @@ async def send_ntfy(title: str, message: str, priority: int = 3, tags: str = "ch
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # NTFY requires ASCII headers — use UTF-8 encoding per NTFY spec
+            encoded_title = title.encode("utf-8")
+
             resp = await client.post(
                 url,
-                content=message,
+                content=message.encode("utf-8"),
                 headers={
-                    "Title": title,
+                    "Title": encoded_title,
                     "Priority": str(priority),
                     "Tags": tags,
                     "Markdown": "yes",

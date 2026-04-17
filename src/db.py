@@ -10,6 +10,31 @@ from pathlib import Path
 from .config import settings
 
 
+def _json_default(obj: object) -> object:
+    """Handle non-standard types when serializing to JSON (e.g. numpy bools)."""
+    if isinstance(obj, bool):
+        return bool(obj)
+    if isinstance(obj, (int,)):
+        return int(obj)
+    if isinstance(obj, float):
+        return float(obj)
+    # Try numpy types if numpy is available
+    try:
+        import numpy as np
+
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+    except ImportError:
+        pass
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def _get_connection() -> sqlite3.Connection:
     """Get a SQLite connection, creating the DB and tables if needed."""
     db_path = Path(settings.db_path)
@@ -87,7 +112,7 @@ def store_signal(
                 scored_value,
                 direction,
                 int(extreme),
-                json.dumps(metadata or {}),
+                json.dumps(metadata or {}, default=_json_default),
                 summary,
             ),
         )
