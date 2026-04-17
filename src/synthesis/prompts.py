@@ -14,7 +14,7 @@ Guidelines:
 - End with a clear theta play recommendation and 2-3 watchlist items
 - Do NOT hedge excessively — give a directional lean"""
 
-USER_PROMPT_TEMPLATE = """Generate an evening market digest for {date}.
+USER_PROMPT_TEMPLATE = """Generate an evening market digest analysis for {date}.
 
 === SIGNAL DATA ===
 {signal_data}
@@ -25,10 +25,9 @@ Overall Posture: {posture}
 Signals at extremes: {extreme_count}
 
 === FORMAT ===
-Use this exact structure:
+Use this exact structure (do NOT restate the raw signals):
 
-POSTURE: [posture assessment]
-[signal summaries with values and direction arrows]
+POSTURE: [Your posture assessment and brief analysis of the signals]
 
 THETA PLAY: [specific recommendation for credit spread / premium selling]
 

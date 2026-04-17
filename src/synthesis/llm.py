@@ -32,7 +32,7 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
         client = genai.Client(api_key=settings.gemini_api_key)
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-flash-latest",
             contents=user_prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_prompt,
@@ -55,42 +55,5 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
 
 
 def _fallback_summary(user_prompt: str) -> str:
-    """Extract a basic summary from the prompt data when no LLM is available."""
-    # Pull out the signal data section
-    lines = user_prompt.split("\n")
-    summary_lines = []
-    in_signals = False
-
-    for line in lines:
-        if "=== SIGNAL DATA ===" in line:
-            in_signals = True
-            continue
-        if "===" in line and in_signals:
-            in_signals = False
-            continue
-        if in_signals and line.strip():
-            # If the line already has a bullet, grab it. If not, preserve the indentation
-            if line.strip().startswith("•"):
-                summary_lines.append(line.strip()[2:])
-            else:
-                summary_lines.append(f"  {line.lstrip()}")
-
-    if not summary_lines:
-        return "Unable to generate digest — no signal data available."
-
-    composite_line = ""
-    for line in lines:
-        if "Composite Score" in line:
-            composite_line = line.strip()
-            break
-        if "Overall Posture" in line:
-            composite_line = line.strip()
-            break
-
-    result = "📊 Evening Market Digest (raw signals — LLM unavailable)\n\n"
-    result += "\n".join(f"• {s}" for s in summary_lines)
-    if composite_line:
-        result += f"\n\n{composite_line}"
-    result += "\n\n⚠️ Configure GEMINI_API_KEY for full AI-synthesized analysis."
-
-    return result
+    """Return a simple fallback message since main.py already renders raw signals."""
+    return "LLM unavailable. Check your GEMINI_API_KEY and API quota for full AI-synthesized analysis."

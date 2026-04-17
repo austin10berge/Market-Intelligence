@@ -99,7 +99,17 @@ async def run_pipeline() -> None:
 
         # Build the full notification text
         header = f"📊 Evening Market Digest — {today.strftime('%b %d, %Y')}\n\n"
-        full_text = header + digest_text
+        
+        # Format the raw signals nicely
+        raw_signals_block = "\n".join(f"• {ss.signal.summary}" for ss in scored_signals)
+        raw_signals_block += f"\n\nComposite Score: {composite:+.3f} (Range: -1.0 to +1.0)"
+        
+        if digest_text and "Unable to generate" not in digest_text and "LLM unavailable" not in digest_text:
+            llm_section = f"\n\n🤖 AI Analysis:\n{digest_text}"
+        else:
+            llm_section = f"\n\n⚠️ {digest_text}"
+
+        full_text = header + raw_signals_block + llm_section
 
         # Store digest to DB
         db.store_digest(
