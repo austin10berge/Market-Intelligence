@@ -91,8 +91,14 @@ class SectorEtfFetcher(BaseFetcher):
             rotation_spread = 0.0
 
         # Build summary
-        leader_str = ", ".join(f"{t} ({p:+.2f}%)" for t, p in leaders)
-        laggard_str = ", ".join(f"{t} ({p:+.2f}%)" for t, p in laggards)
+        leader_lines = "\n".join(f"  {SECTOR_ETFS[t]} ({t}): {p:+.2f}%" for t, p in leaders)
+        laggard_lines = "\n".join(f"  {SECTOR_ETFS[t]} ({t}): {p:+.2f}%" for t, p in laggards)
+
+        summary = (
+            f"Sectors: {rotation}\n"
+            f"Leaders:\n{leader_lines}\n"
+            f"Laggards:\n{laggard_lines}"
+        )
 
         return Signal(
             source=SignalSource.SECTOR_ETF,
@@ -106,10 +112,7 @@ class SectorEtfFetcher(BaseFetcher):
                 "defensive_avg": def_avg,
                 "cyclical_avg": cyc_avg,
             },
-            summary=(
-                f"Sectors: {rotation} | "
-                f"Leaders: {leader_str} | Laggards: {laggard_str}"
-            ),
+            summary=summary,
         )
 
 

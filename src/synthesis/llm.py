@@ -62,14 +62,18 @@ def _fallback_summary(user_prompt: str) -> str:
     in_signals = False
 
     for line in lines:
-        if "SIGNAL DATA" in line:
+        if "=== SIGNAL DATA ===" in line:
             in_signals = True
             continue
-        if "COMPOSITE" in line:
+        if "===" in line and in_signals:
             in_signals = False
             continue
-        if in_signals and line.strip().startswith("•"):
-            summary_lines.append(line.strip()[2:])  # Remove bullet
+        if in_signals and line.strip():
+            # If the line already has a bullet, grab it. If not, preserve the indentation
+            if line.strip().startswith("•"):
+                summary_lines.append(line.strip()[2:])
+            else:
+                summary_lines.append(f"  {line.lstrip()}")
 
     if not summary_lines:
         return "Unable to generate digest — no signal data available."
