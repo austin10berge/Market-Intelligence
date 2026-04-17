@@ -1,0 +1,10 @@
+services:
+  market-intelligence:
+    build: .
+    container_name: market-intelligence
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    restart: "no"
+    # Run via cron on the host or use the built-in scheduler:
+    # docker compose run --rm market-intelligence
