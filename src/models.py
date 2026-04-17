@@ -23,6 +23,9 @@ class SignalSource(str, Enum):
     VIX = "vix"
     PUT_CALL = "put_call"
     SECTOR_ETF = "sector_etf"
+    GEX = "gex"
+    CREDIT_SPREADS = "credit_spreads"
+    LIQUIDITY = "liquidity"
 
 
 class Signal(BaseModel):

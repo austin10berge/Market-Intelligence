@@ -10,6 +10,9 @@ from datetime import date
 from .config import settings
 from .fetchers.base import close_http_client
 from .fetchers.fear_greed import FearGreedFetcher
+from .fetchers.gex import GexFetcher
+from .fetchers.credit_spreads import CreditSpreadsFetcher
+from .fetchers.liquidity import LiquidityFetcher
 from .fetchers.put_call import PutCallFetcher
 from .fetchers.sector_etf import SectorEtfFetcher
 from .fetchers.vix import VixFetcher
@@ -31,12 +34,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# All Phase 1 fetchers
+# All Phase 1 and 2 fetchers
 FETCHERS = [
     FearGreedFetcher(),
     VixFetcher(),
     PutCallFetcher(),
     SectorEtfFetcher(),
+    GexFetcher(),
+    CreditSpreadsFetcher(),
+    LiquidityFetcher(),
 ]
 
 

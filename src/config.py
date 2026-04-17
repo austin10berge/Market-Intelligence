@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     # ── LLM ──────────────────────────────────────────────
     gemini_api_key: str = Field(default="", description="Gemini API key (free tier)")
 
+    # ── FRED API ─────────────────────────────────────────
+    fred_api_key: str = Field(default="", description="FRED API key for liquidity/credit spreads")
+
     # ── Notifications: NTFY.sh (primary) ─────────────────
     ntfy_topic: str = Field(default="market-intelligence", description="NTFY topic name")
     ntfy_server: str = Field(default="https://ntfy.sh", description="NTFY server URL")

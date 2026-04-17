@@ -149,10 +149,75 @@ def _score_sector_etf(signal: Signal) -> ScoredSignal:
         )
 
 
+def _score_gex(signal: Signal) -> ScoredSignal:
+    """GEX: > $5B bullish (pinning), < $0 bearish (volatile)."""
+    gex_billions = signal.value
+    extreme = gex_billions < 0 or gex_billions > 10
+
+    if gex_billions < 0:
+        return ScoredSignal(
+            signal=signal,
+            score=-1,
+            direction=SignalDirection.BEARISH,
+            extreme=extreme,
+            reasoning=f"GEX at ${gex_billions:+.2f}B — negative gamma, high volatility risk",
+        )
+    elif gex_billions > 5:
+        return ScoredSignal(
+            signal=signal,
+            score=1,
+            direction=SignalDirection.BULLISH,
+            extreme=extreme,
+            reasoning=f"GEX at ${gex_billions:+.2f}B — positive gamma, price pinning expected",
+        )
+    else:
+        return ScoredSignal(
+            signal=signal,
+            score=0,
+            direction=SignalDirection.NEUTRAL,
+            extreme=False,
+            reasoning=f"GEX at ${gex_billions:+.2f}B — neutral range",
+        )
+
+
+def _score_credit_spreads(signal: Signal) -> ScoredSignal:
+    """Credit Spreads: > 5.0% bearish/stress, < 3.5% bullish/complacent."""
+    spread = signal.value
+    extreme = spread > 6.0 or spread < 3.0
+
+    if spread > 5.0:
+        return ScoredSignal(
+            signal=signal, score=-1, direction=SignalDirection.BEARISH, extreme=extreme,
+            reasoning=f"Credit spread at {spread:.2f}% — high stress, risk-off",
+        )
+    elif spread < 3.5:
+        return ScoredSignal(
+            signal=signal, score=1, direction=SignalDirection.BULLISH, extreme=extreme,
+            reasoning=f"Credit spread at {spread:.2f}% — tight spreads, risk-on",
+        )
+    else:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
+            reasoning=f"Credit spread at {spread:.2f}% — normal range",
+        )
+
+
+def _score_liquidity(signal: Signal) -> ScoredSignal:
+    """Liquidity scoring placeholder (requires trend analysis / rolling averages)."""
+    net_liq = signal.metadata["display_trillions"]
+    return ScoredSignal(
+        signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
+        reasoning=f"Net Liquidity at ${net_liq:.2f}T (requires trend tracking for directional score)",
+    )
+
+
 # Registry of scoring functions
 _SCORERS = {
     SignalSource.FEAR_GREED: _score_fear_greed,
     SignalSource.VIX: _score_vix,
     SignalSource.PUT_CALL: _score_put_call,
     SignalSource.SECTOR_ETF: _score_sector_etf,
+    SignalSource.GEX: _score_gex,
+    SignalSource.CREDIT_SPREADS: _score_credit_spreads,
+    SignalSource.LIQUIDITY: _score_liquidity,
 }
