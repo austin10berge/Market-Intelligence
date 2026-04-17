@@ -1,5 +1,12 @@
 const API_BASE = "http://127.0.0.1:8000/api";
 
+// CSP State
+let allCspCandidates = [];
+let currentCspSort = 'roc_percent';
+let currentCspSortDesc = true;
+let currentCspPage = 1;
+const CSP_PER_PAGE = 5;
+
 document.addEventListener("DOMContentLoaded", () => {
     initDashboard();
 });
@@ -18,7 +25,7 @@ async function fetchMarketPosture() {
         const response = await fetch(`${API_BASE}/market-posture`);
         if (!response.ok) throw new Error("Failed to fetch posture");
         const data = await response.json();
-        
+
         renderPosture(data);
         renderSignals(data);
     } catch (err) {
@@ -33,7 +40,8 @@ async function fetchCspCandidates() {
         const response = await fetch(`${API_BASE}/screener/csp`);
         if (!response.ok) throw new Error("Failed to fetch CSPs");
         const data = await response.json();
-        renderCspCandidates(data.candidates);
+        allCspCandidates = data.candidates;
+        sortAndRenderCsp();
     } catch (err) {
         console.error(err);
         document.getElementById("csp-list").innerHTML = "<div class='trade-item'>Error fetching option chains</div>";
@@ -55,13 +63,13 @@ async function fetchLeapsCandidates() {
 function renderPosture(data) {
     const postureWidget = document.getElementById("posture-widget");
     const compositeEl = document.getElementById("composite-score");
-    
+
     postureWidget.classList.remove("loading", "posture-bullish", "posture-bearish", "posture-neutral");
-    
+
     // Clean string formatting
     const postureTxt = data.posture || "Neutral";
     postureWidget.innerHTML = `<span class="pulse-ring"></span> ${postureTxt}`;
-    
+
     if (postureTxt.includes("Bullish")) {
         postureWidget.classList.add("posture-bullish");
     } else if (postureTxt.includes("Bearish")) {
@@ -69,7 +77,7 @@ function renderPosture(data) {
     } else {
         postureWidget.classList.add("posture-neutral");
     }
-    
+
     // Score
     const compositeScore = parseFloat(data.composite_score).toFixed(3);
     const sign = compositeScore > 0 ? "+" : "";
@@ -80,15 +88,15 @@ function renderSignals(data) {
     const signalsList = document.getElementById("signals-list");
     signalsList.classList.remove("loading");
     signalsList.innerHTML = "";
-    
+
     if (data.signals && data.signals.length > 0) {
         data.signals.forEach(s => {
             let className = "neutral";
             if (s.scored_value > 0) className = "bullish";
             if (s.scored_value < 0) className = "bearish";
-            
+
             const sourceName = s.source.replace("_", " ").toUpperCase();
-            
+
             signalsList.innerHTML += `
                 <div class="signal-item ${className}">
                     <div class="signal-title">${sourceName}</div>
@@ -97,7 +105,7 @@ function renderSignals(data) {
             `;
         });
     }
-    
+
     // Render LLM summary
     const llmBox = document.getElementById("llm-summary");
     if (data.llm_summary) {
@@ -110,12 +118,12 @@ function renderSignals(data) {
 function renderCspCandidates(candidates) {
     const list = document.getElementById("csp-list");
     list.classList.remove("loading");
-    
+
     if (!candidates || candidates.length === 0) {
         list.innerHTML = "<div class='trade-item'>No viable candidates found.</div>";
         return;
     }
-    
+
     list.innerHTML = "";
     candidates.forEach(c => {
         list.innerHTML += `
@@ -136,6 +144,10 @@ function renderCspCandidates(candidates) {
                     <span class="m-val highlight">${c.roc_percent.toFixed(1)}%</span>
                     <span class="m-lbl">Capital ROC</span>
                 </div>
+                <div class="metric">
+                    <span class="m-val highlight">${c.otm_percent.toFixed(1)}%</span>
+                    <span class="m-lbl">% OTM</span>
+                </div>
             </div>
         `;
     });
@@ -144,12 +156,12 @@ function renderCspCandidates(candidates) {
 function renderLeapsCandidates(candidates) {
     const list = document.getElementById("leaps-list");
     list.classList.remove("loading");
-    
+
     if (!candidates || candidates.length === 0) {
         list.innerHTML = "<div class='trade-item'>No viable candidates found.</div>";
         return;
     }
-    
+
     list.innerHTML = "";
     candidates.forEach(c => {
         list.innerHTML += `
@@ -173,4 +185,61 @@ function renderLeapsCandidates(candidates) {
             </div>
         `;
     });
+}
+
+// ── CSP Pagination & Sorting ──────────────────────────
+
+function sortCsp(field) {
+    if (currentCspSort === field) {
+        currentCspSortDesc = !currentCspSortDesc;
+    } else {
+        currentCspSort = field;
+        currentCspSortDesc = true;
+    }
+    currentCspPage = 1; // Reset to page 1 on sort
+    sortAndRenderCsp();
+}
+
+function prevCspPage() {
+    if (currentCspPage > 1) {
+        currentCspPage--;
+        sortAndRenderCsp();
+    }
+}
+
+function nextCspPage() {
+    const totalPages = Math.ceil(allCspCandidates.length / CSP_PER_PAGE);
+    if (currentCspPage < totalPages) {
+        currentCspPage++;
+        sortAndRenderCsp();
+    }
+}
+
+function sortAndRenderCsp() {
+    // Sort array
+    allCspCandidates.sort((a, b) => {
+        let valA = a[currentCspSort];
+        let valB = b[currentCspSort];
+
+        // Handle string comparison for symbol
+        if (typeof valA === 'string') {
+            return currentCspSortDesc
+                ? valB.localeCompare(valA)
+                : valA.localeCompare(valB);
+        }
+
+        return currentCspSortDesc ? valB - valA : valA - valB;
+    });
+
+    // Paginate
+    const startIndex = (currentCspPage - 1) * CSP_PER_PAGE;
+    const paginatedItems = allCspCandidates.slice(startIndex, startIndex + CSP_PER_PAGE);
+
+    // Update pagination UI
+    const totalPages = Math.ceil(allCspCandidates.length / CSP_PER_PAGE) || 1;
+    document.getElementById("csp-page-info").innerText = `Page ${currentCspPage} / ${totalPages}`;
+    document.getElementById("csp-prev").disabled = currentCspPage === 1;
+    document.getElementById("csp-next").disabled = currentCspPage === totalPages;
+
+    renderCspCandidates(paginatedItems);
 }

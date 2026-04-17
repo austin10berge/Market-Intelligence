@@ -6,10 +6,9 @@ from datetime import date, datetime
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
-logger = logging.getLogger(__name__)
+from ..db import get_watchlist
 
-# Default watchlist to screen
-WATCHLIST = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "SPY", "QQQ", "IWM", "XLE", "XLF"]
+logger = logging.getLogger(__name__)
 
 
 def _get_target_expiry(expirations: tuple[str, ...], target_days: int) -> str | None:
@@ -33,9 +32,12 @@ def _get_target_expiry(expirations: tuple[str, ...], target_days: int) -> str | 
     return best_exp
 
 
-def screen_csp_candidates(tickers: list[str] = WATCHLIST, target_dte: int = 45) -> list[dict]:
+def screen_csp_candidates(tickers: list[str] | None = None, target_dte: int = 45) -> list[dict]:
     """Find Cash Secured Put candidates (~45 DTE, OTM)."""
-    logger.info("Screening CSP candidates...")
+    if tickers is None:
+        tickers = get_watchlist()
+        
+    logger.info(f"Screening CSP candidates across {len(tickers)} tickers...")
     candidates = []
     
     for symbol in tickers:
@@ -53,30 +55,37 @@ def screen_csp_candidates(tickers: list[str] = WATCHLIST, target_dte: int = 45) 
             # Get current price
             current_price = ticker.fast_info.last_price
             
-            # Simple Delta proxy: strike / current_price. 
-            # Real delta requires Black-Scholes, but for an MVP, targeting ~10-15% OTM works well.
-            target_strike = current_price * 0.85
+            # Instead of a single target delta proxy, scan for a range: 5% to 20% OTM
+            max_strike = current_price * 0.95
+            min_strike = current_price * 0.80
             
-            # Find the put closest to the target strike
             if not puts.empty:
-                closest_put = puts.iloc[(puts['strike'] - target_strike).abs().argsort()[:1]]
-                if not closest_put.empty:
-                    put_data = closest_put.iloc[0]
+                # Filter puts within the OTM range
+                valid_puts = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
+                
+                for _, put_data in valid_puts.iterrows():
                     premium = put_data['lastPrice']
                     strike = put_data['strike']
                     roc = (premium / strike) * 100 if strike > 0 else 0
+                    otm_pct = ((current_price - strike) / current_price) * 100
                     
-                    candidates.append({
-                        "symbol": symbol,
-                        "type": "CSP",
-                        "current_price": round(current_price, 2),
-                        "expiration": target_exp,
-                        "strike": float(strike),
-                        "premium": float(premium),
-                        "roc_percent": round(roc, 2),
-                        "impliedVolatility": round(float(put_data['impliedVolatility']) * 100, 2),
-                        "volume": int(put_data['volume']) if not type(put_data['volume']) is float or put_data['volume'] == put_data['volume'] else 0
-                    })
+                    # Only add if we have non-trivial premium (e.g. > $0.15) and some volume
+                    vol = put_data['volume']
+                    is_valid_vol = not type(vol) is float or vol == vol
+                    
+                    if premium > 0.15:
+                        candidates.append({
+                            "symbol": symbol,
+                            "type": "CSP",
+                            "current_price": round(current_price, 2),
+                            "expiration": target_exp,
+                            "strike": float(strike),
+                            "premium": float(premium),
+                            "roc_percent": round(roc, 2),
+                            "otm_percent": round(otm_pct, 2),
+                            "impliedVolatility": round(float(put_data['impliedVolatility']) * 100, 2),
+                            "volume": int(vol) if is_valid_vol else 0
+                        })
         except Exception as e:
             logger.warning(f"Failed to screen CSP for {symbol}: {e}")
             
@@ -84,9 +93,12 @@ def screen_csp_candidates(tickers: list[str] = WATCHLIST, target_dte: int = 45) 
     return sorted(candidates, key=lambda x: x["roc_percent"], reverse=True)
 
 
-def screen_leaps_candidates(tickers: list[str] = WATCHLIST, min_dte: int = 365) -> list[dict]:
+def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365) -> list[dict]:
     """Find LEAPS call candidates (>365 DTE, Deep ITM)."""
-    logger.info("Screening LEAPS candidates...")
+    if tickers is None:
+        tickers = get_watchlist()
+        
+    logger.info(f"Screening LEAPS candidates across {len(tickers)} tickers...")
     candidates = []
     
     for symbol in tickers:

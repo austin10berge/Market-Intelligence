@@ -6,11 +6,17 @@ from contextlib import closing
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from ..config import settings
+from ..db import get_watchlist, update_watchlist
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 
 app = FastAPI(title="Market Intelligence API")
+
+# Pydantic model for watchlist updates
+class WatchlistUpdate(BaseModel):
+    tickers: list[str]
 
 # Allow local frontend to access API
 app.add_middleware(
@@ -88,5 +94,23 @@ def get_leaps_candidates():
     try:
         candidates = screen_leaps_candidates()
         return {"candidates": candidates}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/watchlist")
+def api_get_watchlist():
+    try:
+        return {"watchlist": get_watchlist()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/watchlist")
+def api_update_watchlist(data: WatchlistUpdate):
+    try:
+        updated_tickers = [t.strip().upper() for t in data.tickers if t.strip()]
+        update_watchlist(updated_tickers)
+        return {"status": "success", "watchlist": updated_tickers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

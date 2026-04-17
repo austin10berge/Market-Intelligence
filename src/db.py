@@ -75,6 +75,11 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             full_text       TEXT NOT NULL DEFAULT '',
             created_at      TEXT NOT NULL DEFAULT (datetime('now'))
         );
+        
+        CREATE TABLE IF NOT EXISTS app_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
     """)
     conn.commit()
 
@@ -168,6 +173,40 @@ def store_digest(
                 full_text = excluded.full_text
             """,
             (digest_date.isoformat(), composite_score, posture, llm_summary, full_text),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_watchlist() -> list[str]:
+    """Retrieve the custom options screener watchlist, or return defaults."""
+    conn = _get_connection()
+    try:
+        row = conn.execute("SELECT value FROM app_config WHERE key = 'watchlist'").fetchone()
+        if row:
+            return json.loads(row["value"])
+            
+        # Defaults
+        return [
+            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "AMD",
+            "SPY", "QQQ", "IWM", "DIA", "XLE", "XLF", "XLK", "XLV", "JPM", "V", "MA", "SOFI"
+        ]
+    finally:
+        conn.close()
+
+
+def update_watchlist(tickers: list[str]) -> None:
+    """Save the custom options screener watchlist to the database."""
+    conn = _get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO app_config (key, value)
+            VALUES ('watchlist', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (json.dumps(tickers),)
         )
         conn.commit()
     finally:

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="index.css">
 </head>
+
 <body>
     <div id="app">
         <!-- Header with Posture Widget -->
@@ -35,10 +37,26 @@
                         <h2>Cash Secured Puts (CSP)</h2>
                         <div class="badge green">High Conviction Premium</div>
                     </div>
-                    <p class="subtitle">Looking for ~45 DTE options near 0.20 delta to generate theta decay.</p>
+                    <p class="subtitle">Looking for ~45 DTE options near 0.20 delta (5-20% OTM).</p>
+
+                    <div class="table-headers">
+                        <div class="th-sortable" onclick="sortCsp('symbol')">Ticker ↕</div>
+                        <div class="th-sortable" onclick="sortCsp('strike')">Strike ↕</div>
+                        <div class="th-sortable" onclick="sortCsp('premium')">Premium ↕</div>
+                        <div class="th-sortable" onclick="sortCsp('roc_percent')">ROC % ↕</div>
+                        <div class="th-sortable" onclick="sortCsp('otm_percent')">% OTM ↕</div>
+                    </div>
+
                     <div id="csp-list" class="data-list loading">Scanning option chains...</div>
+
+                    <!-- Pagination Controls -->
+                    <div class="pagination">
+                        <button id="csp-prev" class="btn-icon" onclick="prevCspPage()">←</button>
+                        <span id="csp-page-info" class="page-info">Page 1 / 1</span>
+                        <button id="csp-next" class="btn-icon" onclick="nextCspPage()">→</button>
+                    </div>
                 </section>
-                
+
                 <!-- LEAPS Section -->
                 <section class="glass card">
                     <div class="card-header">
@@ -54,15 +72,24 @@
             <section class="glass card full-width">
                 <h2>Latest Market Signals</h2>
                 <div id="signals-list" class="signals-grid loading">Aggregating sources...</div>
-                
+
                 <div class="llm-box">
                     <h3>🤖 AI Synthesis</h3>
                     <p id="llm-summary">Waiting for LLM analysis...</p>
                 </div>
             </section>
+
+            <!-- Settings Footer -->
+            <div style="text-align: center; margin-top: 2rem;">
+                <a href="watchlist.html" class="badge blue"
+                    style="text-decoration: none; padding: 0.75rem 1.5rem; font-size: 0.95rem; display: inline-block; cursor: pointer;">
+                    ⚙️ Edit Screener Watchlist
+                </a>
+            </div>
         </main>
     </div>
-    
+
     <script src="app.js"></script>
 </body>
+
 </html>
