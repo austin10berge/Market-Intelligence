@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Evening Market Sentiment & Options Screener">
+    <title>Market Intelligence Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header with Posture Widget -->
+        <header class="glass">
+            <div class="header-content">
+                <h1>AI Market Intelligence</h1>
+                <p>Automated Macro Sentiment & Options Scanning</p>
+            </div>
+            <div class="posture-container">
+                <div id="posture-widget" class="posture-card loading">
+                    <span class="pulse-ring"></span>
+                    Initializing...
+                </div>
+                <div id="composite-score" class="composite"></div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <!-- Screener Split View -->
+            <div class="screener-grid">
+                <!-- CSP Section -->
+                <section class="glass card">
+                    <div class="card-header">
+                        <h2>Cash Secured Puts (CSP)</h2>
+                        <div class="badge green">High Conviction Premium</div>
+                    </div>
+                    <p class="subtitle">Looking for ~45 DTE options near 0.20 delta to generate theta decay.</p>
+                    <div id="csp-list" class="data-list loading">Scanning option chains...</div>
+                </section>
+                
+                <!-- LEAPS Section -->
+                <section class="glass card">
+                    <div class="card-header">
+                        <h2>LEAPS Calls</h2>
+                        <div class="badge blue">Long-Term Capital</div>
+                    </div>
+                    <p class="subtitle">Looking for 365+ DTE Deep ITM options as stock replacement.</p>
+                    <div id="leaps-list" class="data-list loading">Scanning option chains...</div>
+                </section>
+            </div>
+
+            <!-- Underlying Signals -->
+            <section class="glass card full-width">
+                <h2>Latest Market Signals</h2>
+                <div id="signals-list" class="signals-grid loading">Aggregating sources...</div>
+                
+                <div class="llm-box">
+                    <h3>🤖 AI Synthesis</h3>
+                    <p id="llm-summary">Waiting for LLM analysis...</p>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
