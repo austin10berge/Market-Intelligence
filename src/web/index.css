@@ -211,7 +211,6 @@ header:hover {
 
 .trade-item {
     display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1.5fr 1.5fr;
     align-items: center;
     padding: 1rem;
     background: rgba(15, 23, 42, 0.4);
@@ -265,7 +264,6 @@ header:hover {
 
 .table-headers {
     display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1.5fr 1.5fr;
     padding: 0 1rem 0.5rem 1rem;
     font-size: 0.75rem;
     color: var(--text-secondary);
@@ -273,6 +271,21 @@ header:hover {
     letter-spacing: 0.05em;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     margin-bottom: 0.5rem;
+}
+
+#csp-list .trade-item,
+#csp-section .table-headers {
+    grid-template-columns: 2fr 1fr 1fr 1.5fr 1.5fr;
+}
+
+#leaps-list .trade-item,
+#leaps-section .table-headers {
+    grid-template-columns: 2fr 1fr 1fr 1.5fr;
+}
+
+#stocks-list .trade-item,
+#stocks-section .table-headers {
+    grid-template-columns: 1fr 2fr 1fr 1.5fr 1fr 1fr 1fr 1fr 1fr;
 }
 
 .th-sortable {
@@ -413,4 +426,14 @@ header:hover {
         grid-template-columns: 1fr 1fr;
         gap: 1rem;
     }
+}
+
+.text-green {
+    color: #34d399;
+    font-weight: 500;
+}
+
+.text-red {
+    color: #f87171;
+    font-weight: 500;
 }

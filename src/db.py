@@ -211,3 +211,72 @@ def update_watchlist(tickers: list[str]) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def get_csp_settings() -> dict:
+    """Retrieve the CSP screener logic parameters."""
+    conn = _get_connection()
+    try:
+        row = conn.execute("SELECT value FROM app_config WHERE key = 'csp_settings'").fetchone()
+        if row:
+            return json.loads(row["value"])
+            
+        # Defaults
+        return {
+            "min_dte": 30,
+            "max_dte": 45,
+            "min_otm_pct": 5.0,
+            "max_otm_pct": 20.0,
+            "min_roc": 1.0,
+            "max_spread_pct": 10.0
+        }
+    finally:
+        conn.close()
+
+
+def update_csp_settings(settings: dict) -> None:
+    """Save the CSP screener logic parameters."""
+    conn = _get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO app_config (key, value)
+            VALUES ('csp_settings', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (json.dumps(settings),)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_stock_watchlist() -> list[str]:
+    """Retrieve the stock screener watchlist."""
+    conn = _get_connection()
+    try:
+        row = conn.execute("SELECT value FROM app_config WHERE key = 'stock_watchlist'").fetchone()
+        if row:
+            return json.loads(row["value"])
+            
+        # Defaults
+        return ["NBIS", "WULF", "IONQ", "MARA", "QUBT", "AAPL", "MSFT"]
+    finally:
+        conn.close()
+
+
+def update_stock_watchlist(tickers: list[str]) -> None:
+    """Save the stock screener watchlist to the database."""
+    conn = _get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO app_config (key, value)
+            VALUES ('stock_watchlist', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (json.dumps(tickers),)
+        )
+        conn.commit()
+    finally:
+        conn.close()

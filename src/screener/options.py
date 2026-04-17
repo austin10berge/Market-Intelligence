@@ -6,38 +6,41 @@ from datetime import date, datetime
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
-from ..db import get_watchlist
+from ..db import get_watchlist, get_csp_settings
 
 logger = logging.getLogger(__name__)
 
 
-def _get_target_expiry(expirations: tuple[str, ...], target_days: int) -> str | None:
-    """Find the expiration date closest to target_days from today."""
+def _get_target_expiry(expirations: tuple[str, ...], min_days: int, max_days: int) -> str | None:
+    """Find the expiration date that falls within the specified min_days and max_days window. Prefers the highest DTE within range."""
     if not expirations:
         return None
         
     today = date.today()
-    best_diff = float("inf")
-    best_exp = None
+    valid_exps = []
     
     for exp_str in expirations:
         exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
         diff = (exp_date - today).days
         
-        # Only consider future expirations
-        if diff > 0 and abs(diff - target_days) < best_diff:
-            best_diff = abs(diff - target_days)
-            best_exp = exp_str
+        # Consider future expirations within the exact range
+        if min_days <= diff <= max_days:
+            valid_exps.append((diff, exp_str))
             
-    return best_exp
+    if not valid_exps:
+        return None
+        
+    # Return the expiration closest to max_days within the window
+    return sorted(valid_exps, key=lambda x: x[0], reverse=True)[0][1]
 
 
-def screen_csp_candidates(tickers: list[str] | None = None, target_dte: int = 45) -> list[dict]:
-    """Find Cash Secured Put candidates (~45 DTE, OTM)."""
+def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
+    """Find Cash Secured Put candidates based on dynamic DB settings."""
     if tickers is None:
         tickers = get_watchlist()
         
-    logger.info(f"Screening CSP candidates across {len(tickers)} tickers...")
+    settings = get_csp_settings()
+    logger.info(f"Screening CSP candidates across {len(tickers)} tickers with settings: {settings}")
     candidates = []
     
     for symbol in tickers:
@@ -45,7 +48,7 @@ def screen_csp_candidates(tickers: list[str] | None = None, target_dte: int = 45
             ticker = yf.Ticker(symbol)
             expirations = ticker.options
             
-            target_exp = _get_target_expiry(expirations, target_dte)
+            target_exp = _get_target_expiry(expirations, settings["min_dte"], settings["max_dte"])
             if not target_exp:
                 continue
                 
@@ -55,12 +58,11 @@ def screen_csp_candidates(tickers: list[str] | None = None, target_dte: int = 45
             # Get current price
             current_price = ticker.fast_info.last_price
             
-            # Instead of a single target delta proxy, scan for a range: 5% to 20% OTM
-            max_strike = current_price * 0.95
-            min_strike = current_price * 0.80
+            # Use dynamic OTM rules
+            max_strike = current_price * (1 - (settings["min_otm_pct"] / 100))
+            min_strike = current_price * (1 - (settings["max_otm_pct"] / 100))
             
             if not puts.empty:
-                # Filter puts within the OTM range
                 valid_puts = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
                 
                 for _, put_data in valid_puts.iterrows():
@@ -68,6 +70,21 @@ def screen_csp_candidates(tickers: list[str] | None = None, target_dte: int = 45
                     strike = put_data['strike']
                     roc = (premium / strike) * 100 if strike > 0 else 0
                     otm_pct = ((current_price - strike) / current_price) * 100
+                    
+                    # Enforce strict Minimum ROC
+                    if roc < settings["min_roc"]:
+                        continue
+                    
+                    # Spread Filter
+                    bid = put_data.get('bid', 0)
+                    ask = put_data.get('ask', 0)
+                    spread_pct = 0
+                    
+                    # Only enforce spread if it is actively quoted
+                    if bid > 0 and ask > bid:
+                        spread_pct = ((ask - bid) / bid) * 100
+                        if spread_pct > settings["max_spread_pct"]:
+                            continue
                     
                     # Only add if we have non-trivial premium (e.g. > $0.15) and some volume
                     vol = put_data['volume']
@@ -83,6 +100,9 @@ def screen_csp_candidates(tickers: list[str] | None = None, target_dte: int = 45
                             "premium": float(premium),
                             "roc_percent": round(roc, 2),
                             "otm_percent": round(otm_pct, 2),
+                            "bid": round(bid, 2),
+                            "ask": round(ask, 2),
+                            "spread_pct": round(spread_pct, 2),
                             "impliedVolatility": round(float(put_data['impliedVolatility']) * 100, 2),
                             "volume": int(vol) if is_valid_vol else 0
                         })
@@ -107,7 +127,17 @@ def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365
             expirations = ticker.options
             
             # Find an expiration roughly 1+ year out
-            target_exp = _get_target_expiry(expirations, min_dte)
+            # Reusing original target helper but just checking minimum dates manually
+            target_exp = None
+            today = date.today()
+            best_diff = float("inf")
+            for exp_str in expirations:
+                exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                diff = (exp_date - today).days
+                if diff > 0 and abs(diff - min_dte) < best_diff and diff >= 300: # Slightly loose bounds
+                    best_diff = abs(diff - min_dte)
+                    target_exp = exp_str
+                    
             if not target_exp:
                 continue
                 

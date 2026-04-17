@@ -7,7 +7,7 @@ if [ -d ".venv" ]; then
 fi
 
 echo "🚀 Starting Market Intelligence API Backend..."
-uvicorn src.api.main:app --port 8000 --reload &
+uvicorn src.api.main:app --port 8000 --reload --reload-exclude ".venv/*" &
 API_PID=$!
 
 echo "🖥️  Starting Market Intelligence Dashboard UI..."

@@ -7,6 +7,10 @@ let currentCspSortDesc = true;
 let currentCspPage = 1;
 const CSP_PER_PAGE = 5;
 
+// Stock State
+let allStockCandidates = [];
+let currentStockSort = { column: 'pct_1d', asc: false };
+
 document.addEventListener("DOMContentLoaded", () => {
     initDashboard();
 });
@@ -16,7 +20,8 @@ async function initDashboard() {
     Promise.allSettled([
         fetchMarketPosture(),
         fetchCspCandidates(),
-        fetchLeapsCandidates()
+        fetchLeapsCandidates(),
+        fetchStockScreener()
     ]);
 }
 
@@ -57,6 +62,20 @@ async function fetchLeapsCandidates() {
     } catch (err) {
         console.error(err);
         document.getElementById("leaps-list").innerHTML = "<div class='trade-item'>Error fetching option chains</div>";
+    }
+}
+
+async function fetchStockScreener() {
+    const listEl = document.getElementById("stocks-list");
+    listEl.innerHTML = "<div class='trade-item' style='justify-content:center'>Scanning stock data...</div>";
+    try {
+        const res = await fetch(`${API_BASE}/screener/stocks`);
+        if (!res.ok) throw new Error("Failed");
+        const data = await res.json();
+        allStockCandidates = data.candidates || [];
+        sortStocks(currentStockSort.column, currentStockSort.asc);
+    } catch (e) {
+        listEl.innerHTML = "<div class='trade-item'>Error fetching stocks</div>";
     }
 }
 
@@ -187,6 +206,39 @@ function renderLeapsCandidates(candidates) {
     });
 }
 
+function renderStockCandidates(candidates) {
+    const listEl = document.getElementById("stocks-list");
+    if (!candidates || candidates.length === 0) {
+        listEl.innerHTML = "<div class='trade-item' style='justify-content:center'>No stock data</div>";
+        return;
+    }
+
+    listEl.innerHTML = candidates.map(c => {
+        const d1Class = c.pct_1d >= 0 ? 'text-green' : 'text-red';
+        const d1Sign = c.pct_1d >= 0 ? '+' : '';
+        const w1Class = c.pct_1w >= 0 ? 'text-green' : 'text-red';
+        const w1Sign = c.pct_1w >= 0 ? '+' : '';
+        const m1Class = c.pct_1m >= 0 ? 'text-green' : 'text-red';
+        const m1Sign = c.pct_1m >= 0 ? '+' : '';
+
+        return `
+            <div class="trade-item">
+                <div class="ticker-block">
+                    <span class="symbol">${c.symbol}</span>
+                </div>
+                <div class="metric" style="color: var(--text-secondary);">${c.name}</div>
+                <div class="metric"><span class="m-val">$${c.price.toFixed(2)}</span></div>
+                <div class="metric" style="color: var(--text-secondary); font-size: 0.8rem;">${c.sector}</div>
+                <div class="metric ${d1Class}">${d1Sign}${c.pct_1d.toFixed(2)}%</div>
+                <div class="metric ${w1Class}">${w1Sign}${c.pct_1w.toFixed(2)}%</div>
+                <div class="metric ${m1Class}">${m1Sign}${c.pct_1m.toFixed(2)}%</div>
+                <div class="metric">${c.pe}</div>
+                <div class="metric">${c.beta}</div>
+            </div>
+        `;
+    }).join("");
+}
+
 // ── CSP Pagination & Sorting ──────────────────────────
 
 function sortCsp(field) {
@@ -242,4 +294,32 @@ function sortAndRenderCsp() {
     document.getElementById("csp-next").disabled = currentCspPage === totalPages;
 
     renderCspCandidates(paginatedItems);
+}
+
+function sortStocks(column, forceAsc = null) {
+    if (forceAsc !== null) {
+        currentStockSort.asc = forceAsc;
+    } else {
+        currentStockSort.asc = currentStockSort.column === column ? !currentStockSort.asc : false;
+    }
+    currentStockSort.column = column;
+
+    allStockCandidates.sort((a, b) => {
+        let valA = a[column];
+        let valB = b[column];
+
+        if (typeof valA === 'string' && valA === "N/A") return 1;
+        if (typeof valB === 'string' && valB === "N/A") return -1;
+        if (typeof valA === 'string' && column !== "symbol" && column !== "name" && column !== "sector") {
+            valA = parseFloat(valA) || 0; valB = parseFloat(valB) || 0;
+        }
+
+        if (typeof valA === 'string') {
+            return currentStockSort.asc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else {
+            return currentStockSort.asc ? valA - valB : valB - valA;
+        }
+    });
+
+    renderStockCandidates(allStockCandidates);
 }

@@ -29,10 +29,32 @@
 
         <!-- Main Content -->
         <main>
+            <!-- Stock Screener Section -->
+            <section id="stocks-section" class="glass card full-width" style="margin-bottom: 2rem;">
+                <div class="card-header">
+                    <h2>Stock Watchlist Performance</h2>
+                    <div class="badge blue">General Equities</div>
+                </div>
+
+                <div class="table-headers">
+                    <div class="th-sortable" onclick="sortStocks('symbol')">Symbol ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('name')">Name ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('price')">Price ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('sector')">Sector ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1d')">1D % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1w')">1W % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1m')">1M % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pe')">P/E ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('beta')">Beta ↕</div>
+                </div>
+
+                <div id="stocks-list" class="data-list loading">Loading stock data...</div>
+            </section>
+
             <!-- Screener Split View -->
             <div class="screener-grid">
                 <!-- CSP Section -->
-                <section class="glass card">
+                <section id="csp-section" class="glass card">
                     <div class="card-header">
                         <h2>Cash Secured Puts (CSP)</h2>
                         <div class="badge green">High Conviction Premium</div>
@@ -58,7 +80,7 @@
                 </section>
 
                 <!-- LEAPS Section -->
-                <section class="glass card">
+                <section id="leaps-section" class="glass card">
                     <div class="card-header">
                         <h2>LEAPS Calls</h2>
                         <div class="badge blue">Long-Term Capital</div>
