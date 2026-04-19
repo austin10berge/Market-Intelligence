@@ -328,3 +328,112 @@ def get_stock_iv_history(symbol: str, lookback_days: int = 252) -> list[dict]:
         return [dict(row) for row in rows]
     finally:
         conn.close()
+
+
+def get_signal_history(source: str, days: int = 30) -> list[dict]:
+    """Return recent daily_signals rows for a given source, with metadata parsed."""
+    conn = _get_connection()
+    try:
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        rows = conn.execute(
+            """
+            SELECT date, source, raw_value, scored_value, direction,
+                   extreme, metadata, summary
+            FROM daily_signals
+            WHERE source = ? AND date >= ?
+            ORDER BY date DESC
+            """,
+            (source, cutoff),
+        ).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            if r.get("metadata"):
+                try:
+                    r["metadata"] = json.loads(r["metadata"])
+                except Exception:
+                    pass
+            results.append(r)
+        return results
+    finally:
+        conn.close()
+
+
+def get_latest_signal(source: str) -> dict | None:
+    """Return the most recent daily_signals row for a given source."""
+    rows = get_signal_history(source, days=7)
+    return rows[0] if rows else None
+
+
+def get_insider_cache(max_age_hours: int = 12) -> dict | None:
+    """Return cached insider trading data if it exists and is fresh enough."""
+    conn = _get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_config WHERE key = 'cache_insider_trading'"
+        ).fetchone()
+        if not row:
+            return None
+        cached = json.loads(row["value"])
+        cached_at = datetime.fromisoformat(cached.get("cached_at", "2000-01-01"))
+        age_hours = (datetime.now() - cached_at).total_seconds() / 3600
+        if age_hours > max_age_hours:
+            return None
+        return cached
+    finally:
+        conn.close()
+
+
+def set_insider_cache(data: dict) -> None:
+    """Store insider trading fetch results in the cache."""
+    conn = _get_connection()
+    try:
+        data["cached_at"] = datetime.now().isoformat()
+        conn.execute(
+            """
+            INSERT INTO app_config (key, value)
+            VALUES ('cache_insider_trading', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (json.dumps(data, default=_json_default),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_congressional_cache(max_age_hours: int = 12) -> dict | None:
+    """Return cached congressional trades data if it exists and is fresh enough."""
+    conn = _get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_config WHERE key = 'cache_congressional_trades'"
+        ).fetchone()
+        if not row:
+            return None
+        cached = json.loads(row["value"])
+        cached_at = datetime.fromisoformat(cached.get("cached_at", "2000-01-01"))
+        age_hours = (datetime.now() - cached_at).total_seconds() / 3600
+        if age_hours > max_age_hours:
+            return None
+        return cached
+    finally:
+        conn.close()
+
+
+def set_congressional_cache(data: dict) -> None:
+    """Store congressional trades fetch results in the cache."""
+    conn = _get_connection()
+    try:
+        data["cached_at"] = datetime.now().isoformat()
+        conn.execute(
+            """
+            INSERT INTO app_config (key, value)
+            VALUES ('cache_congressional_trades', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (json.dumps(data, default=_json_default),),
+        )
+        conn.commit()
+    finally:
+        conn.close()

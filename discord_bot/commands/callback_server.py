@@ -33,7 +33,7 @@ class CallbackServer(commands.Cog):
         await self._runner.setup()
         site = web.TCPSite(self._runner, "0.0.0.0", CALLBACK_PORT)
         await site.start()
-        logger.info(f"Callback server listening on http://127.0.0.1:{CALLBACK_PORT}")
+        logger.info(f"Callback server listening on http://0.0.0.0:{CALLBACK_PORT}")
 
     async def cog_unload(self) -> None:
         if self._runner:

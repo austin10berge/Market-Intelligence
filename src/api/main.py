@@ -15,7 +15,7 @@ import asyncio
 import httpx
 
 from ..config import settings
-from ..db import get_watchlist, update_watchlist, get_csp_settings, update_csp_settings, get_stock_watchlist, update_stock_watchlist
+from ..db import get_watchlist, update_watchlist, get_csp_settings, update_csp_settings, get_stock_watchlist, update_stock_watchlist, get_insider_cache, get_congressional_cache, get_signal_history
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
 from ..main import run_pipeline
@@ -81,7 +81,7 @@ async def _run_and_post_to_discord(channel_id: str, discord_bot_url: str) -> Non
     if not discord_bot_url:
         discord_bot_url = os.getenv("DISCORD_BOT_CALLBACK_URL", "http://discord-bot:9000")
     try:
-        result = await run_pipeline(output_mode="discord")
+        result = await run_pipeline(output_mode="on-demand")
         async with httpx.AsyncClient(timeout=10.0) as client:
             await client.post(
                 f"{discord_bot_url}/callback",
@@ -127,6 +127,28 @@ def get_scan_history(req: Request, limit: int = 5):
             return {"history": [dict(r) for r in rows]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/insider")
+def get_insider_data(req: Request):
+    """Return latest insider trading and congressional trades data for the /insider Discord command."""
+    token = req.headers.get("x-bot-token")
+    if not token or token != settings.discord_bot_secret:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    insider = get_insider_cache(max_age_hours=48)  # Fall back to last 48h if no recent run
+    congressional = get_congressional_cache(max_age_hours=48)
+
+    # Also pull signal history for trend context (last 7 days)
+    insider_history = get_signal_history("insider_trading", days=7)
+    congressional_history = get_signal_history("congressional_trades", days=7)
+
+    return {
+        "insider_trading": insider,
+        "congressional_trades": congressional,
+        "insider_history": insider_history,
+        "congressional_history": congressional_history,
+    }
 
 
 @app.get("/api/market-posture")

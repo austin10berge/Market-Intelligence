@@ -37,6 +37,7 @@ class MarketIntelligenceBot(commands.Bot):
     async def setup_hook(self) -> None:
         """Load cogs and sync slash commands on startup."""
         await self.load_extension("commands.scan")
+        await self.load_extension("commands.insider")
         await self.load_extension("commands.callback_server")
         synced = await self.tree.sync()
         logger.info(f"Synced {len(synced)} slash command(s)")

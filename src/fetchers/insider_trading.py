@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from ..config import settings
-from ..db import get_stock_watchlist
+from ..db import get_stock_watchlist, get_insider_cache, set_insider_cache
 from ..models import Signal, SignalSource
 from .base import BaseFetcher, get_http_client
 
@@ -45,6 +45,17 @@ class InsiderTradingFetcher(BaseFetcher):
         if not tickers:
             logger.warning("Insider Trading: watchlist is empty")
             return None
+
+        # Return cached data if fresh (avoids hammering Finnhub on every pipeline run)
+        cached = get_insider_cache(max_age_hours=12)
+        if cached:
+            logger.info("Insider Trading: using cached data from %s", cached.get("cached_at", "?"))
+            return Signal(
+                source=SignalSource.INSIDER_TRADING,
+                value=cached["score_value"],
+                metadata=cached["metadata"],
+                summary=cached["summary"],
+            )
 
         client = await get_http_client()
         since = (date.today() - timedelta(days=LOOKBACK_DAYS)).isoformat()
@@ -137,18 +148,23 @@ class InsiderTradingFetcher(BaseFetcher):
             f"({sell_summary})"
         )
 
+        metadata = {
+            "buy_tickers": dict(buy_tickers),
+            "sell_tickers": dict(sell_tickers),
+            "total_buys": total_buys,
+            "total_sells": total_sells,
+            "buy_ticker_count": total_buy_tickers,
+            "sell_ticker_count": total_sell_tickers,
+            "lookback_days": LOOKBACK_DAYS,
+            "errors": errors,
+        }
+
+        # Write to cache so /insider command and subsequent pipeline runs can reuse it
+        set_insider_cache({"score_value": score_value, "metadata": metadata, "summary": summary})
+
         return Signal(
             source=SignalSource.INSIDER_TRADING,
             value=score_value,
-            metadata={
-                "buy_tickers": dict(buy_tickers),
-                "sell_tickers": dict(sell_tickers),
-                "total_buys": total_buys,
-                "total_sells": total_sells,
-                "buy_ticker_count": total_buy_tickers,
-                "sell_ticker_count": total_sell_tickers,
-                "lookback_days": LOOKBACK_DAYS,
-                "errors": errors,
-            },
+            metadata=metadata,
             summary=summary,
         )

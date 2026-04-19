@@ -39,7 +39,7 @@ class ScanCommands(commands.Cog):
                     },
                     headers={
                         "x-bot-token": BOT_SECRET,
-                        "x-bot-callback-url": f"http://127.0.0.1:{CALLBACK_PORT}",
+                        "x-bot-callback-url": f"http://discord-bot:{CALLBACK_PORT}",
                     },
                 )
                 resp.raise_for_status()

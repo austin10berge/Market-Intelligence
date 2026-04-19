@@ -26,7 +26,7 @@ services:
       target: dashboard
     container_name: market-intelligence-dashboard
     environment:
-      # Browser calls the API via the LXC's IP — update this to your LXC IP
+      # Browser calls the API via the LXC's real IP — set this in .env
       MARKET_INTELLIGENCE_API_URL: http://10.0.1.21:8000/api
     ports:
       - "9009:9009"
@@ -46,6 +46,8 @@ services:
       # Bot talks to API via container name (internal Docker network)
       MARKET_INTELLIGENCE_API_URL: http://api:8000
       DISCORD_BOT_CALLBACK_PORT: "9000"
+    expose:
+      - "9000"  # Internal only — allows api container to POST callbacks here
     depends_on:
       api:
         condition: service_healthy

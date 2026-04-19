@@ -14,7 +14,7 @@ import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
-from ..db import get_stock_watchlist
+from ..db import get_stock_watchlist, get_congressional_cache, set_congressional_cache
 from ..models import Signal, SignalSource
 from .base import BaseFetcher, get_http_client
 
@@ -49,6 +49,17 @@ class CongressionalTradesFetcher(BaseFetcher):
 
         client = await get_http_client()
         since = date.today() - timedelta(days=LOOKBACK_DAYS)
+
+        # Return cached data if fresh — congressional APIs are slow large JSON files
+        cached = get_congressional_cache(max_age_hours=12)
+        if cached:
+            logger.info("Congressional Trades: using cached data from %s", cached.get("cached_at", "?"))
+            return Signal(
+                source=SignalSource.CONGRESSIONAL_TRADES,
+                value=cached["score_value"],
+                metadata=cached["metadata"],
+                summary=cached["summary"],
+            )
 
         house_trades = await self._fetch_source(client, HOUSE_API, "House", since, watchlist)
         senate_trades = await self._fetch_source(client, SENATE_API, "Senate", since, watchlist)
@@ -114,19 +125,24 @@ class CongressionalTradesFetcher(BaseFetcher):
             f"{hp_str}"
         )
 
+        metadata = {
+            "buys_by_ticker": {k: v for k, v in buys_by_ticker.items()},
+            "sells_by_ticker": {k: v for k, v in sells_by_ticker.items()},
+            "high_profile_trades": high_profile_trades,
+            "total_buys": total_buys,
+            "total_sells": total_sells,
+            "buy_ticker_count": total_buy_tickers,
+            "sell_ticker_count": total_sell_tickers,
+            "lookback_days": LOOKBACK_DAYS,
+        }
+
+        # Write to cache so /insider command can access it without refetching
+        set_congressional_cache({"score_value": score_value, "metadata": metadata, "summary": summary})
+
         return Signal(
             source=SignalSource.CONGRESSIONAL_TRADES,
             value=score_value,
-            metadata={
-                "buys_by_ticker": {k: v for k, v in buys_by_ticker.items()},
-                "sells_by_ticker": {k: v for k, v in sells_by_ticker.items()},
-                "high_profile_trades": high_profile_trades,
-                "total_buys": total_buys,
-                "total_sells": total_sells,
-                "buy_ticker_count": total_buy_tickers,
-                "sell_ticker_count": total_sell_tickers,
-                "lookback_days": LOOKBACK_DAYS,
-            },
+            metadata=metadata,
             summary=summary,
         )
 
