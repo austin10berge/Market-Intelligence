@@ -18,6 +18,35 @@ def score_signal(signal: Signal) -> ScoredSignal:
     return scorer(signal)
 
 
+def check_convergence(scored_signals: list) -> list[str]:
+    """Detect tickers where insiders AND politicians are both buying.
+
+    Returns a list of convergence alert strings for the LLM prompt.
+    """
+    insider = next(
+        (s for s in scored_signals if s.signal.source.value == "insider_trading"), None
+    )
+    congress = next(
+        (s for s in scored_signals if s.signal.source.value == "congressional_trades"), None
+    )
+    if not insider or not congress:
+        return []
+
+    insider_buys = set(insider.signal.metadata.get("buy_tickers", {}).keys())
+    congress_buys = set(congress.signal.metadata.get("buys_by_ticker", {}).keys())
+    overlap = insider_buys & congress_buys
+
+    alerts = []
+    for ticker in sorted(overlap):
+        insider_count = len(insider.signal.metadata["buy_tickers"].get(ticker, []))
+        congress_count = len(congress.signal.metadata["buys_by_ticker"].get(ticker, []))
+        alerts.append(
+            f"🚨 CONVERGENCE: {ticker} — {insider_count} exec insider buy(s) + "
+            f"{congress_count} congressional purchase(s) in same window"
+        )
+
+    return alerts
+
 def _score_fear_greed(signal: Signal) -> ScoredSignal:
     """Fear & Greed: <25 bearish, >75 bullish (contrarian at extremes)."""
     score_val = signal.value
@@ -211,6 +240,107 @@ def _score_liquidity(signal: Signal) -> ScoredSignal:
     )
 
 
+def _score_insider_trading(signal: Signal) -> ScoredSignal:
+    """Insider trading: net open-market buys = bullish, net sells = bearish."""
+    buy_count = signal.metadata.get("buy_ticker_count", 0)
+    sell_count = signal.metadata.get("sell_ticker_count", 0)
+    total_buys = signal.metadata.get("total_buys", 0)
+    total_sells = signal.metadata.get("total_sells", 0)
+    extreme = (buy_count >= 3 and sell_count == 0) or (sell_count >= 3 and buy_count == 0)
+
+    if total_buys == 0 and total_sells == 0:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
+            reasoning="Insider Trading: no open-market activity this week",
+        )
+
+    if buy_count > sell_count:
+        return ScoredSignal(
+            signal=signal, score=1, direction=SignalDirection.BULLISH, extreme=extreme,
+            reasoning=f"Insider Trading: exec buying in {buy_count} ticker(s) vs selling in {sell_count}",
+        )
+    elif sell_count > buy_count:
+        return ScoredSignal(
+            signal=signal, score=-1, direction=SignalDirection.BEARISH, extreme=extreme,
+            reasoning=f"Insider Trading: exec selling in {sell_count} ticker(s) vs buying in {buy_count}",
+        )
+    else:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
+            reasoning=f"Insider Trading: balanced — {buy_count} buy ticker(s), {sell_count} sell ticker(s)",
+        )
+
+
+def _score_congressional_trades(signal: Signal) -> ScoredSignal:
+    """Congressional trades: net purchases = bullish, net sales = bearish."""
+    buy_count = signal.metadata.get("buy_ticker_count", 0)
+    sell_count = signal.metadata.get("sell_ticker_count", 0)
+    total_buys = signal.metadata.get("total_buys", 0)
+    total_sells = signal.metadata.get("total_sells", 0)
+    high_profile = signal.metadata.get("high_profile_trades", [])
+    # Extreme if high-profile politicians are active OR 3+ tickers on one side
+    extreme = len(high_profile) > 0 or buy_count >= 3 or sell_count >= 3
+
+    if total_buys == 0 and total_sells == 0:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
+            reasoning="Congressional Trades: no watchlist activity in disclosure window",
+        )
+
+    if buy_count > sell_count:
+        return ScoredSignal(
+            signal=signal, score=1, direction=SignalDirection.BULLISH, extreme=extreme,
+            reasoning=f"Congressional Trades: purchases in {buy_count} ticker(s), sales in {sell_count}"
+                      + (f" | High-profile: {high_profile[0]}" if high_profile else ""),
+        )
+    elif sell_count > buy_count:
+        return ScoredSignal(
+            signal=signal, score=-1, direction=SignalDirection.BEARISH, extreme=extreme,
+            reasoning=f"Congressional Trades: sales in {sell_count} ticker(s), purchases in {buy_count}"
+                      + (f" | High-profile: {high_profile[0]}" if high_profile else ""),
+        )
+    else:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=extreme,
+            reasoning=f"Congressional Trades: balanced — {buy_count} buy, {sell_count} sell ticker(s)",
+        )
+
+
+def _score_unusual_volume(signal: Signal) -> ScoredSignal:
+    """Unusual volume: bullish if most spikes are on up days, bearish if down days."""
+    spikes = signal.metadata.get("spikes", [])
+    up = signal.metadata.get("up_spikes", 0)
+    down = signal.metadata.get("down_spikes", 0)
+    spike_count = signal.metadata.get("spike_count", 0)
+    extreme = spike_count >= 4
+
+    if spike_count == 0:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
+            reasoning="Unusual Volume: no spikes detected across watchlist",
+        )
+
+    # Find the highest ratio spike for reasoning
+    top = spikes[0] if spikes else {}
+    top_str = f" | Biggest: {top.get('symbol', '?')} at {top.get('ratio', 0):.1f}x avg" if top else ""
+
+    if up > down:
+        return ScoredSignal(
+            signal=signal, score=1, direction=SignalDirection.BULLISH, extreme=extreme,
+            reasoning=f"Unusual Volume: {spike_count} spike(s), {up} on up days vs {down} down days{top_str}",
+        )
+    elif down > up:
+        return ScoredSignal(
+            signal=signal, score=-1, direction=SignalDirection.BEARISH, extreme=extreme,
+            reasoning=f"Unusual Volume: {spike_count} spike(s), {down} on down days vs {up} up days{top_str}",
+        )
+    else:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=extreme,
+            reasoning=f"Unusual Volume: {spike_count} spike(s) split evenly up/down{top_str}",
+        )
+
+
 # Registry of scoring functions
 _SCORERS = {
     SignalSource.FEAR_GREED: _score_fear_greed,
@@ -220,4 +350,7 @@ _SCORERS = {
     SignalSource.GEX: _score_gex,
     SignalSource.CREDIT_SPREADS: _score_credit_spreads,
     SignalSource.LIQUIDITY: _score_liquidity,
+    SignalSource.INSIDER_TRADING: _score_insider_trading,
+    SignalSource.CONGRESSIONAL_TRADES: _score_congressional_trades,
+    SignalSource.UNUSUAL_VOLUME: _score_unusual_volume,
 }

@@ -17,11 +17,14 @@ from .fetchers.liquidity import LiquidityFetcher
 from .fetchers.put_call import PutCallFetcher
 from .fetchers.sector_etf import SectorEtfFetcher
 from .fetchers.vix import VixFetcher
+from .fetchers.insider_trading import InsiderTradingFetcher
+from .fetchers.congressional_trades import CongressionalTradesFetcher
+from .fetchers.unusual_volume import UnusualVolumeFetcher
 from .models import ScoredSignal, Signal
 from .notify.home_assistant import send_ha_notification
 from .notify.ntfy import send_ntfy
 from .processing.preprocessor import compute_composite_score, determine_posture
-from .processing.scorer import score_signal
+from .processing.scorer import score_signal, check_convergence
 from .screener.stocks import screen_stocks
 from .synthesis.llm import synthesize
 from .synthesis.prompts import build_synthesis_prompt
@@ -48,6 +51,9 @@ FETCHERS = [
     GexFetcher(),
     CreditSpreadsFetcher(),
     LiquidityFetcher(),
+    InsiderTradingFetcher(),
+    CongressionalTradesFetcher(),
+    UnusualVolumeFetcher(),
 ]
 
 
@@ -105,12 +111,16 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
         posture = determine_posture(composite, scored_signals)
         extreme_count = sum(1 for s in scored_signals if s.extreme)
 
+        # Check for insider + congressional convergence on the same tickers
+        convergence_alerts = check_convergence(scored_signals)
+
         system_prompt, user_prompt = build_synthesis_prompt(
             date_str=today.strftime("%A, %B %d, %Y"),
             signal_summaries=[ss.signal.summary for ss in scored_signals],
             composite_score=composite,
             posture=posture.value,
             extreme_count=extreme_count,
+            convergence_alerts=convergence_alerts,
         )
 
         digest_text = await synthesize(system_prompt, user_prompt)

@@ -9,6 +9,8 @@ Guidelines:
 - Be concise: target ~150 words maximum
 - Lead with the overall market posture
 - Highlight any signals at extreme readings
+- If insider trading AND congressional trades converge on the same ticker, treat this as a \
+high-conviction signal and call it out explicitly
 - Frame everything through the lens of theta/credit spread strategies
 - If signals conflict, say so explicitly
 - End with a clear theta play recommendation and 2-3 watchlist items
@@ -23,7 +25,7 @@ USER_PROMPT_TEMPLATE = """Generate an evening market digest analysis for {date}.
 Composite Score: {composite_score} (range: -1.0 bearish to +1.0 bullish)
 Overall Posture: {posture}
 Signals at extremes: {extreme_count}
-
+{convergence_section}
 === FORMAT ===
 Use this exact structure (do NOT restate the raw signals):
 
@@ -40,6 +42,7 @@ def build_synthesis_prompt(
     composite_score: float,
     posture: str,
     extreme_count: int,
+    convergence_alerts: list[str] | None = None,
 ) -> tuple[str, str]:
     """Build the system + user prompt pair for LLM synthesis.
 
@@ -47,12 +50,22 @@ def build_synthesis_prompt(
     """
     signal_data = "\n".join(f"• {s}" for s in signal_summaries)
 
+    if convergence_alerts:
+        convergence_section = (
+            "\n=== CONVERGENCE ALERTS (insiders + politicians buying same ticker) ===\n"
+            + "\n".join(convergence_alerts)
+            + "\n"
+        )
+    else:
+        convergence_section = ""
+
     user_prompt = USER_PROMPT_TEMPLATE.format(
         date=date_str,
         signal_data=signal_data,
         composite_score=composite_score,
         posture=posture,
         extreme_count=extreme_count,
+        convergence_section=convergence_section,
     )
 
     return SYSTEM_PROMPT, user_prompt

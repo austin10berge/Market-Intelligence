@@ -21,6 +21,9 @@ class Settings(BaseSettings):
         description="Alpaca market data API base URL",
     )
 
+    # ── Finnhub ───────────────────────────────────────────
+    finnhub_api_key: str = Field(default="", description="Finnhub API key for insider transactions")
+
     # ── Notifications: NTFY.sh (primary) ─────────────────
     ntfy_topic: str = Field(default="market-intelligence", description="NTFY topic name")
     ntfy_server: str = Field(default="https://ntfy.sh", description="NTFY server URL")

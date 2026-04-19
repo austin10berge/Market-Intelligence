@@ -17,7 +17,7 @@ class SignalDirection(str, Enum):
 
 
 class SignalSource(str, Enum):
-    """Available data sources for Phase 1."""
+    """Available data sources."""
 
     FEAR_GREED = "fear_greed"
     VIX = "vix"
@@ -26,6 +26,9 @@ class SignalSource(str, Enum):
     GEX = "gex"
     CREDIT_SPREADS = "credit_spreads"
     LIQUIDITY = "liquidity"
+    INSIDER_TRADING = "insider_trading"
+    CONGRESSIONAL_TRADES = "congressional_trades"
+    UNUSUAL_VOLUME = "unusual_volume"
 
 
 class Signal(BaseModel):
