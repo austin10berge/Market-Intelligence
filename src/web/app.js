@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000/api";
+const API_BASE = (window.MARKET_INTELLIGENCE_CONFIG?.apiBase) || "http://127.0.0.1:8000/api";
 
 // CSP State
 let allCspCandidates = [];
@@ -13,7 +13,20 @@ let currentStockSort = { column: 'pct_1d', asc: false };
 
 document.addEventListener("DOMContentLoaded", () => {
     initDashboard();
+    initScrollOptimization();
 });
+
+function initScrollOptimization() {
+    let isScrolling;
+    window.addEventListener('scroll', () => {
+        window.clearTimeout(isScrolling);
+        document.body.classList.add('disable-hover');
+
+        isScrolling = setTimeout(() => {
+            document.body.classList.remove('disable-hover');
+        }, 150);
+    }, { passive: true });
+}
 
 async function initDashboard() {
     // Fire off all requests concurrently
@@ -73,8 +86,10 @@ async function fetchStockScreener() {
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
         allStockCandidates = data.candidates || [];
+        listEl.classList.remove("loading");
         sortStocks(currentStockSort.column, currentStockSort.asc);
     } catch (e) {
+        listEl.classList.remove("loading");
         listEl.innerHTML = "<div class='trade-item'>Error fetching stocks</div>";
     }
 }
@@ -109,20 +124,18 @@ function renderSignals(data) {
     signalsList.innerHTML = "";
 
     if (data.signals && data.signals.length > 0) {
-        data.signals.forEach(s => {
+        signalsList.innerHTML = data.signals.map(s => {
             let className = "neutral";
             if (s.scored_value > 0) className = "bullish";
             if (s.scored_value < 0) className = "bearish";
-
             const sourceName = s.source.replace("_", " ").toUpperCase();
-
-            signalsList.innerHTML += `
+            return `
                 <div class="signal-item ${className}">
                     <div class="signal-title">${sourceName}</div>
                     <div class="signal-val">${s.summary}</div>
                 </div>
             `;
-        });
+        }).join("");
     }
 
     // Render LLM summary
@@ -143,20 +156,18 @@ function renderCspCandidates(candidates) {
         return;
     }
 
-    list.innerHTML = "";
-    candidates.forEach(c => {
-        list.innerHTML += `
+    list.innerHTML = candidates.map(c => `
             <div class="trade-item">
                 <div class="ticker-block">
                     <span class="ticker">${c.symbol}</span>
-                    <span class="ticker-sub">Stock: $${c.current_price.toFixed(2)}</span>
+                    <span class="ticker-sub">Stock: ${c.current_price.toFixed(2)}</span>
                 </div>
                 <div class="metric">
-                    <span class="m-val">$${c.strike.toFixed(2)}</span>
+                    <span class="m-val">${c.strike.toFixed(2)}</span>
                     <span class="m-lbl">Strike</span>
                 </div>
                 <div class="metric">
-                    <span class="m-val">$${c.premium.toFixed(2)}</span>
+                    <span class="m-val">${c.premium.toFixed(2)}</span>
                     <span class="m-lbl">Premium</span>
                 </div>
                 <div class="metric">
@@ -168,8 +179,7 @@ function renderCspCandidates(candidates) {
                     <span class="m-lbl">% OTM</span>
                 </div>
             </div>
-        `;
-    });
+        `).join("");
 }
 
 function renderLeapsCandidates(candidates) {
@@ -181,20 +191,18 @@ function renderLeapsCandidates(candidates) {
         return;
     }
 
-    list.innerHTML = "";
-    candidates.forEach(c => {
-        list.innerHTML += `
+    list.innerHTML = candidates.map(c => `
             <div class="trade-item">
                 <div class="ticker-block">
                     <span class="ticker">${c.symbol}</span>
-                    <span class="ticker-sub">Stock: $${c.current_price.toFixed(2)}</span>
+                    <span class="ticker-sub">Stock: ${c.current_price.toFixed(2)}</span>
                 </div>
                 <div class="metric">
-                    <span class="m-val">$${c.strike.toFixed(2)}</span>
+                    <span class="m-val">${c.strike.toFixed(2)}</span>
                     <span class="m-lbl">Strike</span>
                 </div>
                 <div class="metric">
-                    <span class="m-val">$${c.premium.toFixed(2)}</span>
+                    <span class="m-val">${c.premium.toFixed(2)}</span>
                     <span class="m-lbl">Premium</span>
                 </div>
                 <div class="metric">
@@ -202,8 +210,7 @@ function renderLeapsCandidates(candidates) {
                     <span class="m-lbl">Markup</span>
                 </div>
             </div>
-        `;
-    });
+        `).join("");
 }
 
 function renderStockCandidates(candidates) {
@@ -220,6 +227,15 @@ function renderStockCandidates(candidates) {
         const w1Sign = c.pct_1w >= 0 ? '+' : '';
         const m1Class = c.pct_1m >= 0 ? 'text-green' : 'text-red';
         const m1Sign = c.pct_1m >= 0 ? '+' : '';
+        const ivRv20Display = c.atm_iv_rv20 === 'N/A' ? 'N/A' : c.atm_iv_rv20.toFixed(2);
+        const ivRankDisplay = c.iv_rank === 'N/A' ? 'N/A' : `${c.iv_rank.toFixed(2)}%`;
+        const ivRankPoints = Number.isFinite(c.iv_rank_points) ? c.iv_rank_points : 0;
+        const ivRankTooltip = c.iv_rank === 'N/A'
+            ? `IV Rank unavailable. History points: ${ivRankPoints}`
+            : `IV Rank based on ${ivRankPoints} ATM IV history points`;
+        const ivRv20Tooltip = c.atm_iv_rv20 === 'N/A'
+            ? 'IV/RV20 unavailable'
+            : 'Higher values mean options are pricing more movement than the stock has recently realized';
 
         return `
             <div class="trade-item">
@@ -234,6 +250,8 @@ function renderStockCandidates(candidates) {
                 <div class="metric ${m1Class}">${m1Sign}${c.pct_1m.toFixed(2)}%</div>
                 <div class="metric">${c.pe}</div>
                 <div class="metric">${c.beta}</div>
+                <div class="metric" title="${ivRv20Tooltip}">${ivRv20Display}</div>
+                <div class="metric" title="${ivRankTooltip}">${ivRankDisplay}</div>
             </div>
         `;
     }).join("");

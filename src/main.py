@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+
 from datetime import date
 
 from .config import settings
@@ -21,9 +22,13 @@ from .notify.home_assistant import send_ha_notification
 from .notify.ntfy import send_ntfy
 from .processing.preprocessor import compute_composite_score, determine_posture
 from .processing.scorer import score_signal
+from .screener.stocks import screen_stocks
 from .synthesis.llm import synthesize
 from .synthesis.prompts import build_synthesis_prompt
 from . import db
+
+import argparse
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -46,7 +51,7 @@ FETCHERS = [
 ]
 
 
-async def run_pipeline() -> None:
+async def run_pipeline(output_mode: str = "notify") -> dict | None:
     """Execute the full evening market sentiment pipeline."""
     today = date.today()
     logger.info(f"{'='*60}")
@@ -86,6 +91,13 @@ async def run_pipeline() -> None:
                 metadata=ss.signal.metadata,
                 summary=ss.signal.summary,
             )
+
+        # Persist one ATM IV snapshot per stock each daily run so IV Rank can build over time.
+        logger.info("Capturing stock IV history snapshots...")
+        try:
+            screen_stocks(persist_history=True)
+        except Exception as exc:
+            logger.warning("Stock IV snapshot capture failed: %s", exc)
 
         # ── Step 3: Synthesize via LLM ───────────────────────────
         logger.info("Step 3/4: Synthesizing digest...")
@@ -130,16 +142,35 @@ async def run_pipeline() -> None:
 
         # ── Step 4: Notify ───────────────────────────────────────
         logger.info("Step 4/4: Sending notification...")
-        await _notify(
-            title=f"📊 Market Digest — {posture.value}",
-            message=full_text,
-            priority=4 if extreme_count > 0 else 3,
-        )
+        if output_mode == "notify":
+            await _notify(
+                title=f"📊 Market Digest — {posture.value}",
+                message=full_text,
+                priority=4 if extreme_count > 0 else 3,
+            )
 
         logger.info("✅ Pipeline complete!")
-        print("\n" + "=" * 60)
-        print(full_text)
-        print("=" * 60)
+
+        # Return structured data (used by Discord / on-demand path)
+        return {
+            "status": "complete",
+            "date": today.isoformat(),
+            "posture": posture.value,
+            "composite_score": round(composite, 3),
+            "extreme_count": extreme_count,
+            "signals": [
+                {
+                    "source": ss.signal.source.value,
+                    "score": ss.score,
+                    "direction": ss.direction.value,
+                    "extreme": ss.extreme,
+                    "summary": ss.signal.summary,
+                    "reasoning": ss.reasoning,
+                }
+                for ss in scored_signals
+            ],
+            "llm_summary": digest_text,
+        }
 
     finally:
         await close_http_client()
@@ -167,9 +198,29 @@ async def _notify(title: str, message: str, priority: int = 3) -> None:
 
 
 def main() -> None:
-    """Entry point for the pipeline."""
+    """Entry point — supports both scheduled and on-demand (Discord) runs."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--mode",
+        choices=["scheduled", "on-demand"],
+        default="scheduled",
+        help="Run mode: 'scheduled' (normal) or 'on-demand' (triggered via Discord/API)",
+    )
+    parser.add_argument(
+        "--output",
+        choices=["notify", "json"],
+        default="notify",
+        help="Output mode: 'notify' sends NTFY, 'json' prints structured result to stdout",
+    )
+    args = parser.parse_args()
+
     logger.info(f"Schedule time configured: {settings.schedule_time}")
-    asyncio.run(run_pipeline())
+    logger.info(f"Run mode: {args.mode} | Output: {args.output}")
+
+    result = asyncio.run(run_pipeline(output_mode=args.output))
+
+    if args.output == "json" and result:
+        print(json.dumps(result))
 
 
 if __name__ == "__main__":

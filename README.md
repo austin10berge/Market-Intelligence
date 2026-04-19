@@ -62,6 +62,9 @@ All settings are managed via `.env` (see `.env.example`):
 | Variable | Default | Description |
 |---|---|---|
 | `GEMINI_API_KEY` | — | Gemini API key for LLM synthesis |
+| `ALPACA_API_KEY` | — | Alpaca market data API key for stock/options data |
+| `ALPACA_API_SECRET` | — | Alpaca market data API secret |
+| `ALPACA_DATA_URL` | `https://data.alpaca.markets` | Alpaca market data API base URL |
 | `NTFY_TOPIC` | `market-intelligence` | NTFY.sh topic name |
 | `NTFY_SERVER` | `https://ntfy.sh` | NTFY server URL |
 | `HA_URL` | — | Home Assistant URL (fallback) |

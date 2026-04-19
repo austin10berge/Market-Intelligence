@@ -80,6 +80,17 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS stock_iv_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            atm_iv REAL NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_iv_history_date_symbol
+            ON stock_iv_history(date, symbol);
     """)
     conn.commit()
 
@@ -278,5 +289,42 @@ def update_stock_watchlist(tickers: list[str]) -> None:
             (json.dumps(tickers),)
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def store_stock_iv_snapshot(snapshot_date: date, symbol: str, atm_iv: float) -> None:
+    """Store or update a daily ATM IV snapshot for a stock symbol."""
+    conn = _get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO stock_iv_history (date, symbol, atm_iv)
+            VALUES (?, ?, ?)
+            ON CONFLICT(date, symbol) DO UPDATE SET
+                atm_iv = excluded.atm_iv
+            """,
+            (snapshot_date.isoformat(), symbol, atm_iv),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_stock_iv_history(symbol: str, lookback_days: int = 252) -> list[dict]:
+    """Return the most recent ATM IV history points for a symbol."""
+    conn = _get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT date, symbol, atm_iv
+            FROM stock_iv_history
+            WHERE symbol = ?
+            ORDER BY date DESC
+            LIMIT ?
+            """,
+            (symbol, lookback_days),
+        ).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()

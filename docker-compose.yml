@@ -1,10 +1,73 @@
 services:
-  market-intelligence:
-    build: .
-    container_name: market-intelligence
+
+  # ── FastAPI backend ──────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      target: api
+    container_name: market-intelligence-api
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - sqlite_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Dashboard (static web UI via nginx) ──────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    container_name: market-intelligence-dashboard
+    environment:
+      # Browser calls the API via the LXC's IP — update this to your LXC IP
+      MARKET_INTELLIGENCE_API_URL: http://${LXC_IP:-localhost}:8000/api
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Discord bot ──────────────────────────────────────────────────────────────
+  discord-bot:
+    build:
+      context: .
+      target: discord-bot
+    container_name: market-intelligence-discord-bot
+    env_file: .env
+    environment:
+      # Bot talks to API via container name (internal Docker network)
+      MARKET_INTELLIGENCE_API_URL: http://api:8000
+      DISCORD_BOT_CALLBACK_PORT: "9000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Nightly pipeline (runs once then exits, triggered by cron) ───────────────
+  pipeline:
+    build:
+      context: .
+      target: pipeline
+    container_name: market-intelligence-pipeline
     env_file: .env
     volumes:
-      - ./data:/app/data
+      - sqlite_data:/app/data
     restart: "no"
-    # Run via cron on the host or use the built-in scheduler:
-    # docker compose run --rm market-intelligence
+    profiles:
+      - pipeline
+
+volumes:
+  sqlite_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data

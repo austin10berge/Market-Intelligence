@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     # ── FRED API ─────────────────────────────────────────
     fred_api_key: str = Field(default="", description="FRED API key for liquidity/credit spreads")
 
+    # ── Alpaca Market Data ───────────────────────────────
+    alpaca_api_key: str = Field(default="", description="Alpaca API key for options market data")
+    alpaca_api_secret: str = Field(default="", description="Alpaca API secret for options market data")
+    alpaca_data_url: str = Field(
+        default="https://data.alpaca.markets",
+        description="Alpaca market data API base URL",
+    )
+
     # ── Notifications: NTFY.sh (primary) ─────────────────
     ntfy_topic: str = Field(default="market-intelligence", description="NTFY topic name")
     ntfy_server: str = Field(default="https://ntfy.sh", description="NTFY server URL")
@@ -33,6 +41,11 @@ class Settings(BaseSettings):
         default="19:00",
         description="Daily run time in 24-hour format (HH:MM)",
     )
+
+    # ── Discord ──────────────────────────────────────────
+    discord_bot_secret: str = Field(default="", description="Shared secret for Discord bot auth")
+    discord_bot_token: str = Field(default="", description="Discord bot token")
+    discord_channel_id: str = Field(default="", description="Default Discord channel ID for scan results")
 
     # ── Logging ──────────────────────────────────────────
     log_level: str = Field(default="INFO", description="Logging level")
