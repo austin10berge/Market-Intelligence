@@ -27,9 +27,9 @@ services:
     container_name: market-intelligence-dashboard
     environment:
       # Browser calls the API via the LXC's IP — update this to your LXC IP
-      MARKET_INTELLIGENCE_API_URL: http://${LXC_IP:-localhost}:8000/api
+      MARKET_INTELLIGENCE_API_URL: http://10.0.1.21:8000/api
     ports:
-      - "8080:8080"
+      - "9009:9009"
     depends_on:
       api:
         condition: service_healthy
