@@ -48,7 +48,7 @@ class ScoredSignal(BaseModel):
     """A signal with directional scoring applied."""
 
     signal: Signal
-    score: int = Field(ge=-1, le=1, description="+1 bullish, 0 neutral, -1 bearish")
+    score: float = Field(ge=-1.0, le=1.0, description="continuous score in [-1.0, +1.0]; positive = bullish, negative = bearish")
     direction: SignalDirection
     extreme: bool = Field(default=False, description="Whether this reading is at an extreme")
     reasoning: str = Field(default="", description="Why this score was assigned")

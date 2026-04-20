@@ -82,10 +82,17 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
 
         # ── Step 2: Score signals ────────────────────────────────
         logger.info("Step 2/4: Scoring signals...")
-        scored_signals = [score_signal(s) for s in signals]
+
+        # Build cross-signal context for regime-aware scorers.
+        # VIX is fetched independently of the signal being scored, so we
+        # extract it here and pass it as shared context to every scorer.
+        vix_signal = next((s for s in signals if s.source.value == "vix"), None)
+        scoring_context = {"vix": vix_signal.value if vix_signal else None}
+
+        scored_signals = [score_signal(s, scoring_context) for s in signals]
 
         for ss in scored_signals:
-            logger.info(f"  {ss.signal.source.value}: {ss.score:+d} ({ss.direction.value})")
+            logger.info(f"  {ss.signal.source.value}: {ss.score:+.3f} ({ss.direction.value})")
             # Store each signal to DB
             db.store_signal(
                 signal_date=today,

@@ -69,3 +69,42 @@ Running log of major decisions made during development. Each entry captures the 
 **Decision:** SQLite via stdlib `sqlite3`, WAL mode, stored in Docker volume.
 
 **Reasoning:** Zero additional infrastructure. WAL mode allows concurrent reads during writes. Migration to PostgreSQL is straightforward later if needed for Grafana integration.
+
+---
+
+## ADR-006: Discord Integration — Bot + FastAPI Bridge
+
+**Date:** 2026-04-19
+**Status:** Accepted
+
+**Context:** Need to trigger pipeline scans and view results from Discord without rebuilding the notification layer.
+
+**Decision:** discord.py bot runs as a separate Docker service. Bot calls FastAPI `POST /api/scan/trigger` with a shared secret header. FastAPI runs `run_pipeline(output_mode="on-demand")` as a background task and POSTs results back to an aiohttp callback server embedded in the bot process (port 9000, Docker-internal only).
+
+**Reasoning:** Keeps the pipeline logic entirely in Python/FastAPI. The bot is a thin client that only handles Discord I/O. The callback pattern avoids long-polling and works within Discord's 3-second interaction response deadline — the bot responds immediately with "queued" and the result arrives separately.
+
+---
+
+## ADR-007: Insider/Congressional Cache — SQLite app_config Table
+
+**Date:** 2026-04-19
+**Status:** Accepted
+
+**Context:** Finnhub has rate limits. The congressional Stock Watcher APIs serve large JSON files (~MB). Both are fetched during the pipeline run but also needed on-demand by the `/insider` Discord command.
+
+**Decision:** Cache fetch results as JSON blobs in the `app_config` table with a `cached_at` timestamp. 12-hour TTL for pipeline re-runs, 48-hour fallback for Discord commands. No separate Redis or cache infrastructure.
+
+**Reasoning:** Reuses existing SQLite infrastructure. The `/insider` command always has data even if the user calls it between pipeline runs. Avoids hammering Finnhub on every `/scan` trigger.
+
+---
+
+## ADR-008: Dashboard API URL — Runtime Injection via config.js
+
+**Date:** 2026-04-19
+**Status:** Accepted
+
+**Context:** The dashboard is a static site served by nginx. The FastAPI backend URL must be the LXC's real IP because the browser makes calls directly — Docker internal hostnames like `api:8000` are not resolvable from the browser.
+
+**Decision:** `nginx/entrypoint.sh` generates `/usr/share/nginx/html/config.js` at container startup from the `MARKET_INTELLIGENCE_API_URL` environment variable. Both HTML pages load `config.js` before `app.js`. `config.js` has `Cache-Control: no-store`.
+
+**Reasoning:** Avoids rebuilding the Docker image to change the API URL. The LXC IP can change (DHCP) so it needs to be configurable without a rebuild. Inline comments in `.env` values must be avoided — pydantic-settings reads them as part of the string value.

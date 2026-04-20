@@ -5,17 +5,25 @@ from __future__ import annotations
 from ..models import ScoredSignal, Signal, SignalDirection, SignalSource
 
 
-def score_signal(signal: Signal) -> ScoredSignal:
-    """Score a raw signal as bullish (+1), neutral (0), or bearish (-1)."""
+def score_signal(signal: Signal, context: dict | None = None) -> ScoredSignal:
+    """Score a raw signal, returning a continuous score in [-1.0, +1.0].
+
+    Args:
+        signal:  The raw signal to score.
+        context: Optional cross-signal context for regime-aware scorers.
+                 Currently recognised keys:
+                   - "vix" (float): current VIX spot level, used by the P/C scorer
+                     to suppress contrarian signals in trending/stressed markets.
+    """
     scorer = _SCORERS.get(signal.source)
     if scorer is None:
         return ScoredSignal(
             signal=signal,
-            score=0,
+            score=0.0,
             direction=SignalDirection.NEUTRAL,
             reasoning=f"No scoring rules defined for {signal.source.value}",
         )
-    return scorer(signal)
+    return scorer(signal, context or {})
 
 
 def check_convergence(scored_signals: list) -> list[str]:
@@ -47,7 +55,7 @@ def check_convergence(scored_signals: list) -> list[str]:
 
     return alerts
 
-def _score_fear_greed(signal: Signal) -> ScoredSignal:
+def _score_fear_greed(signal: Signal, context: dict) -> ScoredSignal:
     """Fear & Greed: <25 bearish, >75 bullish (contrarian at extremes)."""
     score_val = signal.value
     extreme = score_val < 20 or score_val > 80
@@ -79,7 +87,7 @@ def _score_fear_greed(signal: Signal) -> ScoredSignal:
         )
 
 
-def _score_vix(signal: Signal) -> ScoredSignal:
+def _score_vix(signal: Signal, context: dict) -> ScoredSignal:
     """VIX: <15 bullish (complacent), >25 bearish (stress), backwardation amplifies."""
     vix = signal.value
     structure = signal.metadata.get("term_structure", "Unknown")
@@ -114,39 +122,120 @@ def _score_vix(signal: Signal) -> ScoredSignal:
     )
 
 
-def _score_put_call(signal: Signal) -> ScoredSignal:
-    """Put/Call: >1.2 contrarian bullish (extreme fear), <0.7 bearish (complacency)."""
+def _score_put_call(signal: Signal, context: dict) -> ScoredSignal:
+    """Put/Call ratio — continuous sentiment factor with regime-aware weighting.
+
+    Mental model:
+        Signal  = direction   (which way is sentiment leaning?)
+        Extreme = conviction  (is this a tradeable edge, not just noise?)
+
+    Continuous score formula:
+        Neutral anchor is P/C = 1.0 (neither fear nor greed).
+        score = clip( (ratio - 1.0) / 0.5, -1.0, +1.0 )
+
+        Examples:
+            P/C = 0.50 → raw score = -1.0  (max complacency / bearish warning)
+            P/C = 0.70 → raw score = -0.6
+            P/C = 1.00 → raw score =  0.0  (neutral)
+            P/C = 1.30 → raw score = +0.6  (mild fear / mild bullish bias)
+            P/C = 1.50 → raw score = +1.0  (capped)
+            P/C = 2.00 → raw score = +1.0  (capped, but extreme=True)
+
+    Extreme flag (conviction / timing edge — separate from direction):
+        extreme_high: ratio > 1.8  — deep fear, potential reversal setup
+        extreme_low:  ratio < 0.55 — deep complacency, elevated reversal risk
+
+    Regime weighting (VIX-based):
+        Contrarian signals are weakest in trending/stressed markets and
+        strongest when the market is range-bound or in late-stage moves.
+
+        VIX context rules (applied to the *contrarian bullish* side only):
+            VIX > 28 (sustained stress / trend):   weight = 0.4 — suppress bullishness
+            20 < VIX <= 28 (transition / caution):  weight = 0.7 — partial weight
+            VIX <= 20 (calm / range-bound):          weight = 1.0 — full weight
+
+        The bearish side (low P/C = complacency) is not suppressed by high VIX;
+        complacency in a low-vol environment is still a valid warning signal.
+    """
     ratio = signal.value
-    extreme = ratio > 1.2 or ratio < 0.7
+    rolling_avg = signal.metadata.get("rolling_avg_5d")
 
-    if ratio > 1.2:
-        # Extreme put buying — contrarian bullish signal
-        return ScoredSignal(
-            signal=signal,
-            score=1,
-            direction=SignalDirection.BULLISH,
-            extreme=extreme,
-            reasoning=f"P/C {ratio} — extreme put buying, contrarian buy zone",
-        )
-    elif ratio < 0.7:
-        return ScoredSignal(
-            signal=signal,
-            score=-1,
-            direction=SignalDirection.BEARISH,
-            extreme=extreme,
-            reasoning=f"P/C {ratio} — excessive call buying, complacency warning",
-        )
+    # ── 1. Continuous raw score ───────────────────────────────────────────────
+    # Normalisation span: ±0.5 from neutral anchor maps to the full ±1.0 range.
+    # Readings beyond ±0.5 are clamped — their *extremeness* is captured below.
+    NEUTRAL_ANCHOR = 1.0
+    NORMALISATION_SPAN = 0.5
+    raw_score = (ratio - NEUTRAL_ANCHOR) / NORMALISATION_SPAN
+    raw_score = max(-1.0, min(1.0, raw_score))  # clip to [-1, +1]
+
+    # ── 2. Extreme flag — conviction / timing edge ───────────────────────────
+    # Intentionally wider thresholds than the old hard buckets so that
+    # 'extreme' means genuinely rare, not just slightly elevated.
+    extreme = ratio > 1.8 or ratio < 0.55
+
+    # ── 3. Regime weighting — suppress contrarian bullishness in stress ───────
+    # Only applies to the bullish (positive) side; bearish complacency signals
+    # do not need regime suppression.
+    vix = context.get("vix")
+    regime_note = ""
+    regime_weight = 1.0
+
+    if raw_score > 0 and vix is not None:
+        if vix > 28:
+            regime_weight = 0.4
+            regime_note = f" | Regime: stressed (VIX {vix:.1f}) — contrarian signal suppressed"
+        elif vix > 20:
+            regime_weight = 0.7
+            regime_note = f" | Regime: transitional (VIX {vix:.1f}) — reduced weight"
+        else:
+            regime_note = f" | Regime: calm (VIX {vix:.1f}) — full contrarian weight"
+    elif vix is None and raw_score > 0:
+        regime_note = " | Regime: unknown (no VIX context) — unweighted"
+
+    weighted_score = round(raw_score * regime_weight, 3)
+
+    # ── 4. Derive direction from the *weighted* score ─────────────────────────
+    # Use a small dead-zone around zero to avoid noisy NEUTRAL flip-flopping.
+    DIRECTION_THRESHOLD = 0.15
+    if weighted_score > DIRECTION_THRESHOLD:
+        direction = SignalDirection.BULLISH
+    elif weighted_score < -DIRECTION_THRESHOLD:
+        direction = SignalDirection.BEARISH
     else:
-        return ScoredSignal(
-            signal=signal,
-            score=0,
-            direction=SignalDirection.NEUTRAL,
-            extreme=False,
-            reasoning=f"P/C {ratio} — normal range",
-        )
+        direction = SignalDirection.NEUTRAL
+
+    # ── 5. Build human-readable reasoning ────────────────────────────────────
+    rolling_str = f" | 5d avg: {rolling_avg:.3f}" if rolling_avg else ""
+
+    if ratio > 1.8:
+        signal_desc = "extreme put buying — deep fear, potential reversal setup"
+    elif ratio > 1.3:
+        signal_desc = "elevated put buying — fear bias, contrarian bullish lean"
+    elif ratio > 1.0:
+        signal_desc = "mild put skew — slight fear, modest bullish tilt"
+    elif ratio > 0.75:
+        signal_desc = "mild call skew — slight complacency, modest bearish tilt"
+    elif ratio > 0.55:
+        signal_desc = "elevated call buying — complacency building"
+    else:
+        signal_desc = "extreme call buying — deep complacency, elevated reversal risk"
+
+    reasoning = (
+        f"P/C {ratio:.3f} → raw score {raw_score:+.2f}"
+        f" × regime weight {regime_weight:.1f} = {weighted_score:+.3f}"
+        f" | {signal_desc}{rolling_str}{regime_note}"
+    )
+
+    return ScoredSignal(
+        signal=signal,
+        score=weighted_score,
+        direction=direction,
+        extreme=extreme,
+        reasoning=reasoning,
+    )
 
 
-def _score_sector_etf(signal: Signal) -> ScoredSignal:
+def _score_sector_etf(signal: Signal, context: dict) -> ScoredSignal:
     """Sector rotation: defensive leading = bearish, cyclical leading = bullish."""
     rotation = signal.metadata.get("rotation", "Neutral rotation")
     rotation_spread = signal.metadata.get("rotation_spread", 0.0)
@@ -178,7 +267,7 @@ def _score_sector_etf(signal: Signal) -> ScoredSignal:
         )
 
 
-def _score_gex(signal: Signal) -> ScoredSignal:
+def _score_gex(signal: Signal, context: dict) -> ScoredSignal:
     """GEX: > $5B bullish (pinning), < $0 bearish (volatile)."""
     gex_billions = signal.value
     extreme = gex_billions < 0 or gex_billions > 10
@@ -209,7 +298,7 @@ def _score_gex(signal: Signal) -> ScoredSignal:
         )
 
 
-def _score_credit_spreads(signal: Signal) -> ScoredSignal:
+def _score_credit_spreads(signal: Signal, context: dict) -> ScoredSignal:
     """Credit Spreads: > 5.0% bearish/stress, < 3.5% bullish/complacent."""
     spread = signal.value
     extreme = spread > 6.0 or spread < 3.0
@@ -231,7 +320,7 @@ def _score_credit_spreads(signal: Signal) -> ScoredSignal:
         )
 
 
-def _score_liquidity(signal: Signal) -> ScoredSignal:
+def _score_liquidity(signal: Signal, context: dict) -> ScoredSignal:
     """Liquidity scoring placeholder (requires trend analysis / rolling averages)."""
     net_liq = signal.metadata["display_trillions"]
     return ScoredSignal(
@@ -240,7 +329,7 @@ def _score_liquidity(signal: Signal) -> ScoredSignal:
     )
 
 
-def _score_insider_trading(signal: Signal) -> ScoredSignal:
+def _score_insider_trading(signal: Signal, context: dict) -> ScoredSignal:
     """Insider trading: net open-market buys = bullish, net sells = bearish."""
     buy_count = signal.metadata.get("buy_ticker_count", 0)
     sell_count = signal.metadata.get("sell_ticker_count", 0)
@@ -271,7 +360,7 @@ def _score_insider_trading(signal: Signal) -> ScoredSignal:
         )
 
 
-def _score_congressional_trades(signal: Signal) -> ScoredSignal:
+def _score_congressional_trades(signal: Signal, context: dict) -> ScoredSignal:
     """Congressional trades: net purchases = bullish, net sales = bearish."""
     buy_count = signal.metadata.get("buy_ticker_count", 0)
     sell_count = signal.metadata.get("sell_ticker_count", 0)
@@ -306,7 +395,7 @@ def _score_congressional_trades(signal: Signal) -> ScoredSignal:
         )
 
 
-def _score_unusual_volume(signal: Signal) -> ScoredSignal:
+def _score_unusual_volume(signal: Signal, context: dict) -> ScoredSignal:
     """Unusual volume: bullish if most spikes are on up days, bearish if down days."""
     spikes = signal.metadata.get("spikes", [])
     up = signal.metadata.get("up_spikes", 0)
