@@ -550,9 +550,6 @@ header {
         flex-direction: row;
         align-items: center;
         gap: 0.5rem;
-        padding-bottom: 0.4rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-        margin-bottom: 0.15rem;
     }
 
     #stocks-list .trade-item .ticker-block .symbol {
