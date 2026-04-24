@@ -1,11 +1,13 @@
-"""Options screener for CSPs and LEAPS using yfinance."""
+"""Options screener for CSPs and LEAPS using yfinance and Alpaca."""
 
 import logging
 from datetime import date, datetime
 
+import httpx
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from ..config import settings as app_settings
 from ..db import get_watchlist, get_csp_settings
 
 logger = logging.getLogger(__name__)
@@ -26,16 +28,16 @@ def _get_valid_expirations(expirations: tuple[str, ...], min_days: int, max_days
 
 
 def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
-    """Find the best-ROC CSP per (ticker, strike) across all valid expirations."""
+    """Find the best-ROC CSP per (ticker, strike) across all valid expirations using live Alpaca pricing."""
     if tickers is None:
         tickers = get_watchlist()
 
     settings = get_csp_settings()
     logger.info(f"Screening CSP candidates across {len(tickers)} tickers with settings: {settings}")
 
-    # Map of (symbol, strike) -> best candidate dict
-    best_by_strike: dict[tuple, dict] = {}
-
+    # 1. Collect all potential contracts from yfinance
+    potential_contracts = []
+    
     for symbol in tickers:
         try:
             ticker = yf.Ticker(symbol)
@@ -63,59 +65,115 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
                 valid_puts = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
 
                 for _, put_data in valid_puts.iterrows():
-                    premium = put_data['lastPrice']
-                    if premium <= 0.15:
-                        continue
-
                     strike = put_data['strike']
-                    roc = (premium / strike) * 100 if strike > 0 else 0
-
-                    if roc < settings["min_roc"]:
-                        continue
-
-                    bid = put_data.get('bid', 0)
-                    ask = put_data.get('ask', 0)
-                    spread_pct = 0
-
-                    if bid > 0 and ask > bid:
-                        spread_pct = ((ask - bid) / bid) * 100
-                        if spread_pct > settings["max_spread_pct"]:
-                            continue
-
+                    occ_symbol = put_data['contractSymbol']
                     otm_pct = ((current_price - strike) / current_price) * 100
-                    vol = put_data['volume']
-                    is_valid_vol = not type(vol) is float or vol == vol
+                    
                     exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
                     dte = (exp_date - date.today()).days
-                    safe_dte = max(1, dte)
-                    annualized_roc = (roc / safe_dte) * 365
 
-                    candidate = {
+                    potential_contracts.append({
                         "symbol": symbol,
-                        "type": "CSP",
-                        "current_price": round(current_price, 2),
+                        "occ_symbol": occ_symbol,
+                        "current_price": current_price,
                         "expiration": exp_str,
-                        "dte": dte,
-                        "strike": float(strike),
-                        "premium": float(premium),
-                        "roc_percent": round(roc, 2),
-                        "annualized_roc": round(annualized_roc, 2),
-                        "otm_percent": round(otm_pct, 2),
-                        "bid": round(bid, 2),
-                        "ask": round(ask, 2),
-                        "spread_pct": round(spread_pct, 2),
-                        "impliedVolatility": round(float(put_data['impliedVolatility']) * 100, 2),
-                        "volume": int(vol) if is_valid_vol else 0,
-                    }
-
-                    key = (symbol, float(strike))
-                    existing = best_by_strike.get(key)
-                    # Keep the candidate with the highest Annualized ROC (Return per day normalized)
-                    if existing is None or annualized_roc > existing["annualized_roc"]:
-                        best_by_strike[key] = candidate
+                        "strike": strike,
+                        "otm_pct": otm_pct,
+                        "dte": dte
+                    })
 
         except Exception as e:
-            logger.warning(f"Failed to screen CSP for {symbol}: {e}")
+            logger.warning(f"Failed to fetch initial yf chain for {symbol}: {e}")
+
+    if not potential_contracts:
+        return []
+
+    # 2. Batch fetch live snapshots from Alpaca
+    alpaca_snapshots = {}
+    occ_symbols = [c["occ_symbol"] for c in potential_contracts]
+    
+    url = f"{app_settings.alpaca_data_url}/v1beta1/options/snapshots"
+    headers = {
+        "APCA-API-KEY-ID": app_settings.alpaca_api_key,
+        "APCA-API-SECRET-KEY": app_settings.alpaca_api_secret,
+        "accept": "application/json"
+    }
+
+    # Alpaca allows up to 1000 symbols per request
+    chunk_size = 1000
+    with httpx.Client() as client:
+        for i in range(0, len(occ_symbols), chunk_size):
+            chunk = occ_symbols[i:i + chunk_size]
+            try:
+                response = client.get(url, headers=headers, params={"symbols": ",".join(chunk)})
+                if response.status_code == 200:
+                    data = response.json()
+                    alpaca_snapshots.update(data.get("snapshots", {}))
+                else:
+                    logger.error(f"Alpaca API error: {response.text}")
+            except Exception as e:
+                logger.error(f"Failed to reach Alpaca API: {e}")
+
+    # 3. Evaluate candidates with live pricing
+    best_by_strike: dict[tuple, dict] = {}
+
+    for c in potential_contracts:
+        snapshot = alpaca_snapshots.get(c["occ_symbol"], {})
+        if not snapshot:
+            continue
+            
+        quote = snapshot.get("latestQuote", {})
+        trade = snapshot.get("latestTrade", {})
+        
+        bid = quote.get("bp", 0.0)
+        ask = quote.get("ap", 0.0)
+        premium = trade.get("p", 0.0)
+        vol = snapshot.get("v", 0)  # Daily volume is sometimes at the root
+        iv = snapshot.get("impliedVolatility", 0.0)
+
+        if premium <= 0.15:
+            continue
+
+        roc = (premium / c["strike"]) * 100 if c["strike"] > 0 else 0
+
+        if roc < settings["min_roc"]:
+            continue
+
+        spread_pct = 0
+        if bid > 0 and ask > bid:
+            spread_pct = ((ask - bid) / bid) * 100
+            if spread_pct > settings["max_spread_pct"]:
+                continue
+        else:
+            # If there is no valid bid/ask on Alpaca, skip it for CSP safety
+            continue
+
+        safe_dte = max(1, c["dte"])
+        annualized_roc = (roc / safe_dte) * 365
+
+        candidate = {
+            "symbol": c["symbol"],
+            "type": "CSP",
+            "current_price": round(c["current_price"], 2),
+            "expiration": c["expiration"],
+            "dte": c["dte"],
+            "strike": float(c["strike"]),
+            "premium": float(premium),
+            "roc_percent": round(roc, 2),
+            "annualized_roc": round(annualized_roc, 2),
+            "otm_percent": round(c["otm_pct"], 2),
+            "bid": round(bid, 2),
+            "ask": round(ask, 2),
+            "spread_pct": round(spread_pct, 2),
+            "impliedVolatility": round(float(iv) * 100, 2) if iv else 0.0,
+            "volume": int(vol) if vol else 0,
+        }
+
+        key = (c["symbol"], float(c["strike"]))
+        existing = best_by_strike.get(key)
+        # Keep the candidate with the highest Annualized ROC (Return per day normalized)
+        if existing is None or annualized_roc > existing["annualized_roc"]:
+            best_by_strike[key] = candidate
 
     # Sort by highest Annualized Return on Capital
     return sorted(best_by_strike.values(), key=lambda x: x["annualized_roc"], reverse=True)
