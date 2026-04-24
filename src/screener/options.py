@@ -11,106 +11,114 @@ from ..db import get_watchlist, get_csp_settings
 logger = logging.getLogger(__name__)
 
 
-def _get_target_expiry(expirations: tuple[str, ...], min_days: int, max_days: int) -> str | None:
-    """Find the expiration date that falls within the specified min_days and max_days window. Prefers the highest DTE within range."""
+def _get_valid_expirations(expirations: tuple[str, ...], min_days: int, max_days: int) -> list[str]:
+    """Return all expiration dates that fall within the specified min_days and max_days window."""
     if not expirations:
-        return None
-        
+        return []
     today = date.today()
-    valid_exps = []
-    
+    valid = []
     for exp_str in expirations:
         exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
         diff = (exp_date - today).days
-        
-        # Consider future expirations within the exact range
         if min_days <= diff <= max_days:
-            valid_exps.append((diff, exp_str))
-            
-    if not valid_exps:
-        return None
-        
-    # Return the expiration closest to max_days within the window
-    return sorted(valid_exps, key=lambda x: x[0], reverse=True)[0][1]
+            valid.append(exp_str)
+    return valid
 
 
 def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
-    """Find Cash Secured Put candidates based on dynamic DB settings."""
+    """Find the best-ROC CSP per (ticker, strike) across all valid expirations."""
     if tickers is None:
         tickers = get_watchlist()
-        
+
     settings = get_csp_settings()
     logger.info(f"Screening CSP candidates across {len(tickers)} tickers with settings: {settings}")
-    candidates = []
-    
+
+    # Map of (symbol, strike) -> best candidate dict
+    best_by_strike: dict[tuple, dict] = {}
+
     for symbol in tickers:
         try:
             ticker = yf.Ticker(symbol)
             expirations = ticker.options
-            
-            target_exp = _get_target_expiry(expirations, settings["min_dte"], settings["max_dte"])
-            if not target_exp:
-                continue
-                
-            chain = ticker.option_chain(target_exp)
-            puts = chain.puts
-            
-            # Get current price
             current_price = ticker.fast_info.last_price
-            
-            # Use dynamic OTM rules
+
+            valid_exps = _get_valid_expirations(expirations, settings["min_dte"], settings["max_dte"])
+            if not valid_exps:
+                continue
+
             max_strike = current_price * (1 - (settings["min_otm_pct"] / 100))
             min_strike = current_price * (1 - (settings["max_otm_pct"] / 100))
-            
-            if not puts.empty:
+
+            for exp_str in valid_exps:
+                try:
+                    chain = ticker.option_chain(exp_str)
+                    puts = chain.puts
+                except Exception as e:
+                    logger.debug(f"Could not fetch chain for {symbol} {exp_str}: {e}")
+                    continue
+
+                if puts.empty:
+                    continue
+
                 valid_puts = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
-                
+
                 for _, put_data in valid_puts.iterrows():
                     premium = put_data['lastPrice']
+                    if premium <= 0.15:
+                        continue
+
                     strike = put_data['strike']
                     roc = (premium / strike) * 100 if strike > 0 else 0
-                    otm_pct = ((current_price - strike) / current_price) * 100
-                    
-                    # Enforce strict Minimum ROC
+
                     if roc < settings["min_roc"]:
                         continue
-                    
-                    # Spread Filter
+
                     bid = put_data.get('bid', 0)
                     ask = put_data.get('ask', 0)
                     spread_pct = 0
-                    
-                    # Only enforce spread if it is actively quoted
+
                     if bid > 0 and ask > bid:
                         spread_pct = ((ask - bid) / bid) * 100
                         if spread_pct > settings["max_spread_pct"]:
                             continue
-                    
-                    # Only add if we have non-trivial premium (e.g. > $0.15) and some volume
+
+                    otm_pct = ((current_price - strike) / current_price) * 100
                     vol = put_data['volume']
                     is_valid_vol = not type(vol) is float or vol == vol
-                    
-                    if premium > 0.15:
-                        candidates.append({
-                            "symbol": symbol,
-                            "type": "CSP",
-                            "current_price": round(current_price, 2),
-                            "expiration": target_exp,
-                            "strike": float(strike),
-                            "premium": float(premium),
-                            "roc_percent": round(roc, 2),
-                            "otm_percent": round(otm_pct, 2),
-                            "bid": round(bid, 2),
-                            "ask": round(ask, 2),
-                            "spread_pct": round(spread_pct, 2),
-                            "impliedVolatility": round(float(put_data['impliedVolatility']) * 100, 2),
-                            "volume": int(vol) if is_valid_vol else 0
-                        })
+                    exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                    dte = (exp_date - date.today()).days
+                    safe_dte = max(1, dte)
+                    annualized_roc = (roc / safe_dte) * 365
+
+                    candidate = {
+                        "symbol": symbol,
+                        "type": "CSP",
+                        "current_price": round(current_price, 2),
+                        "expiration": exp_str,
+                        "dte": dte,
+                        "strike": float(strike),
+                        "premium": float(premium),
+                        "roc_percent": round(roc, 2),
+                        "annualized_roc": round(annualized_roc, 2),
+                        "otm_percent": round(otm_pct, 2),
+                        "bid": round(bid, 2),
+                        "ask": round(ask, 2),
+                        "spread_pct": round(spread_pct, 2),
+                        "impliedVolatility": round(float(put_data['impliedVolatility']) * 100, 2),
+                        "volume": int(vol) if is_valid_vol else 0,
+                    }
+
+                    key = (symbol, float(strike))
+                    existing = best_by_strike.get(key)
+                    # Keep the candidate with the highest Annualized ROC (Return per day normalized)
+                    if existing is None or annualized_roc > existing["annualized_roc"]:
+                        best_by_strike[key] = candidate
+
         except Exception as e:
             logger.warning(f"Failed to screen CSP for {symbol}: {e}")
-            
-    # Sort by highest Return on Capital
-    return sorted(candidates, key=lambda x: x["roc_percent"], reverse=True)
+
+    # Sort by highest Annualized Return on Capital
+    return sorted(best_by_strike.values(), key=lambda x: x["annualized_roc"], reverse=True)
 
 
 def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365) -> list[dict]:

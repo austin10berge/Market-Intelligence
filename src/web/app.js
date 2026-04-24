@@ -10,7 +10,7 @@ const API_BASE = (window.MARKET_INTELLIGENCE_CONFIG?.apiBase) || (() => {
 
 // CSP State
 let allCspCandidates = [];
-let currentCspSort = 'roc_percent';
+let currentCspSort = 'annualized_roc';
 let currentCspSortDesc = true;
 let currentCspPage = 1;
 const CSP_PER_PAGE = 7;
@@ -213,11 +213,15 @@ function renderCspCandidates(candidates) {
                     <span class="m-lbl">Premium</span>
                 </div>
                 <div class="metric">
-                    <span class="m-val highlight">${c.roc_percent.toFixed(1)}%</span>
-                    <span class="m-lbl">Capital ROC</span>
+                    <span class="m-val highlight">${c.roc_percent}%</span>
+                    <span class="m-lbl">ROC</span>
                 </div>
                 <div class="metric">
-                    <span class="m-val highlight">${c.otm_percent.toFixed(1)}%</span>
+                    <span class="m-val highlight">${c.annualized_roc ? c.annualized_roc + '%' : '—'}</span>
+                    <span class="m-lbl">Yield (Ann.)</span>
+                </div>
+                <div class="metric">
+                    <span class="m-val">${c.otm_percent}%</span>
                     <span class="m-lbl">% OTM</span>
                 </div>
                 <div class="metric">
@@ -231,6 +235,10 @@ function renderCspCandidates(candidates) {
                 <div class="metric">
                     <span class="m-val">${c.volume > 0 ? c.volume.toLocaleString() : '—'}</span>
                     <span class="m-lbl">Volume</span>
+                </div>
+                <div class="metric">
+                    <span class="m-val">${c.dte ?? '—'}</span>
+                    <span class="m-lbl">DTE</span>
                 </div>
             </div>
         `).join("");
