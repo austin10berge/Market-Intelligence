@@ -29,6 +29,72 @@ SELL_CODES = {"S"}  # Open-market sale
 IGNORE_CODES = {"A", "M", "G", "D", "F", "J", "C", "W"}
 
 
+def _fmt_insider_name(raw_name: str, raw_title: str) -> str:
+    """Format a Finnhub insider name + title into 'First Last (Title)'.
+
+    Finnhub returns names in 'LAST FIRST' all-caps form, e.g. 'PAPERMASTER MARK'.
+    We flip to 'First Last' title-case and append the officer title if present.
+
+    Examples:
+        'PAPERMASTER MARK', 'Chief Technology Officer' → 'Mark Papermaster (CTO)'
+        'COOK TIMOTHY D', 'Chief Executive Officer'    → 'Timothy D Cook (CEO)'
+        'SMITH JOHN', ''                               → 'John Smith'
+    """
+    # ── Normalise title abbreviations ──────────────────────────────────────
+    TITLE_MAP = {
+        "chief executive officer":        "CEO",
+        "chief financial officer":        "CFO",
+        "chief operating officer":        "COO",
+        "chief technology officer":       "CTO",
+        "chief information officer":      "CIO",
+        "chief marketing officer":        "CMO",
+        "chief revenue officer":          "CRO",
+        "chief product officer":          "CPO",
+        "chief people officer":           "CPO",
+        "chief legal officer":            "CLO",
+        "chief accounting officer":       "CAO",
+        "chief human resources officer":  "CHRO",
+        "chief strategy officer":         "CSO",
+        "chief commercial officer":       "CCO",
+        "chief compliance officer":       "CCO",
+        "chief risk officer":             "CRO",
+        "chief data officer":             "CDO",
+        "chief scientific officer":       "CSO",
+        "chief medical officer":          "CMO",
+        "president":                      "President",
+        "chairman":                       "Chairman",
+        "chairperson":                    "Chairman",
+        "executive chairman":             "Exec. Chairman",
+        "vice president":                 "VP",
+        "senior vice president":          "SVP",
+        "executive vice president":       "EVP",
+        "general counsel":                "General Counsel",
+        "director":                       "Director",
+        "independent director":           "Ind. Director",
+        "10% owner":                      "10% Owner",
+        "10 percent owner":               "10% Owner",
+    }
+
+    # ── Re-order LAST FIRST → First Last ───────────────────────────────────
+    parts = raw_name.strip().split()
+    if len(parts) >= 2:
+        # Finnhub format: first token is the surname, rest are given name(s)
+        surname = parts[0].capitalize()
+        given   = " ".join(p.capitalize() for p in parts[1:])
+        display = f"{given} {surname}"
+    else:
+        display = raw_name.strip().title() or "Unknown"
+
+    # ── Append abbreviated title if available ──────────────────────────────
+    title_clean = raw_title.strip()
+    if title_clean:
+        abbreviated = TITLE_MAP.get(title_clean.lower())
+        title_str = abbreviated if abbreviated else title_clean
+        display = f"{display} ({title_str})"
+
+    return display
+
+
 class InsiderTradingFetcher(BaseFetcher):
     """Fetch recent SEC Form 4 insider transactions for watchlist tickers via Finnhub."""
 
@@ -85,16 +151,19 @@ class InsiderTradingFetcher(BaseFetcher):
                     name = txn.get("name", "Unknown")
                     txn_date = txn.get("transactionDate", "")
 
+                    title_raw = txn.get("officerTitle", "") or ""
+                    display_name = _fmt_insider_name(name, title_raw)
+
                     if code in BUY_CODES and shares > 0:
                         buy_tickers[symbol].append({
-                            "name": name,
+                            "name": display_name,
                             "shares": int(abs(shares)),
                             "value": round(value),
                             "date": txn_date,
                         })
                     elif code in SELL_CODES and shares < 0:
                         sell_tickers[symbol].append({
-                            "name": name,
+                            "name": display_name,
                             "shares": int(abs(shares)),
                             "value": round(value),
                             "date": txn_date,

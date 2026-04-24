@@ -367,8 +367,8 @@ def _score_congressional_trades(signal: Signal, context: dict) -> ScoredSignal:
     total_buys = signal.metadata.get("total_buys", 0)
     total_sells = signal.metadata.get("total_sells", 0)
     high_profile = signal.metadata.get("high_profile_trades", [])
-    # Extreme if high-profile politicians are active OR 3+ tickers on one side
-    extreme = len(high_profile) > 0 or buy_count >= 3 or sell_count >= 3
+    # Extreme if high-profile politicians are active OR 5+ tickers on one side
+    extreme = len(high_profile) > 0 or buy_count >= 5 or sell_count >= 5
 
     if total_buys == 0 and total_sells == 0:
         return ScoredSignal(

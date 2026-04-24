@@ -8,6 +8,9 @@
     <title>Market Intelligence Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="index.css">
+    <!-- config.js is generated at container startup by entrypoint.sh -->
+    <!-- It sets window.MARKET_INTELLIGENCE_CONFIG.apiBase to the real API URL -->
+    <script src="/config.js"></script>
 </head>
 
 <body>
@@ -39,6 +42,7 @@
                 <div class="table-headers">
                     <div class="th-sortable" onclick="sortStocks('symbol')">Symbol ↕</div>
                     <div class="th-sortable" onclick="sortStocks('name')">Name ↕</div>
+                    <div class="th-label">1M</div>
                     <div class="th-sortable" onclick="sortStocks('price')">Price ↕</div>
                     <div class="th-sortable" onclick="sortStocks('sector')">Sector ↕</div>
                     <div class="th-sortable" onclick="sortStocks('pct_1d')">1D % ↕</div>
@@ -47,16 +51,16 @@
                     <div class="th-sortable" onclick="sortStocks('pe')">P/E ↕</div>
                     <div class="th-sortable" onclick="sortStocks('beta')">Beta ↕</div>
                     <div class="th-sortable" onclick="sortStocks('atm_iv_rv20')">IV/RV20 ↕</div>
-                    <div class="th-sortable" onclick="sortStocks('iv_rank')">IV Rank ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('iv_percentile')">IV Pct ↕</div>
                 </div>
 
                 <div id="stocks-list" class="data-list loading">Loading stock data...</div>
             </section>
 
-            <!-- Screener Split View -->
-            <div class="screener-grid">
+            <!-- Screener Stack -->
+            <div class="screener-stack">
                 <!-- CSP Section -->
-                <section id="csp-section" class="glass card">
+                <section id="csp-section" class="glass card full-width">
                     <div class="card-header">
                         <h2>Cash Secured Puts (CSP)</h2>
                         <div class="badge green">High Conviction Premium</div>
@@ -69,26 +73,47 @@
                         <div class="th-sortable" onclick="sortCsp('premium')">Premium ↕</div>
                         <div class="th-sortable" onclick="sortCsp('roc_percent')">ROC % ↕</div>
                         <div class="th-sortable" onclick="sortCsp('otm_percent')">% OTM ↕</div>
+                        <div class="th-sortable" onclick="sortCsp('spread_pct')">Spread % ↕</div>
+                        <div class="th-sortable" onclick="sortCsp('impliedVolatility')">IV % ↕</div>
+                        <div class="th-sortable" onclick="sortCsp('volume')">Volume ↕</div>
                     </div>
 
                     <div id="csp-list" class="data-list loading">Scanning option chains...</div>
 
                     <!-- Pagination Controls -->
                     <div class="pagination">
-                        <button id="csp-prev" class="btn-icon" onclick="prevCspPage()">←</button>
+                        <button id="csp-prev" class="btn-icon" onclick="prevCspPage()">&#8592;</button>
                         <span id="csp-page-info" class="page-info">Page 1 / 1</span>
-                        <button id="csp-next" class="btn-icon" onclick="nextCspPage()">→</button>
+                        <button id="csp-next" class="btn-icon" onclick="nextCspPage()">&#8594;</button>
                     </div>
                 </section>
 
                 <!-- LEAPS Section -->
-                <section id="leaps-section" class="glass card">
+                <section id="leaps-section" class="glass card full-width">
                     <div class="card-header">
                         <h2>LEAPS Calls</h2>
                         <div class="badge blue">Long-Term Capital</div>
                     </div>
                     <p class="subtitle">Looking for 365+ DTE Deep ITM options as stock replacement.</p>
+
+                    <div class="table-headers">
+                        <div class="th-sortable" onclick="sortLeaps('symbol')">Ticker ↕</div>
+                        <div class="th-sortable" onclick="sortLeaps('strike')">Strike ↕</div>
+                        <div class="th-sortable" onclick="sortLeaps('premium')">Premium ↕</div>
+                        <div class="th-sortable" onclick="sortLeaps('premium_markup_percent')">Markup ↕</div>
+                        <div class="th-sortable" onclick="sortLeaps('volume')">Volume ↕</div>
+                        <div class="th-sortable" onclick="sortLeaps('expiration')">Expiration ↕</div>
+                        <div class="th-sortable" onclick="sortLeaps('break_even')">Break Even ↕</div>
+                    </div>
+
                     <div id="leaps-list" class="data-list loading">Scanning option chains...</div>
+
+                    <!-- Pagination Controls -->
+                    <div class="pagination">
+                        <button id="leaps-prev" class="btn-icon" onclick="prevLeapsPage()">&#8592;</button>
+                        <span id="leaps-page-info" class="page-info">Page 1 / 1</span>
+                        <button id="leaps-next" class="btn-icon" onclick="nextLeapsPage()">&#8594;</button>
+                    </div>
                 </section>
             </div>
 

@@ -1,15 +1,55 @@
-const API_BASE = (window.MARKET_INTELLIGENCE_CONFIG?.apiBase) || "http://127.0.0.1:8000/api";
+const API_BASE = (window.MARKET_INTELLIGENCE_CONFIG?.apiBase) || (() => {
+    console.error(
+        "[Market Intelligence] FATAL: window.MARKET_INTELLIGENCE_CONFIG is not defined.\n" +
+        "config.js was not loaded. The app cannot reach the API from a remote device.\n" +
+        "Ensure <script src='/config.js'> is in index.html and the dashboard container is rebuilt."
+    );
+    // Return a clearly broken URL so fetch errors are obvious in the console
+    return "/MISSING_CONFIG_JS_SEE_CONSOLE";
+})();
 
 // CSP State
 let allCspCandidates = [];
 let currentCspSort = 'roc_percent';
 let currentCspSortDesc = true;
 let currentCspPage = 1;
-const CSP_PER_PAGE = 5;
+const CSP_PER_PAGE = 7;
+
+// LEAPS State
+let allLeapsCandidates = [];
+let currentLeapsPage = 1;
+const LEAPS_PER_PAGE = 7; // ← change this number to show more/fewer rows per page
 
 // Stock State
 let allStockCandidates = [];
 let currentStockSort = { column: 'pct_1d', asc: false };
+
+/**
+ * Build a tiny inline SVG sparkline from an array of price values.
+ * Green stroke if the stock is up over the period, red if down.
+ */
+function buildSparklineSVG(prices, isUp) {
+    if (!prices || prices.length < 2) return '<div class="sparkline-empty">—</div>';
+
+    const width = 60;
+    const height = 24;
+    const padding = 2;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const range = max - min || 1;
+
+    const points = prices.map((p, i) => {
+        const x = padding + (i / (prices.length - 1)) * (width - padding * 2);
+        const y = padding + (1 - (p - min) / range) * (height - padding * 2);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+
+    const color = isUp ? '#34d399' : '#f87171';
+
+    return `<svg class="sparkline-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+        <polyline fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" points="${points}" />
+    </svg>`;
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     initDashboard();
@@ -71,7 +111,9 @@ async function fetchLeapsCandidates() {
         const response = await fetch(`${API_BASE}/screener/leaps`);
         if (!response.ok) throw new Error("Failed to fetch LEAPS");
         const data = await response.json();
-        renderLeapsCandidates(data.candidates);
+        allLeapsCandidates = data.candidates;
+        currentLeapsPage = 1;
+        renderLeapsPage();
     } catch (err) {
         console.error(err);
         document.getElementById("leaps-list").innerHTML = "<div class='trade-item'>Error fetching option chains</div>";
@@ -178,8 +220,75 @@ function renderCspCandidates(candidates) {
                     <span class="m-val highlight">${c.otm_percent.toFixed(1)}%</span>
                     <span class="m-lbl">% OTM</span>
                 </div>
+                <div class="metric">
+                    <span class="m-val ${c.spread_pct > 10 ? 'text-red' : ''}">${c.spread_pct > 0 ? c.spread_pct.toFixed(1) + '%' : '—'}</span>
+                    <span class="m-lbl">Spread %</span>
+                </div>
+                <div class="metric">
+                    <span class="m-val">${c.impliedVolatility > 0 ? c.impliedVolatility.toFixed(1) + '%' : '—'}</span>
+                    <span class="m-lbl">IV</span>
+                </div>
+                <div class="metric">
+                    <span class="m-val">${c.volume > 0 ? c.volume.toLocaleString() : '—'}</span>
+                    <span class="m-lbl">Volume</span>
+                </div>
             </div>
         `).join("");
+}
+
+// ── LEAPS Pagination & Sorting ─────────────────────────────────
+
+let currentLeapsSort = 'premium_markup_percent';
+let currentLeapsSortDesc = false; // lowest markup first by default
+
+function sortLeaps(field) {
+    if (currentLeapsSort === field) {
+        currentLeapsSortDesc = !currentLeapsSortDesc;
+    } else {
+        currentLeapsSort = field;
+        // Expiration sorts ascending by default (nearest first)
+        currentLeapsSortDesc = field === 'expiration' ? false : true;
+    }
+    currentLeapsPage = 1;
+    renderLeapsPage();
+}
+
+function prevLeapsPage() {
+    if (currentLeapsPage > 1) {
+        currentLeapsPage--;
+        renderLeapsPage();
+    }
+}
+
+function nextLeapsPage() {
+    const totalPages = Math.ceil(allLeapsCandidates.length / LEAPS_PER_PAGE);
+    if (currentLeapsPage < totalPages) {
+        currentLeapsPage++;
+        renderLeapsPage();
+    }
+}
+
+function renderLeapsPage() {
+    // Sort array before slicing
+    allLeapsCandidates.sort((a, b) => {
+        let valA = a[currentLeapsSort];
+        let valB = b[currentLeapsSort];
+        if (typeof valA === 'string') {
+            return currentLeapsSortDesc ? valB.localeCompare(valA) : valA.localeCompare(valB);
+        }
+        return currentLeapsSortDesc ? valB - valA : valA - valB;
+    });
+
+    const startIndex = (currentLeapsPage - 1) * LEAPS_PER_PAGE;
+    const pageItems = allLeapsCandidates.slice(startIndex, startIndex + LEAPS_PER_PAGE);
+
+    // Update pagination controls
+    const totalPages = Math.ceil(allLeapsCandidates.length / LEAPS_PER_PAGE) || 1;
+    document.getElementById("leaps-page-info").innerText = `Page ${currentLeapsPage} / ${totalPages}`;
+    document.getElementById("leaps-prev").disabled = currentLeapsPage === 1;
+    document.getElementById("leaps-next").disabled = currentLeapsPage === totalPages;
+
+    renderLeapsCandidates(pageItems);
 }
 
 function renderLeapsCandidates(candidates) {
@@ -209,6 +318,18 @@ function renderLeapsCandidates(candidates) {
                     <span class="m-val highlight">${c.premium_markup_percent.toFixed(1)}%</span>
                     <span class="m-lbl">Markup</span>
                 </div>
+                <div class="metric">
+                    <span class="m-val">${c.volume > 0 ? c.volume.toLocaleString() : '—'}</span>
+                    <span class="m-lbl">Volume</span>
+                </div>
+                <div class="metric">
+                    <span class="m-val">${c.expiration}</span>
+                    <span class="m-lbl">Expiration</span>
+                </div>
+                <div class="metric">
+                    <span class="m-val">${c.break_even.toFixed(2)}</span>
+                    <span class="m-lbl">Break Even</span>
+                </div>
             </div>
         `).join("");
 }
@@ -228,11 +349,11 @@ function renderStockCandidates(candidates) {
         const m1Class = c.pct_1m >= 0 ? 'text-green' : 'text-red';
         const m1Sign = c.pct_1m >= 0 ? '+' : '';
         const ivRv20Display = c.atm_iv_rv20 === 'N/A' ? 'N/A' : c.atm_iv_rv20.toFixed(2);
-        const ivRankDisplay = c.iv_rank === 'N/A' ? 'N/A' : `${c.iv_rank.toFixed(2)}%`;
-        const ivRankPoints = Number.isFinite(c.iv_rank_points) ? c.iv_rank_points : 0;
-        const ivRankTooltip = c.iv_rank === 'N/A'
-            ? `IV Rank unavailable. History points: ${ivRankPoints}`
-            : `IV Rank based on ${ivRankPoints} ATM IV history points`;
+        const ivPctDisplay = c.iv_percentile === 'N/A' ? 'N/A' : `${c.iv_percentile.toFixed(2)}%`;
+        const ivHistoryPoints = Number.isFinite(c.iv_history_points) ? c.iv_history_points : 0;
+        const ivPctTooltip = c.iv_percentile === 'N/A'
+            ? `IV Percentile unavailable. History points: ${ivHistoryPoints}`
+            : `IV was below current level ${c.iv_percentile.toFixed(1)}% of the time over ${ivHistoryPoints} trading days`;
         const ivRv20Tooltip = c.atm_iv_rv20 === 'N/A'
             ? 'IV/RV20 unavailable'
             : 'Higher values mean options are pricing more movement than the stock has recently realized';
@@ -242,16 +363,17 @@ function renderStockCandidates(candidates) {
                 <div class="ticker-block">
                     <span class="symbol">${c.symbol}</span>
                 </div>
-                <div class="metric" style="color: var(--text-secondary);">${c.name}</div>
-                <div class="metric"><span class="m-val">$${c.price.toFixed(2)}</span></div>
-                <div class="metric" style="color: var(--text-secondary); font-size: 0.8rem;">${c.sector}</div>
-                <div class="metric ${d1Class}">${d1Sign}${c.pct_1d.toFixed(2)}%</div>
-                <div class="metric ${w1Class}">${w1Sign}${c.pct_1w.toFixed(2)}%</div>
-                <div class="metric ${m1Class}">${m1Sign}${c.pct_1m.toFixed(2)}%</div>
-                <div class="metric">${c.pe}</div>
-                <div class="metric">${c.beta}</div>
-                <div class="metric" title="${ivRv20Tooltip}">${ivRv20Display}</div>
-                <div class="metric" title="${ivRankTooltip}">${ivRankDisplay}</div>
+                <div class="metric stock-name" data-label="Name">${c.name}</div>
+                <div class="metric sparkline-cell">${buildSparklineSVG(c.price_history_1m, c.pct_1m >= 0)}</div>
+                <div class="metric" data-label="Price"><span class="m-val">$${c.price.toFixed(2)}</span></div>
+                <div class="metric" data-label="Sector" style="font-size: 0.8rem;">${c.sector}</div>
+                <div class="metric ${d1Class}" data-label="1D">${d1Sign}${c.pct_1d.toFixed(2)}%</div>
+                <div class="metric ${w1Class}" data-label="1W">${w1Sign}${c.pct_1w.toFixed(2)}%</div>
+                <div class="metric ${m1Class}" data-label="1M">${m1Sign}${c.pct_1m.toFixed(2)}%</div>
+                <div class="metric" data-label="P/E">${c.pe}</div>
+                <div class="metric" data-label="Beta">${c.beta}</div>
+                <div class="metric" data-label="IV/RV20" title="${ivRv20Tooltip}">${ivRv20Display}</div>
+                <div class="metric" data-label="IV Pct" title="${ivPctTooltip}">${ivPctDisplay}</div>
             </div>
         `;
     }).join("");

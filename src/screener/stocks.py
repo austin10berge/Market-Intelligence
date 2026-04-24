@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 ALPACA_TARGET_DTE = 37
 ALPACA_MIN_DTE = 30
-ALPACA_MAX_DTE = 45
+ALPACA_MAX_DTE = 47
 ALPACA_STRIKE_WINDOW_PCT = 0.10
 DEFAULT_RISK_FREE_RATE = 0.045
 IV_RANK_LOOKBACK_DAYS = 252
@@ -305,8 +305,18 @@ def _fetch_alpaca_atm_iv_percent(
     return sum(iv_values) / len(iv_values)
 
 
-def _calculate_iv_rank(current_iv: float, iv_history: list[dict]) -> float | None:
-    """Compute IV Rank from stored ATM IV history."""
+def _calculate_iv_percentile(current_iv: float, iv_history: list[dict]) -> float | None:
+    """Compute IV Percentile from stored ATM IV history.
+
+    IV Percentile = % of historical observations where IV was *below* the current IV.
+    This is fundamentally different from IV Rank:
+
+      IV Rank      = (current - min) / (max - min)  — sensitive to a single spike
+      IV Percentile = count(history < current) / count(history)  — distribution-based
+
+    Example: IV mostly trades 20-30, one spike to 80.
+      At current IV = 30: IV Rank ≈ 20%  |  IV Percentile ≈ 80%
+    """
     history_values = [float(row["atm_iv"]) for row in iv_history if row.get("atm_iv") is not None]
     if current_iv <= 0:
         return None
@@ -314,13 +324,9 @@ def _calculate_iv_rank(current_iv: float, iv_history: list[dict]) -> float | Non
     if len(history_values) < MIN_IV_RANK_POINTS:
         return None
 
-    iv_low = min(history_values)
-    iv_high = max(history_values)
-    if iv_high <= iv_low:
-        return None
-
-    iv_rank = ((current_iv - iv_low) / (iv_high - iv_low)) * 100
-    return max(0.0, min(100.0, iv_rank))
+    below = sum(1 for v in history_values if v < current_iv)
+    iv_percentile = (below / len(history_values)) * 100
+    return round(iv_percentile, 2)
 
 
 def _fetch_option_contracts(
@@ -659,8 +665,8 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                     store_stock_iv_snapshot(snapshot_date=snapshot_date, symbol=symbol, atm_iv=atm_iv_val)
 
                 iv_history = get_stock_iv_history(symbol, lookback_days=IV_RANK_LOOKBACK_DAYS)
-                iv_rank_val = (
-                    _calculate_iv_rank(atm_iv_val, iv_history)
+                iv_percentile_val = (
+                    _calculate_iv_percentile(atm_iv_val, iv_history)
                     if atm_iv_val is not None
                     else None
                 )
@@ -669,6 +675,12 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                     if atm_iv_val is not None and rv20_val is not None
                     else None
                 )
+
+                # Build 1-month price history for sparkline chart
+                price_history_1m = []
+                history_slice = hist["Close"].tail(21) if len(hist) >= 21 else hist["Close"]
+                if len(history_slice) > 0:
+                    price_history_1m = [round(float(p), 2) for p in history_slice.tolist() if not pd.isna(p)]
 
                 candidates.append(
                     {
@@ -679,6 +691,7 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                         "pct_1d": round(pct_1d, 2),
                         "pct_1w": round(pct_1w, 2),
                         "pct_1m": round(pct_1m, 2),
+                        "price_history_1m": price_history_1m,
                         "pe": round(float(pe_val), 2) if pd.notna(pe_val) else "N/A",
                         "beta": round(float(beta_val), 2) if pd.notna(beta_val) else "N/A",
                         "atm_iv": round(atm_iv_val, 2) if atm_iv_val is not None else "N/A",
@@ -686,8 +699,8 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                         "atm_iv_rv20": round(atm_iv_rv20_val, 2)
                         if atm_iv_rv20_val is not None
                         else "N/A",
-                        "iv_rank": round(iv_rank_val, 2) if iv_rank_val is not None else "N/A",
-                        "iv_rank_points": len(iv_history),
+                        "iv_percentile": round(iv_percentile_val, 2) if iv_percentile_val is not None else "N/A",
+                        "iv_history_points": len(iv_history),
                     }
                 )
 
