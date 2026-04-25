@@ -19,7 +19,12 @@ from ..db import (
     get_csp_settings, update_csp_settings,
     get_stock_watchlist, update_stock_watchlist,
     get_insider_cache, get_congressional_cache, get_signal_history,
+    save_strategy, get_strategies, get_strategy, delete_strategy,
 )
+from ..backtester.models import BacktestRequest, WalkForwardRequest, StrategyDefinition
+from ..backtester.engine import run_backtest
+from ..backtester.walk_forward import run_walk_forward
+from ..backtester.data_provider import get_historical_data
 from ..cache import (
     cache_get, cache_set, screener_ttl,
     invalidate_screener_cache, invalidate_market_posture,
@@ -368,3 +373,85 @@ async def cache_status():
         except Exception as exc:
             result["keys"][key] = {"error": str(exc)}
     return result
+
+
+# ── Backtester ────────────────────────────────────────────────────────────────
+
+@app.post("/api/backtest/run")
+async def api_run_backtest(req: BacktestRequest):
+    try:
+        # Run in thread pool to avoid blocking the event loop
+        df = await asyncio.to_thread(
+            get_historical_data,
+            symbol=req.ticker,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            timeframe=req.timeframe
+        )
+        if df.empty:
+            raise HTTPException(status_code=404, detail=f"No data found for {req.ticker}")
+            
+        result = await asyncio.to_thread(run_backtest, req, df)
+        return result.model_dump()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Backtest run failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/backtest/walk-forward")
+async def api_run_walk_forward(req: WalkForwardRequest):
+    try:
+        df = await asyncio.to_thread(
+            get_historical_data,
+            symbol=req.ticker,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            timeframe=req.timeframe
+        )
+        if df.empty:
+            raise HTTPException(status_code=404, detail=f"No data found for {req.ticker}")
+            
+        result = await asyncio.to_thread(run_walk_forward, req, df)
+        return result.model_dump()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Walk-forward run failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SaveStrategyRequest(BaseModel):
+    name: str
+    definition: dict
+
+
+@app.post("/api/backtest/strategies")
+def api_save_strategy(req: SaveStrategyRequest):
+    try:
+        strategy_id = save_strategy(req.name, req.definition)
+        return {"status": "success", "id": strategy_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/backtest/strategies")
+def api_get_strategies():
+    try:
+        return {"strategies": get_strategies()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/backtest/strategies/{strategy_id}")
+def api_delete_strategy(strategy_id: int):
+    try:
+        success = delete_strategy(strategy_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

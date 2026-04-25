@@ -126,7 +126,7 @@ def compute_stats(
         if gross_loss > 0:
             stats["profit_factor"] = round(gross_profit / gross_loss, 2)
         else:
-            stats["profit_factor"] = float("inf") if gross_profit > 0 else "N/A"
+            stats["profit_factor"] = "N/A"
 
         # Average win / loss
         stats["avg_win"] = round(gross_profit / len(winners), 2) if winners else 0

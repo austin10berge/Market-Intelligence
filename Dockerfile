@@ -34,8 +34,10 @@ CMD ["python3", "-m", "src.main"]
 FROM nginx:alpine AS dashboard
 COPY src/web/index.html /usr/share/nginx/html/index.html
 COPY src/web/watchlist.html /usr/share/nginx/html/watchlist.html
+COPY src/web/backtest.html /usr/share/nginx/html/backtest.html
 COPY src/web/index.css /usr/share/nginx/html/index.css
 COPY src/web/app.js /usr/share/nginx/html/app.js
+COPY src/web/backtest.js /usr/share/nginx/html/backtest.js
 COPY src/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY src/web/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

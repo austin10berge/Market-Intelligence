@@ -91,6 +91,14 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_iv_history_date_symbol
             ON stock_iv_history(date, symbol);
+
+        CREATE TABLE IF NOT EXISTS backtest_strategies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            definition TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
     """)
     conn.commit()
 
@@ -435,5 +443,81 @@ def set_congressional_cache(data: dict) -> None:
             (json.dumps(data, default=_json_default),),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def save_strategy(name: str, definition: dict) -> int:
+    """Save or update a strategy definition."""
+    conn = _get_connection()
+    try:
+        cursor = conn.execute(
+            """
+            INSERT INTO backtest_strategies (name, definition, updated_at)
+            VALUES (?, ?, datetime('now'))
+            """,
+            (name, json.dumps(definition, default=_json_default))
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_strategies() -> list[dict]:
+    """Get all saved strategies."""
+    conn = _get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, name, definition, created_at, updated_at
+            FROM backtest_strategies
+            ORDER BY updated_at DESC
+            """
+        ).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            try:
+                r["definition"] = json.loads(r["definition"])
+            except Exception:
+                pass
+            results.append(r)
+        return results
+    finally:
+        conn.close()
+
+
+def get_strategy(strategy_id: int) -> dict | None:
+    """Get a specific strategy by ID."""
+    conn = _get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT id, name, definition, created_at, updated_at
+            FROM backtest_strategies
+            WHERE id = ?
+            """,
+            (strategy_id,)
+        ).fetchone()
+        if not row:
+            return None
+        r = dict(row)
+        try:
+            r["definition"] = json.loads(r["definition"])
+        except Exception:
+            pass
+        return r
+    finally:
+        conn.close()
+
+
+def delete_strategy(strategy_id: int) -> bool:
+    """Delete a strategy by ID."""
+    conn = _get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM backtest_strategies WHERE id = ?", (strategy_id,))
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
