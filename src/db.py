@@ -239,7 +239,7 @@ def get_csp_settings() -> dict:
             "min_otm_pct": 5.0,
             "max_otm_pct": 20.0,
             "min_roc": 1.0,
-            "max_spread_pct": 10.0
+            "max_spread_pct": 25.0
         }
     finally:
         conn.close()

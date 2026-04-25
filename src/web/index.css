@@ -664,3 +664,62 @@ header {
         font-size: 0.85rem;
     }
 }
+
+/* ── Cache status badge ─────────────────────────────────────────────────────── */
+.cache-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.2rem 0.55rem;
+    border-radius: 99px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    margin-left: auto;  /* push to right side of card-header */
+    opacity: 0.85;
+    transition: opacity 0.2s;
+}
+
+.cache-badge:empty {
+    display: none;
+}
+
+/* Market closed — amber/muted tone, data is stale-but-valid */
+.cache-badge.market-closed {
+    background: rgba(251, 191, 36, 0.12);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.25);
+}
+
+.cache-badge.market-closed::before {
+    content: '●';
+    font-size: 0.5rem;
+    color: #fbbf24;
+}
+
+/* Market open — green pulse, data is fresh */
+.cache-badge.market-open {
+    background: rgba(52, 211, 153, 0.12);
+    color: #34d399;
+    border: 1px solid rgba(52, 211, 153, 0.25);
+}
+
+.cache-badge.market-open::before {
+    content: '●';
+    font-size: 0.5rem;
+    color: #34d399;
+    animation: pulse-dot 2s infinite;
+}
+
+/* Live (fresh cache miss — just fetched) */
+.cache-badge.live {
+    background: rgba(99, 102, 241, 0.12);
+    color: #818cf8;
+    border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.35; }
+}

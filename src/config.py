@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # ── Database ─────────────────────────────────────────
     db_path: str = Field(default="data/market_intelligence.db", description="SQLite DB path")
 
+    # ── Redis ─────────────────────────────────────────────
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL (used for market-hours-aware screener caching)",
+    )
+
     # ── Schedule ─────────────────────────────────────────
     schedule_time: str = Field(
         default="19:00",

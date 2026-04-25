@@ -67,6 +67,7 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
                 for _, put_data in valid_puts.iterrows():
                     strike = put_data['strike']
                     occ_symbol = put_data['contractSymbol']
+                    yf_premium = put_data['lastPrice']
                     otm_pct = ((current_price - strike) / current_price) * 100
                     
                     exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
@@ -75,6 +76,7 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
                     potential_contracts.append({
                         "symbol": symbol,
                         "occ_symbol": occ_symbol,
+                        "yf_premium": yf_premium,
                         "current_price": current_price,
                         "expiration": exp_str,
                         "strike": strike,
@@ -117,9 +119,14 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
     # 3. Evaluate candidates with live pricing
     best_by_strike: dict[tuple, dict] = {}
 
+    # Rejection counters for diagnostics
+    rejected = {"no_alpaca_snapshot": 0, "low_premium": 0, "low_roc": 0, "wide_spread": 0}
+
     for c in potential_contracts:
         snapshot = alpaca_snapshots.get(c["occ_symbol"], {})
         if not snapshot:
+            rejected["no_alpaca_snapshot"] += 1
+            logger.debug(f"No Alpaca snapshot for {c['occ_symbol']} ({c['symbol']} {c['expiration']} {c['strike']}P)")
             continue
             
         quote = snapshot.get("latestQuote", {})
@@ -128,25 +135,31 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
         bid = quote.get("bp", 0.0)
         ask = quote.get("ap", 0.0)
         premium = trade.get("p", 0.0)
+        if premium == 0.0:
+            premium = c.get("yf_premium", 0.0)
+            
         vol = snapshot.get("v", 0)  # Daily volume is sometimes at the root
         iv = snapshot.get("impliedVolatility", 0.0)
 
         if premium <= 0.15:
+            rejected["low_premium"] += 1
+            logger.debug(f"Low premium filtered: {c['symbol']} {c['expiration']} {c['strike']}P — premium={premium:.2f}")
             continue
 
         roc = (premium / c["strike"]) * 100 if c["strike"] > 0 else 0
 
         if roc < settings["min_roc"]:
+            rejected["low_roc"] += 1
+            logger.debug(f"Low ROC filtered: {c['symbol']} {c['expiration']} {c['strike']}P — roc={roc:.2f}% (min={settings['min_roc']}%)")
             continue
 
         spread_pct = 0
         if bid > 0 and ask > bid:
             spread_pct = ((ask - bid) / bid) * 100
             if spread_pct > settings["max_spread_pct"]:
+                rejected["wide_spread"] += 1
+                logger.debug(f"Wide spread filtered: {c['symbol']} {c['expiration']} {c['strike']}P — spread={spread_pct:.1f}% (max={settings['max_spread_pct']}%)")
                 continue
-        else:
-            # If there is no valid bid/ask on Alpaca, skip it for CSP safety
-            continue
 
         safe_dte = max(1, c["dte"])
         annualized_roc = (roc / safe_dte) * 365
@@ -176,7 +189,16 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
             best_by_strike[key] = candidate
 
     # Sort by highest Annualized Return on Capital
-    return sorted(best_by_strike.values(), key=lambda x: x["annualized_roc"], reverse=True)
+    results = sorted(best_by_strike.values(), key=lambda x: x["annualized_roc"], reverse=True)
+    logger.info(
+        f"CSP screen complete: {len(potential_contracts)} contracts evaluated, "
+        f"{len(results)} candidates returned. "
+        f"Rejected — no_alpaca_snapshot={rejected['no_alpaca_snapshot']}, "
+        f"low_premium={rejected['low_premium']}, "
+        f"low_roc={rejected['low_roc']}, "
+        f"wide_spread={rejected['wide_spread']}"
+    )
+    return results
 
 
 def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365) -> list[dict]:

@@ -28,6 +28,7 @@ from .processing.scorer import score_signal, check_convergence
 from .screener.stocks import screen_stocks
 from .synthesis.llm import synthesize
 from .synthesis.prompts import build_synthesis_prompt
+from .cache import invalidate_market_posture
 from . import db
 
 import argparse
@@ -154,6 +155,9 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
             llm_summary=digest_text,
             full_text=full_text,
         )
+
+        # Invalidate the market-posture Redis cache so the dashboard picks up the new digest
+        await invalidate_market_posture()
 
         logger.info(f"Composite score: {composite:+.3f} | Posture: {posture.value}")
 

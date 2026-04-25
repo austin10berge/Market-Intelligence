@@ -1,5 +1,19 @@
 services:
 
+  # ── Redis cache ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: market-intelligence-redis
+    command: redis-server --save "" --appendonly no  # Disable persistence — cache-only use
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   # ── FastAPI backend ──────────────────────────────────────────────────────────
   api:
     build:
@@ -7,10 +21,15 @@ services:
       target: api
     container_name: market-intelligence-api
     env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     volumes:
       - sqlite_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -60,11 +79,37 @@ services:
       target: pipeline
     container_name: market-intelligence-pipeline
     env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - sqlite_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: "no"
     profiles:
       - pipeline
+
+  # ── Cache pre-warmer (runs at 9:25 AM ET via cron, profile=prewarm) ──────────
+  # Cron entry (LXC host, ET timezone):
+  #   25 9 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm prewarm
+  prewarm:
+    build:
+      context: .
+      target: pipeline
+    container_name: market-intelligence-prewarm
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    command: python3 -m src.prewarm
+    volumes:
+      - sqlite_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: "no"
+    profiles:
+      - prewarm
 
 volumes:
   sqlite_data:

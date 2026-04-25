@@ -99,6 +99,7 @@ async function fetchCspCandidates() {
         if (!response.ok) throw new Error("Failed to fetch CSPs");
         const data = await response.json();
         allCspCandidates = data.candidates;
+        updateCacheStatus('csp', data);
         sortAndRenderCsp();
     } catch (err) {
         console.error(err);
@@ -112,6 +113,7 @@ async function fetchLeapsCandidates() {
         if (!response.ok) throw new Error("Failed to fetch LEAPS");
         const data = await response.json();
         allLeapsCandidates = data.candidates;
+        updateCacheStatus('leaps', data);
         currentLeapsPage = 1;
         renderLeapsPage();
     } catch (err) {
@@ -128,6 +130,7 @@ async function fetchStockScreener() {
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
         allStockCandidates = data.candidates || [];
+        updateCacheStatus('stocks', data);
         listEl.classList.remove("loading");
         sortStocks(currentStockSort.column, currentStockSort.asc);
     } catch (e) {
@@ -470,4 +473,49 @@ function sortStocks(column, forceAsc = null) {
     });
 
     renderStockCandidates(allStockCandidates);
+}
+
+// ── Cache status display ──────────────────────────────────────────────────────
+
+/**
+ * Update the "Last updated" timestamp chip for a given section.
+ * Called after each screener fetch with the raw API response.
+ *
+ * @param {'stocks'|'csp'|'leaps'} section
+ * @param {object} apiResponse  - The full API response object (contains cached_at, market_status)
+ */
+function updateCacheStatus(section, apiResponse) {
+    const elId = `cache-status-${section}`;
+    const el = document.getElementById(elId);
+    if (!el) return;
+
+    const cachedAt = apiResponse.cached_at;       // ISO string or null
+    const marketStatus = apiResponse.market_status || '';  // 'Market Open' | 'Market Closed'
+    const isCached = apiResponse.cached === true;
+
+    if (!cachedAt) {
+        el.textContent = 'Live data';
+        el.className = 'cache-badge live';
+        return;
+    }
+
+    // Format relative time
+    const ageMs = Date.now() - new Date(cachedAt).getTime();
+    const ageMins = Math.round(ageMs / 60000);
+    let ageLabel;
+    if (ageMins < 1) {
+        ageLabel = 'just now';
+    } else if (ageMins === 1) {
+        ageLabel = '1 min ago';
+    } else if (ageMins < 60) {
+        ageLabel = `${ageMins} mins ago`;
+    } else {
+        const ageHrs = Math.round(ageMins / 60);
+        ageLabel = `${ageHrs}h ago`;
+    }
+
+    const isOpen = marketStatus === 'Market Open';
+    el.textContent = `Updated ${ageLabel} · ${marketStatus}`;
+    el.className = `cache-badge ${isOpen ? 'market-open' : 'market-closed'}`;
+    el.title = `Data cached at ${new Date(cachedAt).toLocaleTimeString()}`;
 }

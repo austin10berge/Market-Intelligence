@@ -1,10 +1,9 @@
-"""FastAPI backend exposing SQLite market intelligence data."""
+"""FastAPI backend — market-hours-aware Redis cache for all screener endpoints."""
 
 import json
 import logging
 import os
 import sqlite3
-import time
 from contextlib import closing
 from typing import Dict, Any
 
@@ -15,7 +14,18 @@ import asyncio
 import httpx
 
 from ..config import settings
-from ..db import get_watchlist, update_watchlist, get_csp_settings, update_csp_settings, get_stock_watchlist, update_stock_watchlist, get_insider_cache, get_congressional_cache, get_signal_history
+from ..db import (
+    get_watchlist, update_watchlist,
+    get_csp_settings, update_csp_settings,
+    get_stock_watchlist, update_stock_watchlist,
+    get_insider_cache, get_congressional_cache, get_signal_history,
+)
+from ..cache import (
+    cache_get, cache_set, screener_ttl,
+    invalidate_screener_cache, invalidate_market_posture,
+    market_status_label, market_is_open,
+    KEY_SCREENER_CSP, KEY_SCREENER_LEAPS, KEY_SCREENER_STOCKS, KEY_MARKET_POSTURE,
+)
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
 from ..main import run_pipeline
@@ -24,24 +34,18 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Market Intelligence API")
 
-# Simple in-memory cache to prevent yfinance from pegging CPU on every refresh
-_cache: Dict[str, Dict[str, Any]] = {}
-CACHE_TTL = 600  # 10 minutes
+# Allow local frontend to access API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Tighten in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def get_cached(key: str):
-    if key in _cache:
-        entry = _cache[key]
-        if time.time() - entry["timestamp"] < CACHE_TTL:
-            return entry["data"]
-    return None
 
-def set_cache(key: str, data: Any):
-    _cache[key] = {
-        "timestamp": time.time(),
-        "data": data
-    }
+# ── Pydantic models ───────────────────────────────────────────────────────────
 
-# Pydantic models for DB config
 class WatchlistUpdate(BaseModel):
     tickers: list[str]
 
@@ -53,15 +57,21 @@ class CspSettingsUpdate(BaseModel):
     min_roc: float
     max_spread_pct: float
 
-# Allow local frontend to access API
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # For dev only
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
+# ── Cache metadata helper ─────────────────────────────────────────────────────
+
+def _cache_meta(envelope: dict | None) -> dict:
+    """Extract cache metadata from a Redis envelope for inclusion in API responses."""
+    if envelope is None:
+        return {"cached": False, "cached_at": None, "market_status": market_status_label()}
+    return {
+        "cached": True,
+        "cached_at": envelope.get("cached_at"),
+        "market_status": envelope.get("market_status", market_status_label()),
+    }
+
+
+# ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def health_check():
@@ -77,11 +87,12 @@ class ScanTriggerRequest(BaseModel):
 
 async def _run_and_post_to_discord(channel_id: str, discord_bot_url: str) -> None:
     """Background task: run pipeline, POST results back to the Discord bot."""
-    # Fall back to container name if no explicit URL was provided
     if not discord_bot_url:
         discord_bot_url = os.getenv("DISCORD_BOT_CALLBACK_URL", "http://discord-bot:9000")
     try:
         result = await run_pipeline(output_mode="on-demand")
+        # Invalidate market-posture cache so the dashboard reflects the new digest immediately
+        await invalidate_market_posture()
         async with httpx.AsyncClient(timeout=10.0) as client:
             await client.post(
                 f"{discord_bot_url}/callback",
@@ -95,16 +106,12 @@ async def _run_and_post_to_discord(channel_id: str, discord_bot_url: str) -> Non
 @app.post("/api/scan/trigger")
 async def trigger_scan(req: Request, body: ScanTriggerRequest, background_tasks: BackgroundTasks):
     """Trigger a market sentiment scan from the Discord bot."""
-    # Validate shared secret
     token = req.headers.get("x-bot-token")
     if not token or token != settings.discord_bot_secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     discord_bot_url = req.headers.get("x-bot-callback-url", "")
-
-    # Kick off the pipeline in the background so HTTP response returns immediately
     background_tasks.add_task(_run_and_post_to_discord, body.channel_id, discord_bot_url)
-
     return {"status": "queued", "message": "Scan started. Results will post to Discord shortly."}
 
 
@@ -131,15 +138,13 @@ def get_scan_history(req: Request, limit: int = 5):
 
 @app.get("/api/insider")
 def get_insider_data(req: Request):
-    """Return latest insider trading and congressional trades data for the /insider Discord command."""
+    """Return latest insider trading and congressional trades for the /insider Discord command."""
     token = req.headers.get("x-bot-token")
     if not token or token != settings.discord_bot_secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    insider = get_insider_cache(max_age_hours=48)  # Fall back to last 48h if no recent run
+    insider = get_insider_cache(max_age_hours=48)
     congressional = get_congressional_cache(max_age_hours=48)
-
-    # Also pull signal history for trend context (last 7 days)
     insider_history = get_signal_history("insider_trading", days=7)
     congressional_history = get_signal_history("congressional_trades", days=7)
 
@@ -151,80 +156,125 @@ def get_insider_data(req: Request):
     }
 
 
+# ── Market Posture ────────────────────────────────────────────────────────────
+
 @app.get("/api/market-posture")
-def get_market_posture():
-    """Return the latest aggregate market posture and components."""
+async def get_market_posture():
+    """Return the latest aggregate market posture, signals, and LLM summary.
+
+    Cached indefinitely in Redis; invalidated explicitly by the nightly pipeline
+    after a new digest is written to the DB.
+    """
+    # Try Redis first
+    envelope = await cache_get(KEY_MARKET_POSTURE)
+    if envelope is not None:
+        payload = envelope["data"]
+        payload.update(_cache_meta(envelope))
+        return payload
+
+    # Cache miss — fetch from SQLite
     try:
         with closing(sqlite3.connect(settings.db_path)) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
-            # Fetch latest digest
+
             cursor.execute("SELECT * FROM digests ORDER BY date DESC LIMIT 1")
             digest = cursor.fetchone()
-            
             if not digest:
                 raise HTTPException(status_code=404, detail="No digest found")
-                
+
             date_str = digest["date"]
-            
-            # Fetch all signals from that date
             cursor.execute("SELECT * FROM daily_signals WHERE date = ?", (date_str,))
             signals_rows = cursor.fetchall()
-            
+
             signals = []
             for row in signals_rows:
                 s_dict = dict(row)
-                # Parse JSON metadata if present
                 if s_dict.get("metadata"):
                     try:
                         s_dict["metadata"] = json.loads(s_dict["metadata"])
                     except Exception:
                         pass
                 signals.append(s_dict)
-                
-            return {
+
+            data = {
                 "date": date_str,
                 "composite_score": digest["composite_score"],
                 "posture": digest["posture"],
                 "llm_summary": digest["llm_summary"],
                 "full_text": digest["full_text"],
-                "signals": signals
+                "signals": signals,
             }
-            
+
+        # Market posture only changes when the pipeline runs, so we use a long TTL
+        # as a safety-net fallback (24h). The pipeline will explicitly invalidate this
+        # key via invalidate_market_posture() after each successful run.
+        await cache_set(KEY_MARKET_POSTURE, data, ttl=86400)
+
+        data.update(_cache_meta(None))
+        return data
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Screener: CSP ─────────────────────────────────────────────────────────────
+
 @app.get("/api/screener/csp")
-def get_csp_candidates():
-    """Returns top Cash Secured Put candidates currently active."""
-    cached = get_cached("csp")
-    if cached is not None:
-        return {"candidates": cached, "cached": True}
+async def get_csp_candidates():
+    """Return top Cash Secured Put candidates. Market-hours-aware TTL caching."""
+    envelope = await cache_get(KEY_SCREENER_CSP)
+    if envelope is not None:
+        return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
     try:
         candidates = screen_csp_candidates()
-        set_cache("csp", candidates)
-        return {"candidates": candidates, "cached": False}
+        ttl = screener_ttl()
+        await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
+        return {"candidates": candidates, **_cache_meta(None)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Screener: LEAPS ───────────────────────────────────────────────────────────
+
 @app.get("/api/screener/leaps")
-def get_leaps_candidates():
-    """Returns top LEAPS call candidates currently active."""
-    cached = get_cached("leaps")
-    if cached is not None:
-        return {"candidates": cached, "cached": True}
+async def get_leaps_candidates():
+    """Return top LEAPS call candidates. Market-hours-aware TTL caching."""
+    envelope = await cache_get(KEY_SCREENER_LEAPS)
+    if envelope is not None:
+        return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
     try:
         candidates = screen_leaps_candidates()
-        set_cache("leaps", candidates)
-        return {"candidates": candidates, "cached": False}
+        ttl = screener_ttl()
+        await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
+        return {"candidates": candidates, **_cache_meta(None)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ── Screener: Stocks ──────────────────────────────────────────────────────────
+
+@app.get("/api/screener/stocks")
+async def get_stock_candidates():
+    """Return stock screener results. Market-hours-aware TTL caching."""
+    envelope = await cache_get(KEY_SCREENER_STOCKS)
+    if envelope is not None:
+        return {"candidates": envelope["data"], **_cache_meta(envelope)}
+
+    try:
+        candidates = screen_stocks()
+        ttl = screener_ttl()
+        await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
+        return {"candidates": candidates, **_cache_meta(None)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Watchlist: Options (CSP/LEAPS) ────────────────────────────────────────────
 
 @app.get("/api/watchlist")
 def api_get_watchlist():
@@ -235,17 +285,17 @@ def api_get_watchlist():
 
 
 @app.post("/api/watchlist")
-def api_update_watchlist(data: WatchlistUpdate):
+async def api_update_watchlist(data: WatchlistUpdate):
     try:
         updated_tickers = [t.strip().upper() for t in data.tickers if t.strip()]
         update_watchlist(updated_tickers)
-        # Invalidate cache
-        _cache.pop("csp", None)
-        _cache.pop("leaps", None)
+        await invalidate_screener_cache()  # Watchlist changed — stale data is now invalid
         return {"status": "success", "watchlist": updated_tickers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ── CSP Settings ──────────────────────────────────────────────────────────────
 
 @app.get("/api/settings/csp")
 def api_get_csp_settings():
@@ -256,29 +306,18 @@ def api_get_csp_settings():
 
 
 @app.post("/api/settings/csp")
-def api_update_csp_settings(data: CspSettingsUpdate):
+async def api_update_csp_settings(data: CspSettingsUpdate):
     try:
         update_csp_settings(data.model_dump())
-        # Invalidate cache
-        _cache.pop("csp", None)
+        # CSP settings affect screener output — invalidate CSP cache specifically
+        from ..cache import cache_delete
+        await cache_delete(KEY_SCREENER_CSP)
         return {"status": "success", "settings": data.model_dump()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- Stock Screener ---
-@app.get("/api/screener/stocks")
-def get_stock_candidates():
-    """Returns top stock candidates from the watchlist."""
-    cached = get_cached("stocks")
-    if cached is not None:
-        return {"candidates": cached, "cached": True}
 
-    try:
-        candidates = screen_stocks()
-        set_cache("stocks", candidates)
-        return {"candidates": candidates, "cached": False}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# ── Watchlist: Stocks ─────────────────────────────────────────────────────────
 
 @app.get("/api/watchlist/stock")
 def api_get_stock_watchlist():
@@ -287,13 +326,45 @@ def api_get_stock_watchlist():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/watchlist/stock")
-def api_update_stock_watchlist(data: WatchlistUpdate):
+async def api_update_stock_watchlist(data: WatchlistUpdate):
     try:
         updated_tickers = [t.strip().upper() for t in data.tickers if t.strip()]
         update_stock_watchlist(updated_tickers)
-        # Invalidate cache
-        _cache.pop("stocks", None)
+        # Stock watchlist changed — invalidate stock screener cache only
+        from ..cache import cache_delete
+        await cache_delete(KEY_SCREENER_STOCKS)
         return {"status": "success", "watchlist": updated_tickers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Cache status endpoint (dev/debug) ─────────────────────────────────────────
+
+@app.get("/api/cache/status")
+async def cache_status():
+    """Return the current market status and remaining TTL for each cached key.
+
+    Useful for debugging cache behavior from the command line or in dev tools.
+    """
+    from ..cache import get_redis, market_is_open, seconds_until_next_open
+    client = get_redis()
+    keys = [KEY_SCREENER_CSP, KEY_SCREENER_LEAPS, KEY_SCREENER_STOCKS, KEY_MARKET_POSTURE]
+    result = {
+        "market_open": market_is_open(),
+        "market_status": market_status_label(),
+        "seconds_until_next_open": None if market_is_open() else seconds_until_next_open(),
+        "keys": {},
+    }
+    for key in keys:
+        try:
+            ttl = await client.ttl(key)
+            exists = await client.exists(key)
+            result["keys"][key] = {
+                "cached": bool(exists),
+                "ttl_seconds": ttl if ttl >= 0 else None,
+            }
+        except Exception as exc:
+            result["keys"][key] = {"error": str(exc)}
+    return result
