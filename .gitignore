@@ -17,6 +17,7 @@ venv/
 .idea/
 *.swp
 *.swo
+.worktrees/
 
 # Data
 data/*.db
