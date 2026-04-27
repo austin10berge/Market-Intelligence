@@ -82,3 +82,33 @@ export function buildStudyDefinitions(settings) {
 
     return studies;
 }
+
+export function buildWidgetStudies(settings) {
+    const studies = [];
+
+    settings.sma.forEach((item) => {
+        if (item.enabled) {
+            studies.push("MASimple@tv-basicstudies");
+        }
+    });
+
+    if (settings.bollinger.enabled) {
+        studies.push("BB@tv-basicstudies");
+    }
+
+    return studies;
+}
+
+export function buildWidgetStudyOverrides(settings) {
+    const firstEnabledSma = settings.sma.find((item) => item.enabled);
+    const overrides = {
+        "bollinger bands.length": settings.bollinger.length,
+        "bollinger bands.mult": settings.bollinger.multiplier,
+    };
+
+    if (firstEnabledSma) {
+        overrides["moving average.length"] = firstEnabledSma.length;
+    }
+
+    return overrides;
+}

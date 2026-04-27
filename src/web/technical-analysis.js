@@ -1,8 +1,9 @@
 import {
     DEFAULT_INDICATOR_SETTINGS,
     INDICATOR_STORAGE_KEY,
-    buildStudyDefinitions,
     sanitizeIndicatorSettings,
+    buildWidgetStudies,
+    buildWidgetStudyOverrides,
 } from "./technical-analysis-helpers.js";
 
 const API_BASE = window.MARKET_INTELLIGENCE_CONFIG?.apiBase || "/MISSING_CONFIG_JS_SEE_CONSOLE";
@@ -216,17 +217,13 @@ function renderTradingViewWidget(candidate, index) {
             hide_side_toolbar: false,
             allow_symbol_change: false,
             save_image: false,
+            studies: buildWidgetStudies(indicatorSettings),
+            studies_overrides: buildWidgetStudyOverrides(indicatorSettings),
             container_id: containerId,
             support_host: "https://www.tradingview.com",
         });
 
         widgets.push(widget);
-        widget.onChartReady(() => {
-            const chart = widget.activeChart();
-            buildStudyDefinitions(indicatorSettings).forEach((study) => {
-                chart.createStudy(study.name, false, false, study.inputs);
-            });
-        });
     } catch (error) {
         container.innerHTML = `<div class="trade-item">${escapeHtml(error.message || "Chart failed to render.")}</div>`;
     }
