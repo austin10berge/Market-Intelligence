@@ -86,11 +86,9 @@ export function buildStudyDefinitions(settings) {
 export function buildWidgetStudies(settings) {
     const studies = [];
 
-    settings.sma.forEach((item) => {
-        if (item.enabled) {
-            studies.push("MASimple@tv-basicstudies");
-        }
-    });
+    if (settings.sma.some((item) => item.enabled)) {
+        studies.push("MAMultiple@tv-basicstudies");
+    }
 
     if (settings.bollinger.enabled) {
         studies.push("BB@tv-basicstudies");
@@ -100,15 +98,22 @@ export function buildWidgetStudies(settings) {
 }
 
 export function buildWidgetStudyOverrides(settings) {
-    const firstEnabledSma = settings.sma.find((item) => item.enabled);
     const overrides = {
         "bollinger bands.length": settings.bollinger.length,
         "bollinger bands.mult": settings.bollinger.multiplier,
+        "moving average multiple.1st period": settings.sma[0].length,
+        "moving average multiple.2nd period": settings.sma[1].length,
+        "moving average multiple.3rd period": settings.sma[2].length,
+        "moving average multiple.4th period": 400,
+        "moving average multiple.5th period": 500,
+        "moving average multiple.6th period": 600,
+        "moving average multiple.plot 1.display": settings.sma[0].enabled ? 15 : 0,
+        "moving average multiple.plot 2.display": settings.sma[1].enabled ? 15 : 0,
+        "moving average multiple.plot 3.display": settings.sma[2].enabled ? 15 : 0,
+        "moving average multiple.plot 4.display": 0,
+        "moving average multiple.plot 5.display": 0,
+        "moving average multiple.plot 6.display": 0,
     };
-
-    if (firstEnabledSma) {
-        overrides["moving average.length"] = firstEnabledSma.length;
-    }
 
     return overrides;
 }

@@ -170,6 +170,14 @@ async function renderCandidates() {
                     <p class="subtitle">${buildContractSummary(candidate)}</p>
                 </div>
             </div>
+            <div class="ta-stock-grid">
+                ${metricCell("RSI", formatMetric(candidate.rsi))}
+                ${metricCell("ADX", formatMetric(candidate.adx))}
+                ${metricCell("IV/RV20", formatMetric(candidate.atm_iv_rv20))}
+                ${metricCell("IV PCT", formatPercent(candidate.iv_percentile))}
+                ${metricCell("P/E", formatMetric(candidate.pe))}
+                ${metricCell("P/FCF", formatMetric(candidate.p_free_cash_flow))}
+            </div>
             <div class="ta-summary-grid">
                 ${metricCell("Stock", formatMoney(candidate.current_price))}
                 ${metricCell("Premium", formatMoney(candidate.premium))}
@@ -331,6 +339,14 @@ function formatInteger(value) {
 
 function formatPlain(value) {
     return Number.isFinite(value) ? String(value) : "—";
+}
+
+function formatMetric(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value.toFixed(2);
+    }
+
+    return value && value !== "N/A" ? String(value) : "—";
 }
 
 function setMessage(message) {

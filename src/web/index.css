@@ -842,6 +842,13 @@ header {
     margin: 1rem 0 1.25rem;
 }
 
+.ta-stock-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+}
+
 .ta-chart-shell {
     height: 560px;
     border-radius: 12px;

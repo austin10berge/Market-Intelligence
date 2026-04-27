@@ -1,14 +1,24 @@
 """Options screener for CSPs and LEAPS using yfinance and Alpaca."""
 
 import logging
+import math
 from datetime import date, datetime
 
 import httpx
+import pandas as pd
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from ..backtester.indicators import rsi as compute_rsi
 from ..config import settings as app_settings
-from ..db import get_watchlist, get_csp_settings
+from ..db import get_csp_settings, get_stock_iv_history, get_watchlist
+from .stocks import (
+    IV_RANK_LOOKBACK_DAYS,
+    _build_alpaca_client,
+    _calculate_iv_percentile,
+    _calculate_rv20,
+    _fetch_alpaca_atm_iv_percent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +37,119 @@ def _get_valid_expirations(expirations: tuple[str, ...], min_days: int, max_days
     return valid
 
 
+def _compute_adx(hist: pd.DataFrame, period: int = 14) -> float | None:
+    """Compute Wilder's ADX from daily OHLC history."""
+    if hist.empty or len(hist) < (period * 2):
+        return None
+
+    high = hist["High"]
+    low = hist["Low"]
+    close = hist["Close"]
+
+    up_move = high.diff()
+    down_move = -low.diff()
+
+    plus_dm = pd.Series(
+        [up if pd.notna(up) and up > down and up > 0 else 0.0 for up, down in zip(up_move, down_move)],
+        index=hist.index,
+    )
+    minus_dm = pd.Series(
+        [down if pd.notna(down) and down > up and down > 0 else 0.0 for up, down in zip(up_move, down_move)],
+        index=hist.index,
+    )
+
+    tr = pd.concat(
+        [
+            high - low,
+            (high - close.shift(1)).abs(),
+            (low - close.shift(1)).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+
+    atr = tr.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean() / atr)
+    minus_di = 100 * (minus_dm.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean() / atr)
+
+    denom = (plus_di + minus_di).replace(0, pd.NA)
+    dx = ((plus_di - minus_di).abs() / denom) * 100
+    adx = dx.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+    last = adx.iloc[-1]
+    if pd.isna(last):
+        return None
+    return round(float(last), 2)
+
+
+def _compute_p_free_cash_flow(info: dict) -> float | str:
+    market_cap = info.get("marketCap")
+    free_cash_flow = info.get("freeCashflow")
+
+    try:
+        market_cap_val = float(market_cap)
+        free_cash_flow_val = float(free_cash_flow)
+    except (TypeError, ValueError):
+        return "N/A"
+
+    if market_cap_val <= 0 or free_cash_flow_val <= 0:
+        return "N/A"
+
+    return round(market_cap_val / free_cash_flow_val, 2)
+
+
+def _compute_symbol_metrics(
+    symbol: str,
+    ticker: yf.Ticker,
+    current_price: float,
+    alpaca_client: httpx.Client | None,
+) -> dict:
+    metrics = {
+        "rsi": "N/A",
+        "adx": "N/A",
+        "atm_iv_rv20": "N/A",
+        "iv_percentile": "N/A",
+        "pe": "N/A",
+        "p_free_cash_flow": "N/A",
+    }
+
+    try:
+        hist = ticker.history(period="3mo")
+        info = ticker.info
+
+        if not hist.empty:
+            rsi_series = compute_rsi(hist["Close"], period=14)
+            rsi_val = rsi_series.iloc[-1] if not rsi_series.empty else None
+            if pd.notna(rsi_val):
+                metrics["rsi"] = round(float(rsi_val), 2)
+
+            adx_val = _compute_adx(hist)
+            if adx_val is not None:
+                metrics["adx"] = adx_val
+
+            rv20_val = _calculate_rv20(hist)
+            atm_iv_val = _fetch_alpaca_atm_iv_percent(alpaca_client, symbol, float(current_price))
+            if rv20_val is not None and atm_iv_val is not None:
+                metrics["atm_iv_rv20"] = round(atm_iv_val / rv20_val, 2)
+
+            iv_history = get_stock_iv_history(symbol, lookback_days=IV_RANK_LOOKBACK_DAYS)
+            iv_percentile_val = (
+                _calculate_iv_percentile(atm_iv_val, iv_history)
+                if atm_iv_val is not None
+                else None
+            )
+            if iv_percentile_val is not None:
+                metrics["iv_percentile"] = round(iv_percentile_val, 2)
+
+        pe_val = info.get("trailingPE")
+        if pe_val is not None and not pd.isna(pe_val):
+            metrics["pe"] = round(float(pe_val), 2)
+
+        metrics["p_free_cash_flow"] = _compute_p_free_cash_flow(info)
+    except Exception as exc:
+        logger.debug("Failed to compute extra stock metrics for %s: %s", symbol, exc)
+
+    return metrics
+
+
 def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
     """Find the best-ROC CSP per (ticker, strike) across all valid expirations using live Alpaca pricing."""
     if tickers is None:
@@ -37,55 +160,68 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
 
     # 1. Collect all potential contracts from yfinance
     potential_contracts = []
+    extra_metrics_by_symbol: dict[str, dict] = {}
+    alpaca_client = _build_alpaca_client()
     
-    for symbol in tickers:
-        try:
-            ticker = yf.Ticker(symbol)
-            expirations = ticker.options
-            current_price = ticker.fast_info.last_price
+    try:
+        for symbol in tickers:
+            try:
+                ticker = yf.Ticker(symbol)
+                expirations = ticker.options
+                current_price = ticker.fast_info.last_price
 
-            valid_exps = _get_valid_expirations(expirations, settings["min_dte"], settings["max_dte"])
-            if not valid_exps:
-                continue
-
-            max_strike = current_price * (1 - (settings["min_otm_pct"] / 100))
-            min_strike = current_price * (1 - (settings["max_otm_pct"] / 100))
-
-            for exp_str in valid_exps:
-                try:
-                    chain = ticker.option_chain(exp_str)
-                    puts = chain.puts
-                except Exception as e:
-                    logger.debug(f"Could not fetch chain for {symbol} {exp_str}: {e}")
+                valid_exps = _get_valid_expirations(expirations, settings["min_dte"], settings["max_dte"])
+                if not valid_exps:
                     continue
 
-                if puts.empty:
-                    continue
+                extra_metrics_by_symbol[symbol] = _compute_symbol_metrics(
+                    symbol=symbol,
+                    ticker=ticker,
+                    current_price=float(current_price),
+                    alpaca_client=alpaca_client,
+                )
 
-                valid_puts = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
+                max_strike = current_price * (1 - (settings["min_otm_pct"] / 100))
+                min_strike = current_price * (1 - (settings["max_otm_pct"] / 100))
 
-                for _, put_data in valid_puts.iterrows():
-                    strike = put_data['strike']
-                    occ_symbol = put_data['contractSymbol']
-                    yf_premium = put_data['lastPrice']
-                    otm_pct = ((current_price - strike) / current_price) * 100
-                    
-                    exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
-                    dte = (exp_date - date.today()).days
+                for exp_str in valid_exps:
+                    try:
+                        chain = ticker.option_chain(exp_str)
+                        puts = chain.puts
+                    except Exception as e:
+                        logger.debug(f"Could not fetch chain for {symbol} {exp_str}: {e}")
+                        continue
 
-                    potential_contracts.append({
-                        "symbol": symbol,
-                        "occ_symbol": occ_symbol,
-                        "yf_premium": yf_premium,
-                        "current_price": current_price,
-                        "expiration": exp_str,
-                        "strike": strike,
-                        "otm_pct": otm_pct,
-                        "dte": dte
-                    })
+                    if puts.empty:
+                        continue
 
-        except Exception as e:
-            logger.warning(f"Failed to fetch initial yf chain for {symbol}: {e}")
+                    valid_puts = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
+
+                    for _, put_data in valid_puts.iterrows():
+                        strike = put_data['strike']
+                        occ_symbol = put_data['contractSymbol']
+                        yf_premium = put_data['lastPrice']
+                        otm_pct = ((current_price - strike) / current_price) * 100
+                        
+                        exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                        dte = (exp_date - date.today()).days
+
+                        potential_contracts.append({
+                            "symbol": symbol,
+                            "occ_symbol": occ_symbol,
+                            "yf_premium": yf_premium,
+                            "current_price": current_price,
+                            "expiration": exp_str,
+                            "strike": strike,
+                            "otm_pct": otm_pct,
+                            "dte": dte
+                        })
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch initial yf chain for {symbol}: {e}")
+    finally:
+        if alpaca_client is not None:
+            alpaca_client.close()
 
     if not potential_contracts:
         return []
@@ -181,6 +317,7 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
             "impliedVolatility": round(float(iv) * 100, 2) if iv else 0.0,
             "volume": int(vol) if vol else 0,
         }
+        candidate.update(extra_metrics_by_symbol.get(c["symbol"], {}))
 
         key = (c["symbol"], float(c["strike"]))
         existing = best_by_strike.get(key)
