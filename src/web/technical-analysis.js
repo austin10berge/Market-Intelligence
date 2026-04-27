@@ -153,14 +153,16 @@ async function handleControlsChanged() {
 async function renderCandidates() {
     destroyWidgets();
 
-    if (!candidates.length) {
+    const tickerCandidates = dedupeCandidatesBySymbol(candidates);
+
+    if (!tickerCandidates.length) {
         setMessage("No viable CSP candidates found.");
         getListEl().innerHTML = "";
         return;
     }
 
-    setMessage(`${candidates.length} CSP candidates loaded.`);
-    getListEl().innerHTML = candidates.map((candidate, index) => `
+    setMessage(`${tickerCandidates.length} tickers loaded from ${candidates.length} CSP candidates.`);
+    getListEl().innerHTML = tickerCandidates.map((candidate, index) => `
         <section class="glass card full-width ta-ticker-card" data-symbol="${escapeHtml(candidate.symbol || "")}">
             <div class="card-header">
                 <div>
@@ -185,9 +187,23 @@ async function renderCandidates() {
 
     await loadTradingViewScript();
 
-    for (const [index, candidate] of candidates.entries()) {
+    for (const [index, candidate] of tickerCandidates.entries()) {
         renderTradingViewWidget(candidate, index);
     }
+}
+
+function dedupeCandidatesBySymbol(allCandidates) {
+    const seen = new Set();
+
+    return allCandidates.filter((candidate) => {
+        const symbol = candidate?.symbol;
+        if (!symbol || seen.has(symbol)) {
+            return false;
+        }
+
+        seen.add(symbol);
+        return true;
+    });
 }
 
 function renderTradingViewWidget(candidate, index) {
