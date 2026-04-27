@@ -10,12 +10,17 @@ const API_BASE = window.MARKET_INTELLIGENCE_CONFIG?.apiBase || "/MISSING_CONFIG_
 const TRADING_VIEW_SCRIPT_SRC = "https://s3.tradingview.com/tv.js";
 
 let candidates = [];
+/** Map of symbol → stock screener row, used to fill in IV/RV20, IV PCT, P/E */
+let stockDataBySymbol = {};
 let indicatorSettings = loadIndicatorSettings();
 let widgets = [];
 
 document.addEventListener("DOMContentLoaded", async () => {
     renderControls();
-    await loadCandidates();
+    // Fetch CSP candidates and stock screener data concurrently so the stock
+    // screener's already-computed IV/RV20, IV PCT, and P/E values are available
+    // when we render each chart card.
+    await Promise.allSettled([loadCandidates(), loadStockData()]);
 });
 
 function getControlsEl() {
@@ -44,6 +49,18 @@ function persistIndicatorSettings() {
         window.localStorage.setItem(INDICATOR_STORAGE_KEY, JSON.stringify(indicatorSettings));
     } catch {
         // Preserve interactivity even if storage is unavailable.
+    }
+}
+
+async function loadStockData() {
+    try {
+        const response = await fetch(`${API_BASE}/screener/stocks`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        const rows = Array.isArray(payload.candidates) ? payload.candidates : [];
+        stockDataBySymbol = Object.fromEntries(rows.map((r) => [r.symbol, r]));
+    } catch {
+        // Non-fatal — metrics will fall back to whatever the CSP response provides.
     }
 }
 
@@ -150,6 +167,19 @@ async function handleControlsChanged() {
     await renderCandidates();
 }
 
+/**
+ * Merge the best available values for the three metrics that are reliably
+ * provided by the stock screener but may be stale / missing on CSP candidates.
+ */
+function resolveStockMetrics(candidate) {
+    const stock = stockDataBySymbol[candidate.symbol];
+    return {
+        atm_iv_rv20: stock?.atm_iv_rv20 ?? candidate.atm_iv_rv20,
+        iv_percentile: stock?.iv_percentile ?? candidate.iv_percentile,
+        pe: stock?.pe ?? candidate.pe,
+    };
+}
+
 async function renderCandidates() {
     destroyWidgets();
 
@@ -162,7 +192,9 @@ async function renderCandidates() {
     }
 
     setMessage(`${tickerCandidates.length} tickers loaded from ${candidates.length} CSP candidates.`);
-    getListEl().innerHTML = tickerCandidates.map((candidate, index) => `
+    getListEl().innerHTML = tickerCandidates.map((candidate, index) => {
+        const stockMetrics = resolveStockMetrics(candidate);
+        return `
         <section class="glass card full-width ta-ticker-card" data-symbol="${escapeHtml(candidate.symbol || "")}">
             <div class="card-header">
                 <div>
@@ -173,9 +205,9 @@ async function renderCandidates() {
             <div class="ta-stock-grid">
                 ${metricCell("RSI", formatMetric(candidate.rsi))}
                 ${metricCell("ADX", formatMetric(candidate.adx))}
-                ${metricCell("IV/RV20", formatMetric(candidate.atm_iv_rv20))}
-                ${metricCell("IV PCT", formatPercent(candidate.iv_percentile))}
-                ${metricCell("P/E", formatMetric(candidate.pe))}
+                ${metricCell("IV/RV20", formatMetric(stockMetrics.atm_iv_rv20))}
+                ${metricCell("IV PCT", formatPercent(stockMetrics.iv_percentile))}
+                ${metricCell("P/E", formatMetric(stockMetrics.pe))}
                 ${metricCell("P/FCF", formatMetric(candidate.p_free_cash_flow))}
             </div>
             <div class="ta-summary-grid">
@@ -191,7 +223,8 @@ async function renderCandidates() {
             </div>
             <div id="ta-chart-${index}" class="ta-chart-shell"></div>
         </section>
-    `).join("");
+    `;
+    }).join("");
 
     await loadTradingViewScript();
 

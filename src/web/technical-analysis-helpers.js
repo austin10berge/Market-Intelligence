@@ -99,20 +99,24 @@ export function buildWidgetStudies(settings) {
 
 export function buildWidgetStudyOverrides(settings) {
     const overrides = {
-        "bollinger bands.length": settings.bollinger.length,
-        "bollinger bands.mult": settings.bollinger.multiplier,
-        "moving average multiple.1st period": settings.sma[0].length,
-        "moving average multiple.2nd period": settings.sma[1].length,
-        "moving average multiple.3rd period": settings.sma[2].length,
-        "moving average multiple.4th period": 400,
-        "moving average multiple.5th period": 500,
-        "moving average multiple.6th period": 600,
-        "moving average multiple.plot 1.display": settings.sma[0].enabled ? 15 : 0,
-        "moving average multiple.plot 2.display": settings.sma[1].enabled ? 15 : 0,
-        "moving average multiple.plot 3.display": settings.sma[2].enabled ? 15 : 0,
-        "moving average multiple.plot 4.display": 0,
-        "moving average multiple.plot 5.display": 0,
-        "moving average multiple.plot 6.display": 0,
+        // Bollinger Bands overrides
+        "BB.length": settings.bollinger.length,
+        "BB.mult": settings.bollinger.multiplier,
+        // MAMultiple: set each of the 6 period slots; hide unused slots by
+        // setting their length to something large and toggling display off.
+        "MAMultiple.MA #1 Length": settings.sma[0].length,
+        "MAMultiple.MA #2 Length": settings.sma[1].length,
+        "MAMultiple.MA #3 Length": settings.sma[2].length,
+        "MAMultiple.MA #4 Length": 400,
+        "MAMultiple.MA #5 Length": 500,
+        "MAMultiple.MA #6 Length": 600,
+        // display bitmask: 15 = show on all panes, 0 = hidden
+        "MAMultiple.plot_0.display": settings.sma[0].enabled ? 15 : 0,
+        "MAMultiple.plot_1.display": settings.sma[1].enabled ? 15 : 0,
+        "MAMultiple.plot_2.display": settings.sma[2].enabled ? 15 : 0,
+        "MAMultiple.plot_3.display": 0,
+        "MAMultiple.plot_4.display": 0,
+        "MAMultiple.plot_5.display": 0,
     };
 
     return overrides;
