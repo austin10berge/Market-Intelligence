@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -20,9 +20,11 @@ from .models import (
     BacktestResult,
     Direction,
     PositionSizingMethod,
+    PyramidingExitMode,
     Trade,
 )
 from .stats import compute_stats
+from .options import black_scholes_price, get_strike_for_delta
 
 logger = logging.getLogger(__name__)
 
@@ -33,37 +35,42 @@ class OpenPosition:
     direction: str  # "long" or "short"
     entry_date: str
     entry_price: float
+    entry_underlying_price: float
     shares: float
     entry_bar_idx: int
     highest_since_entry: float = 0.0  # For trailing stop (long)
     lowest_since_entry: float = float("inf")  # For trailing stop (short)
+    # Options data
+    is_option: bool = False
+    option_type: str | None = None
+    option_strike: float | None = None
+    option_dte_entry: float | None = None
+    option_iv_entry: float | None = None
 
 
 @dataclass
 class EngineState:
     """Mutable state tracked during the backtest loop."""
     cash: float = 0.0
-    position: OpenPosition | None = None
+    positions: list[OpenPosition] = field(default_factory=list)
     trades: list[Trade] = field(default_factory=list)
     equity_curve: list[dict] = field(default_factory=list)
 
 
 def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
-    """Execute a full backtest on the provided data.
-
-    Args:
-        request: Backtest configuration (strategy, sizing, commission, etc.).
-        df: OHLCV DataFrame with DatetimeIndex, sorted ascending.
-
-    Returns:
-        BacktestResult with equity curve, trades, and statistics.
-    """
+    """Execute a full backtest on the provided data."""
     strategy = request.strategy
     state = EngineState(cash=request.initial_capital)
 
     entry_tree = strategy.entry
     exit_config = strategy.exit
     exit_tree = exit_config.conditions if exit_config.conditions else None
+    pyr = strategy.pyramiding
+
+    # Pre-calculate 20-day Realized Volatility for options pricing
+    if strategy.options.enabled:
+        df["returns"] = df["Close"].pct_change()
+        df["rv20"] = df["returns"].rolling(20).std() * math.sqrt(252)
 
     for i in range(len(df)):
         bar_date = df.index[i].strftime("%Y-%m-%d")
@@ -72,59 +79,113 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
         low = float(df["Low"].iloc[i])
 
         if pd.isna(close) or close <= 0:
-            _record_equity(state, bar_date, close)
+            _record_equity(state, bar_date, close, df, i, request)
             continue
 
-        if state.position is not None:
-            # Update trailing stop tracking
-            if state.position.direction == "long":
-                state.position.highest_since_entry = max(
-                    state.position.highest_since_entry, high
-                )
+        # Check exits for all open positions
+        positions_to_close = []
+        exit_reasons = []
+
+        for pos in state.positions:
+            if pos.is_option:
+                days_held = i - pos.entry_bar_idx
+                rem_dte = max(pos.option_dte_entry - days_held, 0)
+                if pos.option_type == "call":
+                    opt_high = _get_option_price(high, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+                    opt_low = _get_option_price(low, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+                else:
+                    opt_high = _get_option_price(low, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+                    opt_low = _get_option_price(high, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+                pos_high, pos_low = opt_high, opt_low
             else:
-                state.position.lowest_since_entry = min(
-                    state.position.lowest_since_entry, low
+                pos_high, pos_low = high, low
+
+            if pos.direction == "long":
+                pos.highest_since_entry = max(pos.highest_since_entry, pos_high)
+            else:
+                pos.lowest_since_entry = min(pos.lowest_since_entry, pos_low)
+
+            reason = _check_exit(pos, exit_config, exit_tree, df, i, close, pos_high, pos_low)
+            
+            # Additional option expiration check
+            if reason is None and pos.is_option and pos.option_dte_entry is not None:
+                if days_held >= pos.option_dte_entry:
+                    reason = "expiration"
+
+            if reason:
+                positions_to_close.append(pos)
+                exit_reasons.append(reason)
+
+        if positions_to_close:
+            if exit_config.pyramiding_exit_mode == PyramidingExitMode.SELL_ALL:
+                # If any exit triggers, sell everything
+                sell_all_reason = exit_reasons[0]
+                for pos in list(state.positions):
+                    # Only the one that actually triggered gets the precise limit fill, others get market price
+                    if pos in positions_to_close:
+                        actual_reason = exit_reasons[positions_to_close.index(pos)]
+                    else:
+                        actual_reason = f"{sell_all_reason}_forced"
+                    _close_position(state, pos, df, i, close, actual_reason, request)
+            else:
+                # Sell only the ones that triggered
+                for pos, reason in zip(positions_to_close, exit_reasons):
+                    if pos in state.positions:
+                        _close_position(state, pos, df, i, close, reason, request)
+
+        # Check entry
+        can_enter = True
+        if state.positions:
+            if not pyr.enabled or len(state.positions) >= pyr.max_positions:
+                can_enter = False
+            else:
+                last_pos = state.positions[-1]
+                if pyr.scale_in_trigger == "pullback" and pyr.scale_in_value:
+                    ref_price = last_pos.entry_underlying_price if last_pos.is_option else last_pos.entry_price
+                    if strategy.direction in (Direction.LONG, Direction.BOTH):
+                        drop = ((ref_price - close) / ref_price) * 100
+                        if drop < pyr.scale_in_value:
+                            can_enter = False
+                    else:
+                        rise = ((close - ref_price) / ref_price) * 100
+                        if rise < pyr.scale_in_value:
+                            can_enter = False
+                elif pyr.scale_in_trigger == "entry_signal":
+                    # Must evaluate tree again
+                    pass
+
+        if can_enter:
+            if state.positions and pyr.enabled and pyr.scale_in_trigger == "pullback":
+                # Unconditional scale-in based strictly on the pullback drop
+                should_enter_long = strategy.direction in (Direction.LONG, Direction.BOTH)
+                should_enter_short = strategy.direction in (Direction.SHORT, Direction.BOTH)
+            else:
+                should_enter_long = (
+                    strategy.direction in (Direction.LONG, Direction.BOTH)
+                    and _safe_evaluate(entry_tree, df, i)
                 )
-
-            # Check exit conditions
-            exit_reason = _check_exit(
-                state, exit_config, exit_tree, df, i, close, high, low
-            )
-            if exit_reason:
-                _close_position(state, df, i, close, exit_reason, request)
-
-        # If no position, check entry
-        if state.position is None:
-            should_enter_long = (
-                strategy.direction in (Direction.LONG, Direction.BOTH)
-                and _safe_evaluate(entry_tree, df, i)
-            )
-            should_enter_short = (
-                strategy.direction in (Direction.SHORT, Direction.BOTH)
-                and not should_enter_long
-                # For short entries, we'd need separate short entry conditions
-                # For now, v1 focuses on long entries
-            )
+                should_enter_short = (
+                    strategy.direction in (Direction.SHORT, Direction.BOTH)
+                    and not should_enter_long
+                )
 
             if should_enter_long:
                 _open_position(state, "long", i, close, df, request)
             elif should_enter_short and strategy.direction == Direction.SHORT:
                 _open_position(state, "short", i, close, df, request)
 
-        _record_equity(state, bar_date, close)
+        _record_equity(state, bar_date, close, df, i, request)
 
-    # Close any remaining position at end of data
-    if state.position is not None:
+    # Close any remaining positions at end of data
+    if state.positions:
         final_close = float(df["Close"].iloc[-1])
-        _close_position(state, df, len(df) - 1, final_close, "end_of_data", request)
-        # Re-record final equity
+        for pos in list(state.positions):
+            _close_position(state, pos, df, len(df) - 1, final_close, "end_of_data", request)
         if state.equity_curve:
-            state.equity_curve[-1]["equity"] = _calc_equity(state, final_close)
+            state.equity_curve[-1]["equity"] = _calc_equity(state, final_close, df, len(df)-1, request)
 
-    # Build benchmark (buy-and-hold) curve
     benchmark_curve = _build_benchmark(df, request.initial_capital)
 
-    # Compute statistics
     stats = compute_stats(
         trades=state.trades,
         equity_curve=state.equity_curve,
@@ -148,7 +209,6 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
 
 
 def _safe_evaluate(tree: dict, df: pd.DataFrame, bar_idx: int) -> bool:
-    """Evaluate condition tree with exception safety."""
     try:
         return evaluate_condition_tree(tree, df, bar_idx)
     except Exception as exc:
@@ -156,23 +216,33 @@ def _safe_evaluate(tree: dict, df: pd.DataFrame, bar_idx: int) -> bool:
         return False
 
 
-def _calc_equity(state: EngineState, current_price: float) -> float:
-    """Calculate total equity (cash + position value)."""
+def _get_option_price(
+    spot: float, strike: float, dte_days: float, iv: float, opt_type: str
+) -> float:
+    # 100 multiplier is applied to the final premium, this returns per-share price
+    return black_scholes_price(spot, strike, max(dte_days/365.0, 0.001), 0.045, iv, opt_type)
+
+
+def _calc_equity(state: EngineState, current_price: float, df: pd.DataFrame, bar_idx: int, req: BacktestRequest) -> float:
     equity = state.cash
-    if state.position is not None:
-        if state.position.direction == "long":
-            equity += state.position.shares * current_price
+    for pos in state.positions:
+        if pos.is_option:
+            days_held = bar_idx - pos.entry_bar_idx
+            remaining_dte = max(pos.option_dte_entry - days_held, 0)
+            # Use entry IV as a simplistic proxy for remaining IV if not available
+            iv = pos.option_iv_entry
+            opt_price = _get_option_price(current_price, pos.option_strike, remaining_dte, iv, pos.option_type)
+            equity += pos.shares * opt_price * 100 # Options are 100 shares
         else:
-            # Short: profit = (entry - current) * shares
-            equity += state.position.shares * (
-                2 * state.position.entry_price - current_price
-            )
+            if pos.direction == "long":
+                equity += pos.shares * current_price
+            else:
+                equity += pos.shares * (2 * pos.entry_price - current_price)
     return equity
 
 
-def _record_equity(state: EngineState, bar_date: str, close: float) -> None:
-    """Record an equity curve data point."""
-    equity = _calc_equity(state, close) if close > 0 else state.cash
+def _record_equity(state: EngineState, bar_date: str, close: float, df: pd.DataFrame, bar_idx: int, req: BacktestRequest) -> None:
+    equity = _calc_equity(state, close, df, bar_idx, req) if close > 0 else state.cash
     state.equity_curve.append({"date": bar_date, "equity": round(equity, 2)})
 
 
@@ -184,74 +254,151 @@ def _open_position(
     df: pd.DataFrame,
     request: BacktestRequest,
 ) -> None:
-    """Open a new position."""
     sizing = request.strategy.position_sizing
-    fill_price = price * (1 + request.slippage_pct / 100.0) if direction == "long" else \
-                 price * (1 - request.slippage_pct / 100.0)
+    opt_conf = request.strategy.options
+    
+    equity = _calc_equity(state, price, df, bar_idx, request)
+    
+    if opt_conf.enabled:
+        # Approximate option pricing
+        iv = float(df["rv20"].iloc[bar_idx]) if "rv20" in df and not pd.isna(df["rv20"].iloc[bar_idx]) else 0.30
+        iv = max(iv, 0.10) # Floor IV at 10%
+        
+        target_delta = opt_conf.target_delta
+        if direction == "short" and opt_conf.type == "call":
+            target_delta = -target_delta # Selling call is negative delta
+        elif direction == "long" and opt_conf.type == "put":
+            target_delta = -target_delta # Buying put is negative delta
+            
+        strike = get_strike_for_delta(price, target_delta, max(opt_conf.target_dte/365.0, 0.001), 0.045, iv, opt_conf.type)
+        fill_price = _get_option_price(price, strike, opt_conf.target_dte, iv, opt_conf.type)
+        fill_price_cost = fill_price * 100 # Per contract
+    else:
+        fill_price = price * (1 + request.slippage_pct / 100.0) if direction == "long" else \
+                     price * (1 - request.slippage_pct / 100.0)
+        fill_price_cost = fill_price
 
     shares = _calculate_shares(
         sizing_method=sizing.method,
         sizing_value=sizing.value,
         risk_pct=sizing.risk_pct,
-        equity=_calc_equity(state, price),
-        fill_price=fill_price,
+        equity=equity,
+        fill_price=fill_price_cost,
         stop_loss_pct=request.strategy.exit.stop_loss_pct,
     )
 
     if shares <= 0:
         return
 
-    cost = shares * fill_price + request.commission
+    cost = shares * fill_price_cost + request.commission
     if cost > state.cash:
-        # Reduce to what we can afford
-        affordable = (state.cash - request.commission) / fill_price
+        affordable = (state.cash - request.commission) / fill_price_cost
         shares = math.floor(affordable)
         if shares <= 0:
             return
-        cost = shares * fill_price + request.commission
+        cost = shares * fill_price_cost + request.commission
 
     state.cash -= cost
     bar_date = df.index[bar_idx].strftime("%Y-%m-%d")
 
-    state.position = OpenPosition(
-        direction=direction,
-        entry_date=bar_date,
-        entry_price=fill_price,
-        shares=shares,
-        entry_bar_idx=bar_idx,
-        highest_since_entry=float(df["High"].iloc[bar_idx]),
-        lowest_since_entry=float(df["Low"].iloc[bar_idx]),
-    )
+    if opt_conf.enabled:
+        init_high_stock = float(df["High"].iloc[bar_idx])
+        init_low_stock = float(df["Low"].iloc[bar_idx])
+        if opt_conf.type == "call":
+            init_high = _get_option_price(init_high_stock, strike, opt_conf.target_dte, iv, opt_conf.type)
+            init_low = _get_option_price(init_low_stock, strike, opt_conf.target_dte, iv, opt_conf.type)
+        else:
+            init_high = _get_option_price(init_low_stock, strike, opt_conf.target_dte, iv, opt_conf.type)
+            init_low = _get_option_price(init_high_stock, strike, opt_conf.target_dte, iv, opt_conf.type)
+            
+        pos = OpenPosition(
+            direction=direction,
+            entry_date=bar_date,
+            entry_price=fill_price,
+            entry_underlying_price=price,
+            shares=shares,
+            entry_bar_idx=bar_idx,
+            highest_since_entry=init_high,
+            lowest_since_entry=init_low,
+            is_option=True,
+            option_type=opt_conf.type,
+            option_strike=strike,
+            option_dte_entry=opt_conf.target_dte,
+            option_iv_entry=iv
+        )
+    else:
+        pos = OpenPosition(
+            direction=direction,
+            entry_date=bar_date,
+            entry_price=fill_price,
+            entry_underlying_price=price,
+            shares=shares,
+            entry_bar_idx=bar_idx,
+            highest_since_entry=float(df["High"].iloc[bar_idx]),
+            lowest_since_entry=float(df["Low"].iloc[bar_idx]),
+        )
+
+    state.positions.append(pos)
 
 
 def _close_position(
     state: EngineState,
+    pos: OpenPosition,
     df: pd.DataFrame,
     bar_idx: int,
     price: float,
     reason: str,
     request: BacktestRequest,
 ) -> None:
-    """Close the current position and record the trade."""
-    pos = state.position
-    if pos is None:
-        return
+    fill_price = price
+    
+    if pos.is_option:
+        days_held = bar_idx - pos.entry_bar_idx
+        remaining_dte = max(pos.option_dte_entry - days_held, 0)
+        fill_price = _get_option_price(price, pos.option_strike, remaining_dte, pos.option_iv_entry, pos.option_type)
 
-    if pos.direction == "long":
-        fill_price = price * (1 - request.slippage_pct / 100.0)
-        pnl = (fill_price - pos.entry_price) * pos.shares
+    # Adjust for limit orders
+    if reason == "take_profit" and request.strategy.exit.take_profit_pct is not None:
+        if pos.direction == "long":
+            fill_price = pos.entry_price * (1 + request.strategy.exit.take_profit_pct / 100.0)
+        else:
+            fill_price = pos.entry_price * (1 - request.strategy.exit.take_profit_pct / 100.0)
+    elif reason == "stop_loss" and request.strategy.exit.stop_loss_pct is not None:
+        if pos.direction == "long":
+            fill_price = pos.entry_price * (1 - request.strategy.exit.stop_loss_pct / 100.0)
+        else:
+            fill_price = pos.entry_price * (1 + request.strategy.exit.stop_loss_pct / 100.0)
+    elif reason == "trailing_stop" and request.strategy.exit.trailing_stop_pct is not None:
+        if pos.direction == "long":
+            fill_price = pos.highest_since_entry * (1 - request.strategy.exit.trailing_stop_pct / 100.0)
+        else:
+            fill_price = pos.lowest_since_entry * (1 + request.strategy.exit.trailing_stop_pct / 100.0)
     else:
-        fill_price = price * (1 + request.slippage_pct / 100.0)
-        pnl = (pos.entry_price - fill_price) * pos.shares
+        # Normal market order slippage
+        if pos.direction == "long":
+            fill_price = fill_price * (1 - request.slippage_pct / 100.0)
+        else:
+            fill_price = fill_price * (1 + request.slippage_pct / 100.0)
 
-    pnl -= request.commission  # Exit commission
+    if pos.is_option:
+        pnl = (fill_price - pos.entry_price) * pos.shares * 100
+        pnl -= request.commission
+        pnl_pct = (pnl / (pos.entry_price * pos.shares * 100)) * 100.0 if pos.entry_price > 0 else 0.0
+        
+        proceeds = (pos.shares * fill_price * 100) - request.commission
+    else:
+        if pos.direction == "long":
+            pnl = (fill_price - pos.entry_price) * pos.shares
+        else:
+            pnl = (pos.entry_price - fill_price) * pos.shares
 
-    pnl_pct = (pnl / (pos.entry_price * pos.shares)) * 100.0 if pos.entry_price > 0 else 0.0
+        pnl -= request.commission
+        pnl_pct = (pnl / (pos.entry_price * pos.shares)) * 100.0 if pos.entry_price > 0 else 0.0
+        
+        proceeds = pos.shares * fill_price - request.commission if pos.direction == "long" else \
+                   pos.shares * (2 * pos.entry_price - fill_price) - request.commission
 
-    proceeds = pos.shares * fill_price - request.commission if pos.direction == "long" else \
-               pos.shares * (2 * pos.entry_price - fill_price) - request.commission
     state.cash += proceeds
-
     exit_date = df.index[bar_idx].strftime("%Y-%m-%d")
     bars_held = bar_idx - pos.entry_bar_idx
 
@@ -266,14 +413,20 @@ def _close_position(
         pnl_pct=round(pnl_pct, 2),
         exit_reason=reason,
         bars_held=bars_held,
+        is_option=pos.is_option,
+        option_type=pos.option_type,
+        option_strike=pos.option_strike,
+        option_dte_entry=pos.option_dte_entry,
+        option_dte_exit=max(pos.option_dte_entry - bars_held, 0) if pos.is_option else None,
+        option_iv_entry=pos.option_iv_entry,
     )
 
     state.trades.append(trade)
-    state.position = None
+    state.positions.remove(pos)
 
 
 def _check_exit(
-    state: EngineState,
+    pos: OpenPosition,
     exit_config,
     exit_tree: dict | None,
     df: pd.DataFrame,
@@ -282,15 +435,6 @@ def _check_exit(
     high: float,
     low: float,
 ) -> str | None:
-    """Check all exit conditions. Returns exit reason or None."""
-    pos = state.position
-    if pos is None:
-        return None
-
-    # Use the bar date for trade recording
-    bar_date = df.index[bar_idx].strftime("%Y-%m-%d")
-
-    # 1. Stop loss
     if exit_config.stop_loss_pct is not None:
         if pos.direction == "long":
             stop_price = pos.entry_price * (1 - exit_config.stop_loss_pct / 100.0)
@@ -301,7 +445,6 @@ def _check_exit(
             if high >= stop_price:
                 return "stop_loss"
 
-    # 2. Take profit
     if exit_config.take_profit_pct is not None:
         if pos.direction == "long":
             target = pos.entry_price * (1 + exit_config.take_profit_pct / 100.0)
@@ -312,7 +455,6 @@ def _check_exit(
             if low <= target:
                 return "take_profit"
 
-    # 3. Trailing stop
     if exit_config.trailing_stop_pct is not None:
         if pos.direction == "long":
             trail_price = pos.highest_since_entry * (1 - exit_config.trailing_stop_pct / 100.0)
@@ -323,13 +465,11 @@ def _check_exit(
             if high >= trail_price:
                 return "trailing_stop"
 
-    # 4. Time-based exit
     if exit_config.max_hold_days is not None:
         bars_held = bar_idx - pos.entry_bar_idx
         if bars_held >= exit_config.max_hold_days:
             return "time"
 
-    # 5. Indicator-based exit
     if exit_tree is not None:
         if _safe_evaluate(exit_tree, df, bar_idx):
             return "signal"
@@ -345,7 +485,6 @@ def _calculate_shares(
     fill_price: float,
     stop_loss_pct: float | None,
 ) -> float:
-    """Determine the number of shares to buy based on position sizing method."""
     if fill_price <= 0:
         return 0
 
@@ -360,9 +499,7 @@ def _calculate_shares(
         return math.floor(dollar_amount / fill_price)
 
     elif sizing_method == PositionSizingMethod.RISK_BASED:
-        # Risk X% of equity per trade based on stop distance
         if risk_pct is None or stop_loss_pct is None or stop_loss_pct <= 0:
-            # Fall back to 10% of equity if stop loss not defined
             dollar_amount = equity * 0.10
             return math.floor(dollar_amount / fill_price)
 
@@ -376,7 +513,6 @@ def _calculate_shares(
 
 
 def _build_benchmark(df: pd.DataFrame, initial_capital: float) -> list[dict]:
-    """Build a buy-and-hold equity curve for comparison."""
     if df.empty:
         return []
 

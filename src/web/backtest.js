@@ -25,16 +25,18 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("start-date").value = start.toISOString().split('T')[0];
 
     // Toggle operator setup
-    const toggleBtns = document.querySelectorAll("#entry-operator-toggle .toggle-btn");
+    const toggleBtns = document.querySelectorAll(".toggle-group .toggle-btn");
     toggleBtns.forEach(btn => {
         btn.addEventListener("click", (e) => {
-            toggleBtns.forEach(b => b.classList.remove("active"));
+            const group = e.target.closest('.toggle-group');
+            group.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
             e.target.classList.add("active");
         });
     });
 
-    // Add first condition row by default
+    // Add first condition rows by default
     addCondition('entry-conditions-container');
+    addCondition('exit-conditions-container');
 
     // Load saved strategies list
     loadSavedStrategiesList();
@@ -84,6 +86,30 @@ function toggleWfInputs() {
     }
 }
 
+function toggleOptionsInputs() {
+    const enabled = document.getElementById("options-enabled").checked;
+    const container = document.getElementById("options-inputs");
+    if (enabled) {
+        container.style.opacity = "1";
+        container.style.pointerEvents = "all";
+    } else {
+        container.style.opacity = "0.5";
+        container.style.pointerEvents = "none";
+    }
+}
+
+function togglePyrInputs() {
+    const enabled = document.getElementById("pyr-enabled").checked;
+    const container = document.getElementById("pyr-inputs");
+    if (enabled) {
+        container.style.opacity = "1";
+        container.style.pointerEvents = "all";
+    } else {
+        container.style.opacity = "0.5";
+        container.style.pointerEvents = "none";
+    }
+}
+
 function showLoading(show, msg = "This may take a few seconds.") {
     const overlay = document.getElementById("loading-overlay");
     const msgEl = document.getElementById("loading-msg");
@@ -123,6 +149,9 @@ function addCondition(containerId) {
             <option value="EMA">EMA</option>
             <option value="MACD_LINE">MACD Line</option>
             <option value="MACD_HISTOGRAM">MACD Hist</option>
+            <option value="BB_UPPER">BB Upper</option>
+            <option value="BB_MIDDLE">BB Middle</option>
+            <option value="BB_LOWER">BB Lower</option>
             <option value="PRICE">Price (Close)</option>
             <option value="VWAP">VWAP</option>
             <option value="PULLBACK">Pullback %</option>
@@ -175,6 +204,11 @@ function updateConditionParams(rowId) {
         paramsContainer.innerHTML = `
             <input type="number" class="settings-input param-fast" value="12" style="width: 50px;" title="Fast">
             <input type="number" class="settings-input param-slow" value="26" style="width: 50px;" title="Slow">
+        `;
+    } else if (ind.startsWith("BB_")) {
+        paramsContainer.innerHTML = `
+            <input type="number" class="settings-input param-period" value="20" placeholder="Period" style="width: 60px;">
+            <input type="number" class="settings-input param-stddev" value="2.0" step="0.1" placeholder="StdDev" style="width: 60px;">
         `;
     } else if (ind === "PULLBACK") {
         paramsContainer.innerHTML = ``;
@@ -233,6 +267,9 @@ function updateConditionType(rowId) {
                 <option value="SMA">SMA</option>
                 <option value="EMA">EMA</option>
                 <option value="VWAP">VWAP</option>
+                <option value="BB_UPPER">BB Upper</option>
+                <option value="BB_MIDDLE">BB Middle</option>
+                <option value="BB_LOWER">BB Lower</option>
             </select>
             <input type="number" class="settings-input target-period" value="200" style="width: 70px;">
         `;
@@ -248,6 +285,9 @@ function updateConditionType(rowId) {
                 <option value="SMA">SMA</option>
                 <option value="EMA">EMA</option>
                 <option value="VWAP">VWAP</option>
+                <option value="BB_UPPER">BB Upper</option>
+                <option value="BB_MIDDLE">BB Middle</option>
+                <option value="BB_LOWER">BB Lower</option>
                 <option value="MACD_SIGNAL">MACD Signal</option>
             </select>
             <input type="number" class="settings-input target-period" value="200" style="width: 70px;">
@@ -255,8 +295,8 @@ function updateConditionType(rowId) {
     }
 }
 
-function serializeConditions() {
-    const container = document.getElementById("entry-conditions-container");
+function serializeConditions(containerId, operatorId) {
+    const container = document.getElementById(containerId);
     const rows = container.querySelectorAll(".condition-node");
     const conditions = [];
     
@@ -283,7 +323,10 @@ function serializeConditions() {
         
         // Standard indicator parsing
         const params = {};
-        if (row.querySelector(".param-period")) {
+        if (ind.startsWith("BB_")) {
+            params.period = parseInt(row.querySelector(".param-period").value);
+            params.std_dev = parseFloat(row.querySelector(".param-stddev").value);
+        } else if (row.querySelector(".param-period")) {
             params.period = parseInt(row.querySelector(".param-period").value);
         } else if (row.querySelector(".param-fast")) {
             params.fast = parseInt(row.querySelector(".param-fast").value);
@@ -325,7 +368,9 @@ function serializeConditions() {
         }
     });
     
-    const operator = document.querySelector("#entry-operator-toggle .active").dataset.val;
+    if (conditions.length === 0) return null;
+    
+    const operator = document.querySelector(`#${operatorId} .active`).dataset.val;
     
     return {
         operator: operator,
@@ -334,19 +379,37 @@ function serializeConditions() {
 }
 
 function buildStrategyPayload() {
+    const entryTree = serializeConditions("entry-conditions-container", "entry-operator-toggle");
+    const exitTree = serializeConditions("exit-conditions-container", "exit-operator-toggle");
+    
+    // We need at least an empty node if they deleted all conditions, or just pass null
     const strategy = {
         name: "UI Strategy",
-        entry: serializeConditions(),
+        entry: entryTree || { operator: "AND", conditions: [] },
         exit: {
+            conditions: exitTree,
             stop_loss_pct: parseFloat(document.getElementById("stop-loss").value) || null,
             take_profit_pct: parseFloat(document.getElementById("take-profit").value) || null,
             trailing_stop_pct: parseFloat(document.getElementById("trailing-stop").value) || null,
-            max_hold_days: parseInt(document.getElementById("max-hold").value) || null
+            max_hold_days: parseInt(document.getElementById("max-hold").value) || null,
+            pyramiding_exit_mode: document.getElementById("pyr-exit") ? document.getElementById("pyr-exit").value : "sell_all"
         },
         position_sizing: {
             method: document.getElementById("sizing-method").value,
             value: parseFloat(document.getElementById("sizing-value").value) || 100,
             risk_pct: parseFloat(document.getElementById("risk-pct").value) || null
+        },
+        options: {
+            enabled: document.getElementById("options-enabled").checked,
+            type: document.getElementById("option-type").value,
+            target_dte: parseInt(document.getElementById("option-dte").value) || 30,
+            target_delta: parseFloat(document.getElementById("option-delta").value) || 0.50
+        },
+        pyramiding: {
+            enabled: document.getElementById("pyr-enabled").checked,
+            max_positions: parseInt(document.getElementById("pyr-max").value) || 3,
+            scale_in_trigger: document.getElementById("pyr-trigger").value,
+            scale_in_value: parseFloat(document.getElementById("pyr-value").value) || null
         },
         direction: "long"
     };

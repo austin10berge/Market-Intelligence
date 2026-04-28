@@ -233,22 +233,41 @@ def update_watchlist(tickers: list[str]) -> None:
 
 
 def get_csp_settings() -> dict:
-    """Retrieve the CSP screener logic parameters."""
+    """Retrieve the CSP screener logic parameters.
+
+    Always merges stored values over the full defaults dict so that new fields
+    added after the initial DB row was written are never missing (which would
+    cause a KeyError crash in the screener).
+    """
+    defaults = {
+        "min_dte": 30,
+        "max_dte": 45,
+        "min_otm_pct": 5.0,
+        "max_otm_pct": 20.0,
+        "min_roc": 1.0,
+        "max_spread_pct": 25.0,
+        # Technical filter settings (sourced from mLabs analysis)
+        "min_iv": 25.0,
+        "min_rsi": 38.0,
+        "max_rsi": 65.0,
+        "min_adx": 15.0,
+        "max_adx": 50.0,   # Raised from 40 — strong trending markets regularly exceed 40
+        "pullback_mode": False,
+        "score_weight_ay": 0.35,
+        "score_weight_pop": 0.20,
+        "score_weight_iv_pct": 0.20,
+        "score_weight_rsi": 0.15,
+        "score_weight_adx": 0.10,
+    }
     conn = _get_connection()
     try:
         row = conn.execute("SELECT value FROM app_config WHERE key = 'csp_settings'").fetchone()
         if row:
-            return json.loads(row["value"])
-            
-        # Defaults
-        return {
-            "min_dte": 30,
-            "max_dte": 45,
-            "min_otm_pct": 5.0,
-            "max_otm_pct": 20.0,
-            "min_roc": 1.0,
-            "max_spread_pct": 25.0
-        }
+            stored = json.loads(row["value"])
+            # Merge: defaults first, then overlay stored values so new fields
+            # added to defaults are always present even in old DB rows.
+            return {**defaults, **stored}
+        return defaults
     finally:
         conn.close()
 

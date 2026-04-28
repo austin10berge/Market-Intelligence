@@ -158,7 +158,7 @@ def compute_stats(
 
     if trades and n_bars > 0:
         total_bars_in_market = sum(t.bars_held for t in trades)
-        stats["exposure_pct"] = round(total_bars_in_market / n_bars * 100, 1)
+        stats["exposure_pct"] = min(round(total_bars_in_market / n_bars * 100, 1), 100.0)
     else:
         stats["exposure_pct"] = 0.0
 

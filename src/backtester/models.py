@@ -18,6 +18,16 @@ class Direction(str, Enum):
     BOTH = "both"
 
 
+class OptionType(str, Enum):
+    CALL = "call"
+    PUT = "put"
+
+
+class PyramidingExitMode(str, Enum):
+    SELL_ALL = "sell_all"
+    SELL_PROFITABLE = "sell_profitable"
+
+
 class PositionSizingMethod(str, Enum):
     FIXED_SHARES = "fixed_shares"
     FIXED_DOLLAR = "fixed_dollar"
@@ -109,6 +119,7 @@ class ExitStrategy(BaseModel):
     max_hold_days: int | None = None
     # Indicator-based exit conditions (same tree structure as entry)
     conditions: dict[str, Any] | None = None
+    pyramiding_exit_mode: PyramidingExitMode = PyramidingExitMode.SELL_ALL
 
 
 # ── Position Sizing ───────────────────────────────────────────────────────────
@@ -121,6 +132,25 @@ class PositionSizing(BaseModel):
     risk_pct: float | None = None
 
 
+# ── Options & Pyramiding ──────────────────────────────────────────────────────
+
+
+class OptionsConfig(BaseModel):
+    enabled: bool = False
+    type: OptionType = OptionType.CALL
+    target_dte: int = 30
+    target_delta: float = 0.50
+
+
+class PyramidingConfig(BaseModel):
+    enabled: bool = False
+    max_positions: int = 1
+    # If "entry_signal", we buy again if the entry tree evaluates to True on a new bar.
+    # If "pullback", we buy again if price drops X% from the last fill price.
+    scale_in_trigger: str = "entry_signal"  
+    scale_in_value: float | None = None  # e.g., 10.0 for 10% pullback
+
+
 # ── Strategy Definition ──────────────────────────────────────────────────────
 
 
@@ -130,6 +160,8 @@ class StrategyDefinition(BaseModel):
     entry: dict[str, Any]  # ConditionGroup as dict (parsed at evaluation time)
     exit: ExitStrategy = Field(default_factory=ExitStrategy)
     position_sizing: PositionSizing = Field(default_factory=PositionSizing)
+    options: OptionsConfig = Field(default_factory=OptionsConfig)
+    pyramiding: PyramidingConfig = Field(default_factory=PyramidingConfig)
     direction: Direction = Direction.LONG
 
 
@@ -178,6 +210,12 @@ class Trade(BaseModel):
     pnl_pct: float
     exit_reason: str  # "stop_loss", "take_profit", "trailing_stop", "signal", "time", "end_of_data"
     bars_held: int
+    is_option: bool = False
+    option_type: str | None = None
+    option_strike: float | None = None
+    option_dte_entry: float | None = None
+    option_dte_exit: float | None = None
+    option_iv_entry: float | None = None
 
 
 class BacktestResult(BaseModel):

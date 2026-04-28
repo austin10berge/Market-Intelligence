@@ -81,11 +81,16 @@ def seconds_until_next_open() -> int:
 def screener_ttl() -> int:
     """Dynamic TTL (seconds) for screener cache entries.
 
-    5 minutes during market hours; until next open when the market is closed.
+    - Market open : 5 minutes (prices move, refresh often)
+    - Market closed weekday : until next open (data won't change)
+    - Weekend : 4 hours max so a bad result doesn't stay locked in
+      until Monday morning (~57 h away on Sunday night)
     """
     if market_is_open():
         return 300  # 5 minutes
-    return seconds_until_next_open()
+    secs = seconds_until_next_open()
+    four_hours = 4 * 3600
+    return min(secs, four_hours)
 
 
 # ── Redis connection ──────────────────────────────────────────────────────────

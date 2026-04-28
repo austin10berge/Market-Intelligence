@@ -61,6 +61,18 @@ class CspSettingsUpdate(BaseModel):
     max_otm_pct: float
     min_roc: float
     max_spread_pct: float
+    # Technical filter fields (optional so old clients don't break)
+    min_iv: float = 25.0
+    min_rsi: float = 38.0
+    max_rsi: float = 65.0
+    min_adx: float = 15.0
+    max_adx: float = 40.0
+    pullback_mode: bool = False
+    score_weight_ay: float = 0.35
+    score_weight_pop: float = 0.20
+    score_weight_iv_pct: float = 0.20
+    score_weight_rsi: float = 0.15
+    score_weight_adx: float = 0.10
 
 
 # ── Cache metadata helper ─────────────────────────────────────────────────────
@@ -235,11 +247,13 @@ async def get_csp_candidates():
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
     try:
-        candidates = screen_csp_candidates()
+        # Run blocking screener in a thread so the event loop isn't starved
+        candidates = await asyncio.to_thread(screen_csp_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
         return {"candidates": candidates, **_cache_meta(None)}
     except Exception as e:
+        logger.exception("CSP screener failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -253,11 +267,12 @@ async def get_leaps_candidates():
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
     try:
-        candidates = screen_leaps_candidates()
+        candidates = await asyncio.to_thread(screen_leaps_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
         return {"candidates": candidates, **_cache_meta(None)}
     except Exception as e:
+        logger.exception("LEAPS screener failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -271,11 +286,12 @@ async def get_stock_candidates():
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
     try:
-        candidates = screen_stocks()
+        candidates = await asyncio.to_thread(screen_stocks)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
         return {"candidates": candidates, **_cache_meta(None)}
     except Exception as e:
+        logger.exception("Stock screener failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -290,11 +306,13 @@ def api_get_watchlist():
 
 
 @app.post("/api/watchlist")
-async def api_update_watchlist(data: WatchlistUpdate):
+async def api_update_watchlist(data: WatchlistUpdate, background_tasks: BackgroundTasks):
     try:
         updated_tickers = [t.strip().upper() for t in data.tickers if t.strip()]
         update_watchlist(updated_tickers)
         await invalidate_screener_cache()  # Watchlist changed — stale data is now invalid
+        # Kick off a fresh CSP scan against the new watchlist immediately
+        background_tasks.add_task(_rescan_csp_background)
         return {"status": "success", "watchlist": updated_tickers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -310,13 +328,26 @@ def api_get_csp_settings():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _rescan_csp_background() -> None:
+    """Re-run the CSP screener with the freshly saved settings and repopulate the cache."""
+    try:
+        candidates = await asyncio.to_thread(screen_csp_candidates)
+        ttl = screener_ttl()
+        await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
+        logger.info("Background CSP re-scan complete: %d candidates cached", len(candidates))
+    except Exception as exc:
+        logger.error("Background CSP re-scan failed: %s", exc)
+
+
 @app.post("/api/settings/csp")
-async def api_update_csp_settings(data: CspSettingsUpdate):
+async def api_update_csp_settings(data: CspSettingsUpdate, background_tasks: BackgroundTasks):
     try:
         update_csp_settings(data.model_dump())
-        # CSP settings affect screener output — invalidate CSP cache specifically
+        # Invalidate stale cache immediately so no client gets old results
         from ..cache import cache_delete
         await cache_delete(KEY_SCREENER_CSP)
+        # Kick off a fresh scan in the background so the dashboard updates promptly
+        background_tasks.add_task(_rescan_csp_background)
         return {"status": "success", "settings": data.model_dump()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -343,6 +374,195 @@ async def api_update_stock_watchlist(data: WatchlistUpdate):
         return {"status": "success", "watchlist": updated_tickers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── CSP Debug endpoint ───────────────────────────────────────────────────────
+
+@app.get("/api/screener/csp/debug")
+async def debug_csp_screener():
+    """Run the CSP screener with verbose per-ticker rejection reasons.
+
+    Bypasses the cache entirely and returns a full diagnostic breakdown:
+    - Current settings being used
+    - Per-ticker technical indicator values and pass/fail status
+    - Contract-level rejection counts by reason
+    - Sample of raw Alpaca snapshot data for the first ticker that passes tech filters
+
+    This endpoint is intentionally slow (runs the full screener) — use only for debugging.
+    """
+    import yfinance as yf
+    import pandas as pd
+    import pandas_ta as ta
+    import httpx
+    from ..db import get_watchlist, get_csp_settings
+    from ..screener.options import _get_valid_expirations, _compute_technicals
+    from datetime import date, datetime
+
+    settings_used = get_csp_settings()
+    tickers = get_watchlist()
+
+    report = {
+        "settings": settings_used,
+        "watchlist": tickers,
+        "ticker_count": len(tickers),
+        "technical_results": [],
+        "tech_pass_count": 0,
+        "tech_fail_count": 0,
+        "contract_pipeline": {
+            "potential_contracts": 0,
+            "no_alpaca_snapshot": 0,
+            "low_iv": 0,
+            "low_premium": 0,
+            "low_roc": 0,
+            "wide_spread": 0,
+            "passed": 0,
+        },
+        "alpaca_sample": None,
+        "final_candidate_count": 0,
+    }
+
+    # ── Step 1: Technical filter — report per ticker ─────────────────────────
+    qualifying = []
+    for symbol in tickers:
+        entry = {"symbol": symbol, "pass": False, "reason": None, "rsi": None, "adx": None, "return_5d": None}
+        tech = await asyncio.to_thread(_compute_technicals, symbol)
+        if tech is None:
+            entry["reason"] = "could not compute technicals (insufficient history or yfinance error)"
+            report["technical_results"].append(entry)
+            report["tech_fail_count"] += 1
+            continue
+
+        entry["rsi"] = tech["rsi"]
+        entry["adx"] = tech["adx"]
+        entry["return_5d"] = tech["return_5d"]
+
+        rsi, adx = tech["rsi"], tech["adx"]
+        if not (settings_used["min_rsi"] <= rsi <= settings_used["max_rsi"]):
+            entry["reason"] = f"RSI {rsi} outside [{settings_used['min_rsi']}, {settings_used['max_rsi']}]"
+            report["technical_results"].append(entry)
+            report["tech_fail_count"] += 1
+            continue
+        if not (settings_used["min_adx"] <= adx <= settings_used["max_adx"]):
+            entry["reason"] = f"ADX {adx} outside [{settings_used['min_adx']}, {settings_used['max_adx']}]"
+            report["technical_results"].append(entry)
+            report["tech_fail_count"] += 1
+            continue
+        if settings_used.get("pullback_mode"):
+            ret5d = tech.get("return_5d")
+            if not (rsi <= 55 and ret5d is not None and ret5d < 0):
+                entry["reason"] = f"pullback_mode: rsi={rsi} ret5d={ret5d} (need rsi<=55 and ret5d<0)"
+                report["technical_results"].append(entry)
+                report["tech_fail_count"] += 1
+                continue
+
+        entry["pass"] = True
+        entry["reason"] = "passed"
+        report["technical_results"].append(entry)
+        report["tech_pass_count"] += 1
+        qualifying.append(symbol)
+
+    if not qualifying:
+        return report
+
+    # ── Step 2: Contract collection — count only, no full chain parse ─────────
+    potential_contracts = []
+    for symbol in qualifying[:5]:  # Limit to first 5 passing tickers for speed
+        try:
+            ticker = yf.Ticker(symbol)
+            expirations = ticker.options
+            current_price = ticker.fast_info.last_price
+            valid_exps = _get_valid_expirations(expirations, settings_used["min_dte"], settings_used["max_dte"])
+            if not valid_exps:
+                continue
+            max_strike = current_price * (1 - settings_used["min_otm_pct"] / 100)
+            min_strike = current_price * (1 - settings_used["max_otm_pct"] / 100)
+            for exp_str in valid_exps:
+                try:
+                    chain = ticker.option_chain(exp_str)
+                    puts = chain.puts
+                    valid_puts = puts[(puts["strike"] >= min_strike) & (puts["strike"] <= max_strike)]
+                    exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                    dte = (exp_date - date.today()).days
+                    for _, row in valid_puts.iterrows():
+                        potential_contracts.append({
+                            "symbol": symbol,
+                            "occ_symbol": row["contractSymbol"],
+                            "yf_premium": row["lastPrice"],
+                            "current_price": current_price,
+                            "strike": row["strike"],
+                            "otm_pct": ((current_price - row["strike"]) / current_price) * 100,
+                            "dte": dte,
+                        })
+                except Exception:
+                    continue
+        except Exception as e:
+            pass
+
+    report["contract_pipeline"]["potential_contracts"] = len(potential_contracts)
+
+    if not potential_contracts:
+        return report
+
+    # ── Step 3: Alpaca snapshot — check a sample ──────────────────────────────
+    occ_symbols = [c["occ_symbol"] for c in potential_contracts[:50]]
+    url = f"{settings.alpaca_data_url}/v1beta1/options/snapshots"
+    headers = {
+        "APCA-API-KEY-ID": settings.alpaca_api_key,
+        "APCA-API-SECRET-KEY": settings.alpaca_api_secret,
+        "accept": "application/json",
+    }
+    alpaca_snapshots = {}
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, params={"symbols": ",".join(occ_symbols)})
+            if resp.status_code == 200:
+                alpaca_snapshots = resp.json().get("snapshots", {})
+                report["alpaca_sample"] = {
+                    "http_status": resp.status_code,
+                    "symbols_requested": len(occ_symbols),
+                    "symbols_returned": len(alpaca_snapshots),
+                    "sample_keys": list(alpaca_snapshots.keys())[:5],
+                    "sample_snapshot": next(iter(alpaca_snapshots.values()), None),
+                }
+            else:
+                report["alpaca_sample"] = {"http_status": resp.status_code, "error": resp.text[:500]}
+    except Exception as e:
+        report["alpaca_sample"] = {"error": str(e)}
+
+    # ── Step 4: Walk contracts through filters, count rejections ─────────────
+    for c in potential_contracts:
+        snap = alpaca_snapshots.get(c["occ_symbol"], {})
+        if not snap:
+            report["contract_pipeline"]["no_alpaca_snapshot"] += 1
+            continue
+        quote = snap.get("latestQuote", {})
+        trade = snap.get("latestTrade", {})
+        bid = quote.get("bp", 0.0)
+        ask = quote.get("ap", 0.0)
+        premium = trade.get("p", 0.0) or c["yf_premium"]
+        iv_raw = snap.get("impliedVolatility", 0.0)
+        iv = float(iv_raw) * 100 if iv_raw and float(iv_raw) <= 3.0 else float(iv_raw or 0)
+
+        if iv > 0 and iv < settings_used.get("min_iv", 25.0):
+            report["contract_pipeline"]["low_iv"] += 1
+            continue
+        if premium <= 0.15:
+            report["contract_pipeline"]["low_premium"] += 1
+            continue
+        roc = (premium / c["strike"]) * 100 if c["strike"] > 0 else 0
+        if roc < settings_used["min_roc"]:
+            report["contract_pipeline"]["low_roc"] += 1
+            continue
+        spread_pct = 0.0
+        if bid > 0 and ask > bid:
+            spread_pct = ((ask - bid) / ((ask + bid) / 2)) * 100  # midpoint spread
+            if spread_pct > settings_used["max_spread_pct"]:
+                report["contract_pipeline"]["wide_spread"] += 1
+                continue
+        report["contract_pipeline"]["passed"] += 1
+
+    report["final_candidate_count"] = report["contract_pipeline"]["passed"]
+    return report
 
 
 # ── Cache status endpoint (dev/debug) ─────────────────────────────────────────

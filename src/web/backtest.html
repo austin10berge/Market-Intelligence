@@ -227,6 +227,33 @@
                     </div>
                 </div>
 
+                <!-- Asset Type / Options -->
+                <div class="builder-section">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h3 style="font-size: 1rem; margin: 0;">Asset Type</h3>
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="checkbox" id="options-enabled" onchange="toggleOptionsInputs()"> Enable Options
+                        </label>
+                    </div>
+                    <div class="builder-row" id="options-inputs" style="opacity: 0.5; pointer-events: none;">
+                        <div>
+                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Type</label>
+                            <select id="option-type" class="settings-input">
+                                <option value="call">Call</option>
+                                <option value="put">Put</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Target DTE</label>
+                            <input type="number" id="option-dte" class="settings-input" value="30">
+                        </div>
+                        <div>
+                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Target Delta</label>
+                            <input type="number" id="option-delta" class="settings-input" value="0.50" step="0.01" min="0.01" max="0.99">
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Entry Conditions -->
                 <div class="builder-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
@@ -305,6 +332,40 @@
                         <div>
                             <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Max Hold (Bars)</label>
                             <input type="number" id="max-hold" class="settings-input" placeholder="None" style="width: 100px;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pyramiding -->
+                <div class="builder-section">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h3 style="font-size: 1rem; margin: 0;">Pyramiding (Scale In)</h3>
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="checkbox" id="pyr-enabled" onchange="togglePyrInputs()"> Enable Pyramiding
+                        </label>
+                    </div>
+                    <div class="builder-row" id="pyr-inputs" style="opacity: 0.5; pointer-events: none;">
+                        <div>
+                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Max Tranches</label>
+                            <input type="number" id="pyr-max" class="settings-input" value="3" min="2">
+                        </div>
+                        <div>
+                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Scale In Trigger</label>
+                            <select id="pyr-trigger" class="settings-input">
+                                <option value="entry_signal">On Entry Signal</option>
+                                <option value="pullback">On % Pullback</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Pullback %</label>
+                            <input type="number" id="pyr-value" class="settings-input" value="5.0" step="0.5">
+                        </div>
+                        <div>
+                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Exit Mode</label>
+                            <select id="pyr-exit" class="settings-input">
+                                <option value="sell_all">Sell All on Signal</option>
+                                <option value="sell_profitable">Sell Only Profitable</option>
+                            </select>
                         </div>
                     </div>
                 </div>
