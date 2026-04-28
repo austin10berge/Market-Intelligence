@@ -247,7 +247,20 @@ def get_csp_settings() -> dict:
             "min_otm_pct": 5.0,
             "max_otm_pct": 20.0,
             "min_roc": 1.0,
-            "max_spread_pct": 25.0
+            "max_spread_pct": 25.0,
+            # Technical filter fields
+            "min_iv": 25.0,
+            "min_rsi": 38.0,
+            "max_rsi": 65.0,
+            "min_adx": 15.0,
+            "max_adx": 40.0,
+            "pullback_mode": False,
+            # Composite score weights
+            "score_weight_ay": 0.35,
+            "score_weight_pop": 0.20,
+            "score_weight_iv_pct": 0.20,
+            "score_weight_rsi": 0.15,
+            "score_weight_adx": 0.10,
         }
     finally:
         conn.close()

@@ -61,6 +61,18 @@ class CspSettingsUpdate(BaseModel):
     max_otm_pct: float
     min_roc: float
     max_spread_pct: float
+    # Technical filter fields (optional so old clients don't break)
+    min_iv: float = 25.0
+    min_rsi: float = 38.0
+    max_rsi: float = 65.0
+    min_adx: float = 15.0
+    max_adx: float = 40.0
+    pullback_mode: bool = False
+    score_weight_ay: float = 0.35
+    score_weight_pop: float = 0.20
+    score_weight_iv_pct: float = 0.20
+    score_weight_rsi: float = 0.15
+    score_weight_adx: float = 0.10
 
 
 # ── Cache metadata helper ─────────────────────────────────────────────────────
@@ -235,11 +247,12 @@ async def get_csp_candidates():
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
     try:
-        candidates = screen_csp_candidates()
+        candidates = await asyncio.to_thread(screen_csp_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
         return {"candidates": candidates, **_cache_meta(None)}
     except Exception as e:
+        logger.exception("CSP screener failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -253,11 +266,12 @@ async def get_leaps_candidates():
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
     try:
-        candidates = screen_leaps_candidates()
+        candidates = await asyncio.to_thread(screen_leaps_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
         return {"candidates": candidates, **_cache_meta(None)}
     except Exception as e:
+        logger.exception("LEAPS screener failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -271,11 +285,12 @@ async def get_stock_candidates():
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
     try:
-        candidates = screen_stocks()
+        candidates = await asyncio.to_thread(screen_stocks)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
         return {"candidates": candidates, **_cache_meta(None)}
     except Exception as e:
+        logger.exception("Stock screener failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -290,11 +305,12 @@ def api_get_watchlist():
 
 
 @app.post("/api/watchlist")
-async def api_update_watchlist(data: WatchlistUpdate):
+async def api_update_watchlist(data: WatchlistUpdate, background_tasks: BackgroundTasks):
     try:
         updated_tickers = [t.strip().upper() for t in data.tickers if t.strip()]
         update_watchlist(updated_tickers)
-        await invalidate_screener_cache()  # Watchlist changed — stale data is now invalid
+        await invalidate_screener_cache()
+        background_tasks.add_task(_rescan_csp_background)
         return {"status": "success", "watchlist": updated_tickers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -310,13 +326,24 @@ def api_get_csp_settings():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _rescan_csp_background() -> None:
+    """Re-run the CSP screener with the freshly saved settings and repopulate the cache."""
+    try:
+        candidates = await asyncio.to_thread(screen_csp_candidates)
+        ttl = screener_ttl()
+        await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
+        logger.info("Background CSP re-scan complete: %d candidates cached", len(candidates))
+    except Exception as exc:
+        logger.error("Background CSP re-scan failed: %s", exc)
+
+
 @app.post("/api/settings/csp")
-async def api_update_csp_settings(data: CspSettingsUpdate):
+async def api_update_csp_settings(data: CspSettingsUpdate, background_tasks: BackgroundTasks):
     try:
         update_csp_settings(data.model_dump())
-        # CSP settings affect screener output — invalidate CSP cache specifically
         from ..cache import cache_delete
         await cache_delete(KEY_SCREENER_CSP)
+        background_tasks.add_task(_rescan_csp_background)
         return {"status": "success", "settings": data.model_dump()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
