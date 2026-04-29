@@ -86,34 +86,42 @@ export function buildStudyDefinitions(settings) {
 export function buildWidgetStudies(settings) {
     const studies = [];
 
-    // One "Moving Average@tv-basicstudies" entry per enabled SMA.
-    // This is more reliable than MAMultiple whose override key names
-    // vary across TradingView widget versions.
+    // tv.js only accepts string IDs in the studies array — inputs are
+    // controlled via studies_overrides. We add one MA@tv-basicstudies
+    // per enabled SMA slot so each gets its own override namespace
+    // (MA@tv-basicstudies-0, MA@tv-basicstudies-1, etc.).
     settings.sma.forEach((item) => {
         if (item.enabled) {
-            studies.push({
-                id: "Moving Average@tv-basicstudies",
-                inputs: { length: item.length },
-            });
+            studies.push("MA@tv-basicstudies");
         }
     });
 
     if (settings.bollinger.enabled) {
-        studies.push({
-            id: "BB@tv-basicstudies",
-            inputs: {
-                length: settings.bollinger.length,
-                mult: settings.bollinger.multiplier,
-            },
-        });
+        studies.push("BB@tv-basicstudies");
     }
 
     return studies;
 }
 
 export function buildWidgetStudyOverrides(settings) {
-    // Overrides are no longer needed — inputs are passed directly in the
-    // studies array as objects with an `inputs` field (supported in
-    // TradingView widget v1.4+). Keeping this function for API compatibility.
-    return {};
+    const overrides = {};
+
+    // tv.js indexes duplicate study IDs as "MA@tv-basicstudies-0",
+    // "MA@tv-basicstudies-1", etc. We only add overrides for enabled SMAs
+    // since disabled ones are not pushed into the studies array.
+    let idx = 0;
+    settings.sma.forEach((item) => {
+        if (item.enabled) {
+            const prefix = idx === 0 ? "MA@tv-basicstudies" : `MA@tv-basicstudies-${idx}`;
+            overrides[`${prefix}.length`] = item.length;
+            idx++;
+        }
+    });
+
+    if (settings.bollinger.enabled) {
+        overrides["BB@tv-basicstudies.length"] = settings.bollinger.length;
+        overrides["BB@tv-basicstudies.mult"] = settings.bollinger.multiplier;
+    }
+
+    return overrides;
 }
