@@ -51,11 +51,11 @@ def _compute_technicals(symbol: str) -> dict | None:
         else:
             hist.index = pd.to_datetime(hist.index)
 
-        # ── RSI(14) ───────────────────────────────────────────────────────────
+        # ── RSI(14) ────────────────────────────────────────────────────────────────────
         rsi_series = ta.rsi(hist["Close"], length=14)
         rsi_val = float(rsi_series.iloc[-1]) if rsi_series is not None and not rsi_series.empty else None
 
-        # ── ADX(14) ───────────────────────────────────────────────────────────
+        # ── ADX(14) ────────────────────────────────────────────────────────────────────
         # pandas-ta returns a DataFrame with columns ADX_14, DMP_14, DMN_14
         adx_df = ta.adx(hist["High"], hist["Low"], hist["Close"], length=14)
         adx_val = None
@@ -64,14 +64,14 @@ def _compute_technicals(symbol: str) -> dict | None:
             if adx_col:
                 adx_val = float(adx_df[adx_col[0]].iloc[-1])
 
-        # ── SMA(50) — used only when pullback_mode is active ──────────────────
+        # ── SMA(50) — used only when pullback_mode is active ─────────────────────────
         sma50_val = None
         if len(hist) >= 50:
             sma50_series = ta.sma(hist["Close"], length=50)
             if sma50_series is not None and not sma50_series.empty:
                 sma50_val = float(sma50_series.iloc[-1])
 
-        # ── 5-day return — used in pullback_mode ─────────────────────────────
+        # ── 5-day return — used in pullback_mode ───────────────────────────────────
         recent_return_5d = None
         if len(hist) >= 6:
             recent_return_5d = float(
@@ -178,7 +178,7 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
         len(tickers), settings,
     )
 
-    # ── Step 1: Technical pre-filter ─────────────────────────────────────────
+    # ── Step 1: Technical pre-filter ───────────────────────────────────────────────────
     technicals: dict[str, dict] = {}
     tech_rejected = 0
     for symbol in tickers:
@@ -237,7 +237,7 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
         len(qualifying_tickers), len(tickers), tech_rejected,
     )
 
-    # ── Step 2: Collect candidate contracts from yfinance ─────────────────────
+    # ── Step 2: Collect candidate contracts from yfinance ─────────────────────────
     potential_contracts = []
 
     for symbol in qualifying_tickers:
@@ -294,7 +294,7 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
     if not potential_contracts:
         return []
 
-    # ── Step 3: Batch-fetch live snapshots from Alpaca ─────────────────────────
+    # ── Step 3: Batch-fetch live snapshots from Alpaca ───────────────────────────
     alpaca_snapshots: dict[str, dict] = {}
     occ_symbols = [c["occ_symbol"] for c in potential_contracts]
 
@@ -336,7 +336,7 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
             except Exception as e:
                 logger.error("Failed to reach Alpaca API: %s", e)
 
-    # ── Step 4: Evaluate candidates ────────────────────────────────────────────
+    # ── Step 4: Evaluate candidates ────────────────────────────────────────────────
     best_by_strike: dict[tuple, dict] = {}
     rejected = {
         "no_alpaca_snapshot": 0,
@@ -402,7 +402,6 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
         spread_pct = 0.0
         if bid > 0 and ask > bid:
             # Use midpoint-relative spread: standard for options
-            # (ask-bid)/bid inflates spread when bid is tiny, e.g. $0.05 bid
             spread_pct = ((ask - bid) / ((ask + bid) / 2)) * 100
             if spread_pct > settings["max_spread_pct"]:
                 rejected["wide_spread"] += 1
@@ -445,22 +444,20 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
             "spread_pct": round(spread_pct, 2),
             "impliedVolatility": round(iv, 2),
             "volume": int(vol) if vol else 0,
-            # Technical indicators (new)
+            # Technical indicators
             "rsi": rsi_val,
             "adx": adx_val,
             "sma50": tech.get("sma50"),
             "return_5d": tech.get("return_5d"),
-            # Composite score (new) — primary sort key
+            # Composite score — primary sort key
             "composite_score": composite_score,
         }
 
         key = (c["symbol"], float(c["strike"]))
         existing = best_by_strike.get(key)
-        # Keep the best composite score per (ticker, strike)
         if existing is None or composite_score > existing["composite_score"]:
             best_by_strike[key] = candidate
 
-    # Sort by composite score descending (highest quality first)
     results = sorted(best_by_strike.values(), key=lambda x: x["composite_score"], reverse=True)
     logger.info(
         "CSP screen complete: %d contracts evaluated, %d candidates returned. "
@@ -480,49 +477,50 @@ def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365
     """Find LEAPS call candidates (>365 DTE, Deep ITM)."""
     if tickers is None:
         tickers = get_watchlist()
-
+        
     logger.info(f"Screening LEAPS candidates across {len(tickers)} tickers...")
     candidates = []
-
+    
     for symbol in tickers:
         try:
             ticker = yf.Ticker(symbol)
             expirations = ticker.options
-
+            
             # Find an expiration roughly 1+ year out
+            # Reusing original target helper but just checking minimum dates manually
             target_exp = None
             today = date.today()
             best_diff = float("inf")
             for exp_str in expirations:
                 exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
                 diff = (exp_date - today).days
-                if diff > 0 and abs(diff - min_dte) < best_diff and diff >= 300:  # Slightly loose bounds
+                if diff > 0 and abs(diff - min_dte) < best_diff and diff >= 300: # Slightly loose bounds
                     best_diff = abs(diff - min_dte)
                     target_exp = exp_str
-
+                    
             if not target_exp:
                 continue
-
+                
             chain = ticker.option_chain(target_exp)
             calls = chain.calls
-
+            
             # Get current price
             current_price = ticker.fast_info.last_price
-
+            
             # Real LEAPS delta target is ~0.80. As proxy, look ~20% ITM.
             target_strike = current_price * 0.80
-
+            
             if not calls.empty:
-                closest_call = calls.iloc[(calls["strike"] - target_strike).abs().argsort()[:1]]
+                closest_call = calls.iloc[(calls['strike'] - target_strike).abs().argsort()[:1]]
                 if not closest_call.empty:
                     call_data = closest_call.iloc[0]
-                    premium = call_data["lastPrice"]
-                    strike = call_data["strike"]
-
+                    premium = call_data['lastPrice']
+                    strike = call_data['strike']
+                    
                     # Compute break-even
                     break_even = strike + premium
                     premium_over_stock = ((break_even - current_price) / current_price) * 100
-
+                    
                     candidates.append({
                         "symbol": symbol,
                         "type": "LEAPS Call",
@@ -532,14 +530,10 @@ def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365
                         "premium": float(premium),
                         "break_even": round(break_even, 2),
                         "premium_markup_percent": round(premium_over_stock, 2),
-                        "volume": (
-                            int(call_data["volume"])
-                            if not isinstance(call_data["volume"], float) or call_data["volume"] == call_data["volume"]
-                            else 0
-                        ),
+                        "volume": int(call_data['volume']) if not type(call_data['volume']) is float or call_data['volume'] == call_data['volume'] else 0
                     })
         except Exception as e:
             logger.warning(f"Failed to screen LEAPS for {symbol}: {e}")
-
+            
     # Sort by lowest markup over current stock price
     return sorted(candidates, key=lambda x: x["premium_markup_percent"])
