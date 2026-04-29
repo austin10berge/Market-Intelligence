@@ -252,8 +252,6 @@ function renderTradingViewWidget(candidate, index) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    // Build the studies array from current indicator settings.
-    // embed-widget-advanced-chart.js uses short internal IDs with an inputs object.
     const studies = buildWidgetStudies(indicatorSettings);
 
     const config = {
@@ -272,21 +270,46 @@ function renderTradingViewWidget(candidate, index) {
         studies,
     };
 
-    // The embed-widget-advanced-chart widget renders via a <script> tag
-    // containing the JSON config as its text content, placed inside the
-    // container div. It does not use a global TradingView object.
+    // Browsers block dynamically injected <script> tags with textContent.
+    // The correct approach is to write a full HTML document into a blob URL
+    // and load it in an <iframe>. The embed widget script runs inside the
+    // iframe's document where it was parsed statically.
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  .tradingview-widget-container { height: 100%; }
+</style>
+</head>
+<body>
+<div class="tradingview-widget-container" style="height:100%">
+  <div class="tradingview-widget-container__widget" style="height:100%"></div>
+  <script type="text/javascript"
+    src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+    async>
+  ${JSON.stringify(config)}
+  <\/script>
+</div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+
     container.innerHTML = "";
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.async = true;
-    script.type = "text/javascript";
-    script.textContent = JSON.stringify(config);
-    container.appendChild(script);
+    const iframe = document.createElement("iframe");
+    iframe.src = url;
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
+    iframe.style.border = "none";
+    iframe.onload = () => URL.revokeObjectURL(url);
+    container.appendChild(iframe);
+    widgets.push(url);
 }
 
 function destroyWidgets() {
-    // With the embed widget, destroying means clearing the container HTML.
-    // The widget self-cleans when its container is removed from the DOM.
     document.querySelectorAll(".ta-chart-shell").forEach((el) => {
         el.innerHTML = "";
     });
