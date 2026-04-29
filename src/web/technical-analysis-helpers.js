@@ -86,38 +86,34 @@ export function buildStudyDefinitions(settings) {
 export function buildWidgetStudies(settings) {
     const studies = [];
 
-    if (settings.sma.some((item) => item.enabled)) {
-        studies.push("MAMultiple@tv-basicstudies");
-    }
+    // One "Moving Average@tv-basicstudies" entry per enabled SMA.
+    // This is more reliable than MAMultiple whose override key names
+    // vary across TradingView widget versions.
+    settings.sma.forEach((item) => {
+        if (item.enabled) {
+            studies.push({
+                id: "Moving Average@tv-basicstudies",
+                inputs: { length: item.length },
+            });
+        }
+    });
 
     if (settings.bollinger.enabled) {
-        studies.push("BB@tv-basicstudies");
+        studies.push({
+            id: "BB@tv-basicstudies",
+            inputs: {
+                length: settings.bollinger.length,
+                mult: settings.bollinger.multiplier,
+            },
+        });
     }
 
     return studies;
 }
 
 export function buildWidgetStudyOverrides(settings) {
-    const overrides = {
-        // Bollinger Bands overrides
-        "BB.length": settings.bollinger.length,
-        "BB.mult": settings.bollinger.multiplier,
-        // MAMultiple: set each of the 6 period slots; hide unused slots by
-        // setting their length to something large and toggling display off.
-        "MAMultiple.MA #1 Length": settings.sma[0].length,
-        "MAMultiple.MA #2 Length": settings.sma[1].length,
-        "MAMultiple.MA #3 Length": settings.sma[2].length,
-        "MAMultiple.MA #4 Length": 400,
-        "MAMultiple.MA #5 Length": 500,
-        "MAMultiple.MA #6 Length": 600,
-        // display bitmask: 15 = show on all panes, 0 = hidden
-        "MAMultiple.plot_0.display": settings.sma[0].enabled ? 15 : 0,
-        "MAMultiple.plot_1.display": settings.sma[1].enabled ? 15 : 0,
-        "MAMultiple.plot_2.display": settings.sma[2].enabled ? 15 : 0,
-        "MAMultiple.plot_3.display": 0,
-        "MAMultiple.plot_4.display": 0,
-        "MAMultiple.plot_5.display": 0,
-    };
-
-    return overrides;
+    // Overrides are no longer needed — inputs are passed directly in the
+    // studies array as objects with an `inputs` field (supported in
+    // TradingView widget v1.4+). Keeping this function for API compatibility.
+    return {};
 }
