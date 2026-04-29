@@ -173,10 +173,13 @@ async function handleControlsChanged() {
  */
 function resolveStockMetrics(candidate) {
     const stock = stockDataBySymbol[candidate.symbol];
+    // Stock screener returns "N/A" (string) when a value couldn't be computed.
+    // Normalise those to null so the format helpers render "—" correctly.
+    const clean = (v) => (v === "N/A" || v === undefined ? null : v);
     return {
-        atm_iv_rv20: stock?.atm_iv_rv20 ?? candidate.atm_iv_rv20,
-        iv_percentile: stock?.iv_percentile ?? candidate.iv_percentile,
-        pe: stock?.pe ?? candidate.pe,
+        atm_iv_rv20: clean(stock?.atm_iv_rv20) ?? clean(candidate.atm_iv_rv20),
+        iv_percentile: clean(stock?.iv_percentile) ?? clean(candidate.iv_percentile),
+        pe: clean(stock?.pe) ?? clean(candidate.pe),
     };
 }
 
