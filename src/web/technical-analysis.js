@@ -7,7 +7,6 @@ import {
 } from "./technical-analysis-helpers.js";
 
 const API_BASE = window.MARKET_INTELLIGENCE_CONFIG?.apiBase || "/MISSING_CONFIG_JS_SEE_CONSOLE";
-const TRADING_VIEW_SCRIPT_SRC = "https://s3.tradingview.com/tv.js";
 
 let candidates = [];
 /** Map of symbol → stock screener row, used to fill in IV/RV20, IV PCT, P/E */
@@ -229,8 +228,6 @@ async function renderCandidates() {
     `;
     }).join("");
 
-    await loadTradingViewScript();
-
     for (const [index, candidate] of tickerCandidates.entries()) {
         renderTradingViewWidget(candidate, index);
     }
@@ -253,95 +250,51 @@ function dedupeCandidatesBySymbol(allCandidates) {
 function renderTradingViewWidget(candidate, index) {
     const containerId = `ta-chart-${index}`;
     const container = document.getElementById(containerId);
+    if (!container) return;
 
-    if (!container || !window.TradingView?.widget) {
-        if (container) {
-            container.innerHTML = "<div class='trade-item'>Chart failed to initialize.</div>";
-        }
-        return;
-    }
+    // Build the studies array from current indicator settings.
+    // embed-widget-advanced-chart.js uses short internal IDs with an inputs object.
+    const studies = buildWidgetStudies(indicatorSettings);
 
-    try {
-        container.innerHTML = "";
+    const config = {
+        autosize: true,
+        symbol: candidate.symbol || "SPY",
+        interval: indicatorSettings.interval,
+        timezone: "exchange",
+        theme: indicatorSettings.theme,
+        style: "1",
+        locale: "en",
+        backgroundColor: "rgba(11, 15, 25, 1)",
+        withdateranges: true,
+        hide_side_toolbar: false,
+        allow_symbol_change: false,
+        save_image: false,
+        studies,
+    };
 
-        const widget = new window.TradingView.widget({
-            autosize: true,
-            symbol: resolveTradingViewSymbol(candidate.symbol),
-            interval: indicatorSettings.interval,
-            timezone: "exchange",
-            theme: indicatorSettings.theme,
-            style: "1",
-            locale: "en",
-            backgroundColor: "rgba(11, 15, 25, 1)",
-            withdateranges: true,
-            hide_side_toolbar: false,
-            allow_symbol_change: false,
-            save_image: false,
-            studies: buildWidgetStudies(indicatorSettings),
-            studies_overrides: buildWidgetStudyOverrides(indicatorSettings),
-            container_id: containerId,
-            support_host: "https://www.tradingview.com",
-        });
-
-        widgets.push(widget);
-    } catch (error) {
-        container.innerHTML = `<div class="trade-item">${escapeHtml(error.message || "Chart failed to render.")}</div>`;
-    }
+    // The embed-widget-advanced-chart widget renders via a <script> tag
+    // containing the JSON config as its text content, placed inside the
+    // container div. It does not use a global TradingView object.
+    container.innerHTML = "";
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.async = true;
+    script.type = "text/javascript";
+    script.textContent = JSON.stringify(config);
+    container.appendChild(script);
 }
 
 function destroyWidgets() {
-    widgets.forEach((widget) => {
-        if (typeof widget.remove === "function") {
-            widget.remove();
-        }
+    // With the embed widget, destroying means clearing the container HTML.
+    // The widget self-cleans when its container is removed from the DOM.
+    document.querySelectorAll(".ta-chart-shell").forEach((el) => {
+        el.innerHTML = "";
     });
     widgets = [];
 }
 
 function resolveTradingViewSymbol(symbol) {
     return symbol || "SPY";
-}
-
-function loadTradingViewScript() {
-    if (window.TradingView?.widget) {
-        return Promise.resolve();
-    }
-
-    const existing = document.querySelector(`script[data-tradingview-script="true"]`);
-    if (existing) {
-        return waitForTradingView();
-    }
-
-    const script = document.createElement("script");
-    script.src = TRADING_VIEW_SCRIPT_SRC;
-    script.async = true;
-    script.dataset.tradingviewScript = "true";
-    document.head.appendChild(script);
-
-    return waitForTradingView();
-}
-
-function waitForTradingView() {
-    return new Promise((resolve, reject) => {
-        let attempts = 0;
-
-        const tick = () => {
-            if (window.TradingView?.widget) {
-                resolve();
-                return;
-            }
-
-            attempts += 1;
-            if (attempts > 100) {
-                reject(new Error("TradingView failed to load"));
-                return;
-            }
-
-            window.setTimeout(tick, 100);
-        };
-
-        tick();
-    });
 }
 
 function buildContractSummary(candidate) {

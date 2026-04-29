@@ -84,16 +84,34 @@ export function buildStudyDefinitions(settings) {
 }
 
 export function buildWidgetStudies(settings) {
-    // Return empty array — studies are not added via this mechanism.
-    // The TradingView widget's studies_overrides system requires knowing
-    // the widget's internal study registry IDs, which are not publicly
-    // documented and change between widget versions. Instead we let the
-    // widget load with its default state and the user can add indicators
-    // interactively via the chart UI.
-    return [];
+    const studies = [];
+
+    // embed-widget-advanced-chart.js accepts study objects with `id` and `inputs`.
+    // The correct internal ID for a Simple Moving Average is "MASimple@tv-basicstudies".
+    settings.sma.forEach((item) => {
+        if (item.enabled) {
+            studies.push({
+                id: "MASimple@tv-basicstudies",
+                inputs: { length: item.length },
+            });
+        }
+    });
+
+    if (settings.bollinger.enabled) {
+        studies.push({
+            id: "BB@tv-basicstudies",
+            inputs: {
+                length: settings.bollinger.length,
+                mult: settings.bollinger.multiplier,
+            },
+        });
+    }
+
+    return studies;
 }
 
 export function buildWidgetStudyOverrides(_settings) {
-    // Not used — see buildWidgetStudies comment above.
+    // Not used with embed-widget-advanced-chart.js — inputs are passed
+    // directly in the studies array objects above.
     return {};
 }
