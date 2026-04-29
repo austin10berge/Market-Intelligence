@@ -88,12 +88,27 @@ export function buildWidgetStudies(settings) {
 
     // embed-widget-advanced-chart.js accepts study objects with `id` and `inputs`.
     // The correct internal ID for a Simple Moving Average is "MASimple@tv-basicstudies".
+    // SMA color palette — one color per slot in order.
+    // To change a color: edit the hex value. To change opacity: edit the alpha (0.0–1.0).
+    const SMA_COLORS = [
+        "rgba(255, 179, 0, 1.0)",   // SMA 1 — amber
+        "rgba(33, 150, 243, 1.0)",  // SMA 2 — blue
+        "rgba(76, 175, 80, 1.0)",   // SMA 3 — green
+    ];
+
+    let colorIdx = 0;
     settings.sma.forEach((item) => {
         if (item.enabled) {
+            const color = SMA_COLORS[colorIdx] ?? "rgba(255, 255, 255, 1.0)";
             studies.push({
                 id: "MASimple@tv-basicstudies",
                 inputs: { length: item.length },
+                styles: {
+                    "Plot.color": color,
+                    "Plot.linewidth": 2,
+                },
             });
+            colorIdx++;
         }
     });
 
