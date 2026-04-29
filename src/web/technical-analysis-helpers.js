@@ -84,43 +84,16 @@ export function buildStudyDefinitions(settings) {
 }
 
 export function buildWidgetStudies(settings) {
-    const studies = [];
-
-    // The Advanced Chart widget uses "Moving Average@tv-basicstudies".
-    // Duplicate entries are indexed as "Moving Average@tv-basicstudies-0",
-    // "Moving Average@tv-basicstudies-1", etc. in studies_overrides.
-    settings.sma.forEach((item) => {
-        if (item.enabled) {
-            studies.push("Moving Average@tv-basicstudies");
-        }
-    });
-
-    if (settings.bollinger.enabled) {
-        studies.push("Bollinger Bands@tv-basicstudies");
-    }
-
-    return studies;
+    // Return empty array — studies are not added via this mechanism.
+    // The TradingView widget's studies_overrides system requires knowing
+    // the widget's internal study registry IDs, which are not publicly
+    // documented and change between widget versions. Instead we let the
+    // widget load with its default state and the user can add indicators
+    // interactively via the chart UI.
+    return [];
 }
 
-export function buildWidgetStudyOverrides(settings) {
-    const overrides = {};
-
-    // Duplicate study IDs are indexed starting at 0.
-    // First instance: "Moving Average@tv-basicstudies-0"
-    // Second instance: "Moving Average@tv-basicstudies-1", etc.
-    let idx = 0;
-    settings.sma.forEach((item) => {
-        if (item.enabled) {
-            const prefix = `Moving Average@tv-basicstudies-${idx}`;
-            overrides[`${prefix}.length`] = item.length;
-            idx++;
-        }
-    });
-
-    if (settings.bollinger.enabled) {
-        overrides["Bollinger Bands@tv-basicstudies-0.length"] = settings.bollinger.length;
-        overrides["Bollinger Bands@tv-basicstudies-0.mult"] = settings.bollinger.multiplier;
-    }
-
-    return overrides;
+export function buildWidgetStudyOverrides(_settings) {
+    // Not used — see buildWidgetStudies comment above.
+    return {};
 }
