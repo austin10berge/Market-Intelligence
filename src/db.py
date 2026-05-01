@@ -233,35 +233,42 @@ def update_watchlist(tickers: list[str]) -> None:
 
 
 def get_csp_settings() -> dict:
-    """Retrieve the CSP screener logic parameters."""
+    """Retrieve the CSP screener logic parameters.
+
+    Always merges the stored value on top of the full defaults so that any
+    keys added after a row was first written are transparently backfilled.
+    This means old DB rows (missing technical filter keys, score weights, etc.)
+    never cause KeyErrors in the screener — no migration required.
+    """
+    defaults = {
+        "min_dte": 30,
+        "max_dte": 45,
+        "min_otm_pct": 5.0,
+        "max_otm_pct": 20.0,
+        "min_roc": 1.0,
+        "max_spread_pct": 25.0,
+        # Technical filter fields
+        "min_iv": 25.0,
+        "min_rsi": 38.0,
+        "max_rsi": 65.0,
+        "min_adx": 15.0,
+        "max_adx": 40.0,
+        "pullback_mode": False,
+        # Composite score weights
+        "score_weight_ay": 0.35,
+        "score_weight_pop": 0.20,
+        "score_weight_iv_pct": 0.20,
+        "score_weight_rsi": 0.15,
+        "score_weight_adx": 0.10,
+    }
     conn = _get_connection()
     try:
         row = conn.execute("SELECT value FROM app_config WHERE key = 'csp_settings'").fetchone()
         if row:
-            return json.loads(row["value"])
-            
-        # Defaults
-        return {
-            "min_dte": 30,
-            "max_dte": 45,
-            "min_otm_pct": 5.0,
-            "max_otm_pct": 20.0,
-            "min_roc": 1.0,
-            "max_spread_pct": 25.0,
-            # Technical filter fields
-            "min_iv": 25.0,
-            "min_rsi": 38.0,
-            "max_rsi": 65.0,
-            "min_adx": 15.0,
-            "max_adx": 40.0,
-            "pullback_mode": False,
-            # Composite score weights
-            "score_weight_ay": 0.35,
-            "score_weight_pop": 0.20,
-            "score_weight_iv_pct": 0.20,
-            "score_weight_rsi": 0.15,
-            "score_weight_adx": 0.10,
-        }
+            stored = json.loads(row["value"])
+            # Merge: defaults supply any key the stored row is missing
+            return {**defaults, **stored}
+        return defaults
     finally:
         conn.close()
 

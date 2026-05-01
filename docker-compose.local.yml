@@ -1,0 +1,15 @@
+# Local development override for docker-compose.yml
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# This file overrides MARKET_INTELLIGENCE_API_URL so the browser calls
+# localhost:8000 instead of the production server. It also exposes the API
+# port explicitly in case you want to hit it directly from the browser.
+#
+# The base docker-compose.yml is unchanged so production deploys are unaffected.
+
+services:
+  dashboard:
+    environment:
+      MARKET_INTELLIGENCE_API_URL: http://localhost:8000/api

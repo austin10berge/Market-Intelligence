@@ -2,8 +2,8 @@ FROM python:3.12-slim AS base
 
 WORKDIR /app
 
-# install curl for healthchecks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# install curl for healthchecks and ca-certificates for outbound HTTPS
+RUN apt-get update && apt-get install -y curl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies from pyproject.toml
 COPY pyproject.toml .
@@ -18,6 +18,8 @@ RUN mkdir -p data
 
 # ── api target ────────────────────────────────────────────────────────────────
 FROM base AS api
+# Clear any stale bytecode so rebuilt images always run fresh .py source
+RUN find /app/src -name "*.pyc" -delete 2>/dev/null || true
 EXPOSE 8000
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
 
@@ -36,11 +38,13 @@ COPY src/web/index.html /usr/share/nginx/html/index.html
 COPY src/web/watchlist.html /usr/share/nginx/html/watchlist.html
 COPY src/web/backtest.html /usr/share/nginx/html/backtest.html
 COPY src/web/technical-analysis.html /usr/share/nginx/html/technical-analysis.html
+COPY src/web/scanner.html /usr/share/nginx/html/scanner.html
 COPY src/web/index.css /usr/share/nginx/html/index.css
 COPY src/web/app.js /usr/share/nginx/html/app.js
 COPY src/web/backtest.js /usr/share/nginx/html/backtest.js
 COPY src/web/technical-analysis.js /usr/share/nginx/html/technical-analysis.js
 COPY src/web/technical-analysis-helpers.js /usr/share/nginx/html/technical-analysis-helpers.js
+COPY src/web/scanner.js /usr/share/nginx/html/scanner.js
 COPY src/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY src/web/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="CSP Universe Scanner — S&P 500 + NASDAQ 100">
+    <title>CSP Scanner — Market Intelligence</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+    <!-- config.js is generated at container startup by entrypoint.sh -->
+    <script src="/config.js"></script>
+    <style>
+        /* ── Funnel summary strip ──────────────────────────────────────────── */
+        .funnel-strip {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+        }
+
+        .funnel-card {
+            flex: 1 1 140px;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            text-align: center;
+        }
+
+        .funnel-card .fc-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-secondary);
+            margin-bottom: 0.35rem;
+        }
+
+        .funnel-card .fc-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .funnel-card .fc-sub {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            margin-top: 0.2rem;
+        }
+
+        .funnel-card.accent-green .fc-value { color: var(--accent-green); }
+        .funnel-card.accent-blue  .fc-value { color: var(--accent-blue); }
+
+        /* ── Criteria badges ───────────────────────────────────────────────── */
+        .criteria-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .criteria-badge {
+            background: rgba(59, 130, 246, 0.12);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 9999px;
+            padding: 0.3rem 0.85rem;
+            font-size: 0.78rem;
+            color: var(--accent-blue);
+            font-weight: 500;
+        }
+
+        /* ── Scan button + status ──────────────────────────────────────────── */
+        .scan-controls {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .btn-scan {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 0.7rem 1.75rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            font-family: var(--font-main);
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        .btn-scan:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+        .btn-scan:active:not(:disabled) { transform: translateY(0); }
+        .btn-scan:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        .scan-status {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+        }
+
+        .scan-status.running { color: #f59e0b; }
+        .scan-status.done    { color: var(--accent-green); }
+        .scan-status.error   { color: var(--accent-red); }
+
+        /* ── Spinner ───────────────────────────────────────────────────────── */
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(245, 158, 11, 0.3);
+            border-top-color: #f59e0b;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 0.4rem;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Results table (matches existing screener tables) ─────────────── */
+        .table-headers {
+            display: grid;
+            grid-template-columns: 72px 1fr 80px 80px 70px 70px 80px 80px 80px 80px 80px;
+            gap: 0.5rem;
+            padding: 0.6rem 1rem;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .scan-row {
+            display: grid;
+            grid-template-columns: 72px 1fr 80px 80px 70px 70px 80px 80px 80px 80px 80px;
+            gap: 0.5rem;
+            padding: 0.65rem 1rem;
+            font-size: 0.83rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            transition: background 0.15s;
+            align-items: center;
+        }
+
+        .scan-row:last-child { border-bottom: none; }
+        .scan-row:hover { background: rgba(255, 255, 255, 0.03); }
+
+        .scan-row .symbol {
+            font-weight: 700;
+            color: var(--accent-blue);
+            font-size: 0.88rem;
+        }
+
+        .th-sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .th-sortable:hover { color: var(--text-primary); }
+
+        /* ── Positive / negative colours ──────────────────────────────────── */
+        .positive { color: var(--accent-green); }
+        .negative { color: var(--accent-red); }
+        .neutral  { color: var(--text-secondary); }
+
+        /* ── Score pill ────────────────────────────────────────────────────── */
+        .score-pill {
+            display: inline-block;
+            padding: 0.18rem 0.55rem;
+            border-radius: 9999px;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+
+        .score-high   { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+        .score-mid    { background: rgba(245, 158, 11, 0.15);  color: #f59e0b; }
+        .score-low    { background: rgba(148, 163, 184, 0.12); color: var(--text-secondary); }
+
+        /* ── Empty / loading states ────────────────────────────────────────── */
+        .state-msg {
+            padding: 3rem 1rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        /* ── Nav links (top of page) ───────────────────────────────────────── */
+        .nav-links {
+            display: flex;
+            gap: 1.25rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.88rem;
+            padding: 0.3rem 0;
+            border-bottom: 2px solid transparent;
+            transition: color 0.2s, border-color 0.2s;
+        }
+
+        .nav-links a:hover  { color: var(--text-primary); }
+        .nav-links a.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+
+        /* ── Cache badge ───────────────────────────────────────────────────── */
+        .cache-badge {
+            font-size: 0.72rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            background: rgba(148, 163, 184, 0.12);
+            color: var(--text-secondary);
+            margin-left: 0.5rem;
+        }
+
+        /* ── Responsive ────────────────────────────────────────────────────── */
+        @media (max-width: 900px) {
+            .table-headers,
+            .scan-row {
+                grid-template-columns: 64px 1fr 70px 70px 65px 65px 70px 70px 70px;
+            }
+
+            /* Hide ADX and RV cols on narrow screens */
+            .table-headers > :nth-child(10),
+            .table-headers > :nth-child(11),
+            .scan-row > :nth-child(10),
+            .scan-row > :nth-child(11) {
+                display: none;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .funnel-card { flex: 1 1 120px; }
+
+            .table-headers,
+            .scan-row {
+                grid-template-columns: 56px 1fr 64px 64px 60px 60px 64px;
+            }
+
+            /* Keep: symbol, expiry, strike, premium, score, AY, OTM — hide rest */
+            .table-headers > :nth-child(n+8),
+            .scan-row > :nth-child(n+8) {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="glass">
+            <div class="header-content">
+                <h1>CSP Universe Scanner</h1>
+                <p>S&amp;P 500 + NASDAQ 100 &mdash; systematic CSP candidate discovery</p>
+            </div>
+        </header>
+
+        <!-- Nav -->
+        <nav class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/scanner.html" class="active">CSP Scanner</a>
+            <a href="/watchlist.html">Watchlist</a>
+            <a href="/backtest.html">Backtester</a>
+        </nav>
+
+        <!-- Main -->
+        <main>
+            <!-- Scan Controls -->
+            <section class="glass card full-width" style="padding: 1.5rem 2rem; margin-bottom: 1.5rem;">
+                <div class="card-header" style="margin-bottom: 1rem;">
+                    <h2>Screening Criteria</h2>
+                    <span class="badge blue">S&amp;P 500 ∪ NASDAQ 100</span>
+                </div>
+
+                <div class="criteria-row">
+                    <span class="criteria-badge">Market Cap &gt; $10B</span>
+                    <span class="criteria-badge">Price &lt; $150</span>
+                    <span class="criteria-badge">Beta 0.8 – 2.4</span>
+                    <span class="criteria-badge">IV ≥ 30% (RV-20 fallback)</span>
+                    <span class="criteria-badge">RSI 38–65</span>
+                    <span class="criteria-badge">ADX 15–40</span>
+                    <span class="criteria-badge">DTE 30–45</span>
+                    <span class="criteria-badge">OTM 5–20%</span>
+                </div>
+
+                <div class="scan-controls">
+                    <button id="btn-scan" class="btn-scan" onclick="startScan()">Run Scan</button>
+                    <button id="btn-rescan" class="btn-scan" style="background: linear-gradient(135deg, #64748b, #475569); display:none;" onclick="forceRescan()">Force Rescan</button>
+                    <div id="scan-status" class="scan-status">
+                        Press <strong>Run Scan</strong> to scan the full index universe.
+                        First run takes 3–6 minutes; results are cached until market conditions change.
+                    </div>
+                </div>
+
+                <!-- Funnel summary — hidden until scan completes -->
+                <div id="funnel-strip" class="funnel-strip" style="display:none;">
+                    <div class="funnel-card">
+                        <div class="fc-label">Universe</div>
+                        <div class="fc-value" id="fc-universe">—</div>
+                        <div class="fc-sub">S&amp;P 500 + NASDAQ 100</div>
+                    </div>
+                    <div class="funnel-card">
+                        <div class="fc-label">Fundamental Pass</div>
+                        <div class="fc-value" id="fc-fundamental">—</div>
+                        <div class="fc-sub">Cap &gt;10B · Price &lt;$150 · Beta 0.8–2.4</div>
+                    </div>
+                    <div class="funnel-card">
+                        <div class="fc-label">Vol ≥ 30% Pass</div>
+                        <div class="fc-value" id="fc-rv">—</div>
+                        <div class="fc-sub">IV ≥ 30% (RV-20 fallback)</div>
+                    </div>
+                    <div class="funnel-card accent-green">
+                        <div class="fc-label">CSP Candidates</div>
+                        <div class="fc-value" id="fc-candidates">—</div>
+                        <div class="fc-sub">RSI · ADX · Alpaca live pricing</div>
+                    </div>
+                    <div class="funnel-card accent-blue">
+                        <div class="fc-label">Cache Status</div>
+                        <div class="fc-value" id="fc-cache-status">—</div>
+                        <div class="fc-sub" id="fc-cache-at">—</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Results Table -->
+            <section id="results-section" class="glass card full-width" style="display:none;">
+                <div class="card-header" style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--glass-border);">
+                    <h2>CSP Candidates
+                        <span id="results-count" class="cache-badge"></span>
+                    </h2>
+                    <div id="cache-badge-scan" class="cache-badge"></div>
+                </div>
+
+                <div class="table-headers">
+                <div class="th-sortable" onclick="sortResults('symbol')">Symbol ↕</div>
+                <div>Expiry</div>
+                <div class="th-sortable" onclick="sortResults('strike')">Strike ↕</div>
+                <div class="th-sortable" onclick="sortResults('premium')">Prem ↕</div>
+                <div class="th-sortable" onclick="sortResults('dte')">DTE ↕</div>
+                <div class="th-sortable" onclick="sortResults('otm_percent')">OTM% ↕</div>
+                <div class="th-sortable" onclick="sortResults('annualized_roc')">Ann. ROC ↕</div>
+                <div class="th-sortable" onclick="sortResults('impliedVolatility')">IV% ↕</div>
+                <div class="th-sortable" onclick="sortResults('rv20')">RV-20 ↕</div>
+                <div class="th-sortable" onclick="sortResults('iv_rv_ratio')">IV/RV ↕</div>
+                <div class="th-sortable" onclick="sortResults('composite_score')">Score ↕</div>
+                </div>
+
+                <div id="results-list">
+                    <div class="state-msg">No results yet.</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/scanner.js"></script>
+</body>
+</html>

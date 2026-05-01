@@ -26,13 +26,15 @@ from ..backtester.engine import run_backtest
 from ..backtester.walk_forward import run_walk_forward
 from ..backtester.data_provider import get_historical_data
 from ..cache import (
-    cache_get, cache_set, screener_ttl,
+    cache_get, cache_set, cache_delete, screener_ttl, scanner_ttl,
     invalidate_screener_cache, invalidate_market_posture,
     market_status_label, market_is_open,
-    KEY_SCREENER_CSP, KEY_SCREENER_LEAPS, KEY_SCREENER_STOCKS, KEY_MARKET_POSTURE,
+    KEY_SCREENER_CSP, KEY_SCREENER_LEAPS, KEY_SCREENER_STOCKS,
+    KEY_SCREENER_CSP_SCAN, KEY_MARKET_POSTURE,
 )
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
+from ..screener.csp_scanner import run_csp_scan
 from ..main import run_pipeline
 
 logger = logging.getLogger(__name__)
@@ -254,6 +256,54 @@ async def get_csp_candidates():
     except Exception as e:
         logger.exception("CSP screener failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Screener: CSP Scan (broad universe) ─────────────────────────────────────
+
+@app.get("/api/screener/csp-scan")
+async def get_csp_scan_candidates():
+    """Run the broad-universe CSP scanner (S&P 500 + NASDAQ 100).
+
+    Designed to be run once at or after EOD close. Results are cached for
+    23 hours regardless of market status — the scan captures a daily snapshot
+    and does not need to refresh intraday.
+
+    A zero-result scan (all filter counts = 0) is never cached — this indicates
+    a bad run (e.g. market closed with no Alpaca data) rather than a valid result.
+    Use DELETE /api/screener/csp-scan to manually bust a stale cache.
+    """
+    envelope = await cache_get(KEY_SCREENER_CSP_SCAN)
+    if envelope is not None:
+        payload = envelope["data"]
+        payload.update(_cache_meta(envelope))
+        return payload
+
+    try:
+        result = await asyncio.to_thread(run_csp_scan)
+
+        # Refuse to cache a zero-result scan — it means Alpaca returned no
+        # options data (market closed, bad run) rather than a valid empty screen.
+        summary = result.get("filter_summary", {})
+        if summary.get("combined_unique", 0) > 0:
+            await cache_set(KEY_SCREENER_CSP_SCAN, result, ttl=scanner_ttl())
+        else:
+            logger.warning(
+                "CSP scan returned zero universe tickers — result not cached. "
+                "Run after market close (4 PM ET) when Alpaca options data is available."
+            )
+
+        result.update(_cache_meta(None))
+        return result
+    except Exception as e:
+        logger.exception("CSP scan failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/screener/csp-scan")
+async def invalidate_csp_scan_cache():
+    """Bust the CSP scan cache so the next GET triggers a fresh scan."""
+    await cache_delete(KEY_SCREENER_CSP_SCAN)
+    return {"status": "ok", "message": "CSP scan cache cleared. Next GET will run a fresh scan."}
 
 
 # ── Screener: LEAPS ───────────────────────────────────────────────────────────

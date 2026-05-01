@@ -93,6 +93,24 @@ def screener_ttl() -> int:
     return min(secs, four_hours)
 
 
+def scanner_ttl() -> int:
+    """TTL (seconds) for the broad universe CSP scanner cache entry.
+
+    The scanner is designed to run once at or after EOD close and have its
+    results persist until the following EOD. Unlike the watchlist screeners,
+    which need to refresh during the trading day, the scanner captures a
+    daily snapshot — running it intraday adds noise without adding value.
+
+    TTL is fixed at 23 hours regardless of market status. This means:
+    - A scan run at 4 PM ET is valid until 3 PM ET the next day.
+    - The result survives overnight and through the pre-market window.
+    - It does NOT auto-refresh during the trading day (intentional).
+    - Use DELETE /api/screener/csp-scan to manually bust the cache
+      and force a fresh scan at any time.
+    """
+    return 23 * 3600  # 23 hours
+
+
 # ── Redis connection ──────────────────────────────────────────────────────────
 
 _redis_client: aioredis.Redis | None = None
@@ -114,10 +132,11 @@ def get_redis() -> aioredis.Redis:
 
 # ── Cache key constants ───────────────────────────────────────────────────────
 
-KEY_SCREENER_CSP    = "screener:csp"
-KEY_SCREENER_LEAPS  = "screener:leaps"
-KEY_SCREENER_STOCKS = "screener:stocks"
-KEY_MARKET_POSTURE  = "market:posture"
+KEY_SCREENER_CSP      = "screener:csp"
+KEY_SCREENER_LEAPS    = "screener:leaps"
+KEY_SCREENER_STOCKS   = "screener:stocks"
+KEY_SCREENER_CSP_SCAN = "screener:csp-scan"
+KEY_MARKET_POSTURE    = "market:posture"
 
 
 # ── Core get/set helpers ──────────────────────────────────────────────────────

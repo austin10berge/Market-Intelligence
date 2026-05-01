@@ -253,7 +253,6 @@ function renderTradingViewWidget(candidate, index) {
     if (!container) return;
 
     const studies = buildWidgetStudies(indicatorSettings);
-
     const config = {
         autosize: true,
         symbol: candidate.symbol || "SPY",
@@ -270,43 +269,18 @@ function renderTradingViewWidget(candidate, index) {
         studies,
     };
 
-    // Browsers block dynamically injected <script> tags with textContent.
-    // The correct approach is to write a full HTML document into a blob URL
-    // and load it in an <iframe>. The embed widget script runs inside the
-    // iframe's document where it was parsed statically.
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-  .tradingview-widget-container { height: 100%; }
-</style>
-</head>
-<body>
-<div class="tradingview-widget-container" style="height:100%">
-  <div class="tradingview-widget-container__widget" style="height:100%"></div>
-  <script type="text/javascript"
-    src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
-    async>
-  ${JSON.stringify(config)}
-  <\/script>
-</div>
-</body>
-</html>`;
-
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-
-    container.innerHTML = "";
-    const iframe = document.createElement("iframe");
-    iframe.src = url;
-    iframe.style.width = "100%";
-    iframe.style.height = "100%";
-    iframe.style.border = "none";
-    iframe.onload = () => URL.revokeObjectURL(url);
-    container.appendChild(iframe);
-    widgets.push(url);
+    // The embed-widget-advanced-chart.js script requires the <script> tag to be
+    // present in the DOM as parsed HTML — not injected via createElement.
+    // Setting innerHTML directly causes the browser's HTML parser to process the
+    // script tag correctly, which triggers the widget to initialize.
+    container.innerHTML = `
+        <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+        <script type="text/javascript"
+            src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+            async>
+        ${JSON.stringify(config)}
+        <\/script>
+    `;
 }
 
 function destroyWidgets() {

@@ -16,6 +16,8 @@ dependencies = [
     "uvicorn>=0.29.0",
     "redis[asyncio]>=5.0",
     "pandas-ta>=0.3.14b0",
+    "lxml>=5.0",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
