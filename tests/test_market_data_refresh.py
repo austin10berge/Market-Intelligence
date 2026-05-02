@@ -7,34 +7,11 @@ temp file using the same pattern as test_market_data_store.py.
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
-import types
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
-
-# ── Stub out optional heavy dependencies before any project imports ────────────
-# pandas_ta may not be installed in the CI/test environment.  Stub it so the
-# import chain (refresh → csp_scanner → options → pandas_ta) doesn't blow up.
-
-def _stub_module(name: str) -> None:
-    """Insert a lightweight stub into sys.modules if the real module is absent."""
-    if name not in sys.modules:
-        try:
-            __import__(name)
-        except ModuleNotFoundError:
-            stub = types.ModuleType(name)
-            sys.modules[name] = stub
-            # Also register any sub-packages that might be imported
-            parts = name.split(".")
-            for i in range(1, len(parts)):
-                parent = ".".join(parts[:i])
-                if parent not in sys.modules:
-                    sys.modules[parent] = types.ModuleType(parent)
-
-_stub_module("pandas_ta")
 
 # ── Temp DB setup (must happen before importing the module under test) ─────────
 
@@ -260,10 +237,6 @@ class TestFetchFundamentalsBatch:
 class TestRefreshUniverseIncremental:
     """refresh_universe(full=False) should use period='5d'."""
 
-    def _setup_mocks(self, ctx):
-        """Configure context manager patches — call inside a test."""
-        pass
-
     def test_mode_label_is_incremental(self):
         multi_df = _make_multi_index_df(SMALL_UNIVERSE, n=5)
         ticker_mock = MagicMock()
@@ -380,13 +353,13 @@ class TestRefreshUniverseOhlcvUpsert:
 
     def test_ohlcv_data_readable_after_refresh(self):
         ensure_tables()
-        multi_df = _make_multi_index_df(["AAPL"], n=4)
         ticker_mock = MagicMock()
         ticker_mock.info = _make_ticker_info("AAPL")
 
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            # Single-ticker universe → yf.download returns a flat DataFrame (not MultiIndex)
             patch("src.market_data.refresh.yf.download", return_value=_make_ohlcv_df(n=4)),
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),
@@ -424,7 +397,6 @@ class TestRefreshUniverseFundamentalsUpsert:
 
     def test_fundamentals_readable_after_refresh(self):
         ensure_tables()
-        multi_df = _make_multi_index_df(["GOOG"], n=2)
 
         def _ticker_factory(symbol):
             mock = MagicMock()
@@ -434,6 +406,7 @@ class TestRefreshUniverseFundamentalsUpsert:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["GOOG"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            # Single-ticker universe → flat DataFrame path
             patch("src.market_data.refresh.yf.download", return_value=_make_ohlcv_df(n=2)),
             patch("src.market_data.refresh.yf.Ticker", side_effect=_ticker_factory),
             patch("src.market_data.refresh.time.sleep"),
