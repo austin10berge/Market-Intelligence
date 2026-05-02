@@ -1,10 +1,10 @@
 """Unit tests for CSP scanner technical condition filter logic.
 
 Tests cover:
-  - _check_conditions: all 8 condition types, None-indicator handling,
+  - _check_conditions: condition types, None-indicator handling,
     stacking (AND semantics), unknown-condition fail-safe
   - _compute_technical_indicators: returns correct keys, handles short history
-  - apply_technical_conditions: passes all through when conditions=[]
+  - apply_technical_conditions: pass-through, max_rsi gate behavior
 """
 
 from __future__ import annotations
@@ -192,59 +192,90 @@ class TestCheckConditionsPriceVsMa:
 
 
 class TestCheckConditionsBollingerBand:
-    def test_passes_within_2pct(self):
-        ind = _make_indicators(bb_pct_from_lower=1.5)
+    def test_passes_price_below_midline(self):
+        # price=94, sma20=95 → price < midline
+        ind = _make_indicators(price=94.0, sma20=95.0)
         ok, res = _check_conditions(ind, ["price_near_lower_bb"])
         assert res["price_near_lower_bb"] is True
 
-    def test_passes_at_exactly_0pct(self):
-        ind = _make_indicators(bb_pct_from_lower=0.0)
+    def test_passes_price_below_lower_band(self):
+        # price well below midline (even below lower band) still passes
+        ind = _make_indicators(price=80.0, sma20=95.0)
         ok, res = _check_conditions(ind, ["price_near_lower_bb"])
         assert res["price_near_lower_bb"] is True
 
-    def test_passes_at_exactly_2pct(self):
-        ind = _make_indicators(bb_pct_from_lower=2.0)
-        ok, res = _check_conditions(ind, ["price_near_lower_bb"])
-        assert res["price_near_lower_bb"] is True
-
-    def test_fails_above_2pct(self):
-        ind = _make_indicators(bb_pct_from_lower=3.0)
+    def test_fails_price_above_midline(self):
+        # price=100, sma20=95 → price > midline
+        ind = _make_indicators(price=100.0, sma20=95.0)
         ok, res = _check_conditions(ind, ["price_near_lower_bb"])
         assert res["price_near_lower_bb"] is False
 
-    def test_fails_when_none(self):
-        ind = _make_indicators(bb_pct_from_lower=None)
+    def test_fails_price_equal_midline(self):
+        # price == sma20 is not strictly below
+        ind = _make_indicators(price=95.0, sma20=95.0)
         ok, res = _check_conditions(ind, ["price_near_lower_bb"])
         assert res["price_near_lower_bb"] is False
 
-    def test_fails_below_lower_band(self):
-        """Negative pct means price is below the lower band — should fail."""
-        ind = _make_indicators(bb_pct_from_lower=-0.5)
+    def test_fails_when_sma20_none(self):
+        ind = _make_indicators(sma20=None)
+        ok, res = _check_conditions(ind, ["price_near_lower_bb"])
+        assert res["price_near_lower_bb"] is False
+
+    def test_fails_when_price_none(self):
+        ind = _make_indicators(price=None)
         ok, res = _check_conditions(ind, ["price_near_lower_bb"])
         assert res["price_near_lower_bb"] is False
 
 
-class TestCheckConditionsRsiOversoldBounce:
-    def test_passes_in_range_30_45(self):
-        for rsi_val in [30.0, 37.5, 45.0]:
-            ind = _make_indicators(rsi=rsi_val)
-            ok, res = _check_conditions(ind, ["rsi_oversold_bounce"])
-            assert res["rsi_oversold_bounce"] is True, f"Expected pass for RSI={rsi_val}"
+class TestMaxRsiGate:
+    """max_rsi is applied as an always-on gate in apply_technical_conditions."""
 
-    def test_fails_below_30(self):
-        ind = _make_indicators(rsi=29.9)
-        ok, res = _check_conditions(ind, ["rsi_oversold_bounce"])
-        assert res["rsi_oversold_bounce"] is False
+    def test_no_rsi_filter_when_max_rsi_100(self):
+        rows = [{"symbol": "AAPL"}, {"symbol": "MSFT"}]
+        tickers, _ = apply_technical_conditions(rows, conditions=[], max_rsi=100.0)
+        assert tickers == ["AAPL", "MSFT"]
 
-    def test_fails_above_45(self):
-        ind = _make_indicators(rsi=45.1)
-        ok, res = _check_conditions(ind, ["rsi_oversold_bounce"])
-        assert res["rsi_oversold_bounce"] is False
+    def test_rsi_gate_passes_ticker_below_threshold(self):
+        from unittest.mock import patch, MagicMock
+        fake_indicators = {"price": 100.0, "sma20": 105.0, "sma50": 100.0, "sma200": 90.0,
+                           "bb_lower": 95.0, "bb_pct_from_lower": 5.0, "rsi": 38.0}
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_indicators):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], max_rsi=45.0)
+        assert "TEST" in tickers
 
-    def test_fails_when_none(self):
-        ind = _make_indicators(rsi=None)
-        ok, res = _check_conditions(ind, ["rsi_oversold_bounce"])
-        assert res["rsi_oversold_bounce"] is False
+    def test_rsi_gate_blocks_ticker_above_threshold(self):
+        from unittest.mock import patch, MagicMock
+        fake_indicators = {"price": 100.0, "sma20": 95.0, "sma50": 90.0, "sma200": 80.0,
+                           "bb_lower": 85.0, "bb_pct_from_lower": 15.0, "rsi": 62.0}
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_indicators):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], max_rsi=50.0)
+        assert "TEST" not in tickers
+
+    def test_rsi_gate_fails_at_exact_threshold(self):
+        """RSI must be strictly less than max_rsi — equal does not pass."""
+        from unittest.mock import patch, MagicMock
+        fake_indicators = {"price": 100.0, "sma20": 95.0, "sma50": 90.0, "sma200": 80.0,
+                           "bb_lower": 85.0, "bb_pct_from_lower": 15.0, "rsi": 50.0}
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_indicators):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], max_rsi=50.0)
+        assert "TEST" not in tickers
+
+    def test_rsi_gate_fails_when_rsi_none(self):
+        """When RSI cannot be computed the gate blocks the ticker."""
+        from unittest.mock import patch, MagicMock
+        fake_indicators = {"price": 100.0, "sma20": 95.0, "sma50": 90.0, "sma200": 80.0,
+                           "bb_lower": 85.0, "bb_pct_from_lower": 15.0, "rsi": None}
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_indicators):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], max_rsi=50.0)
+        assert "TEST" not in tickers
 
 
 # ── _check_conditions: stacking (AND semantics) ────────────────────────────────

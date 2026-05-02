@@ -47,6 +47,9 @@ DEFAULT_MAX_PRICE        = 150.0
 DEFAULT_MIN_BETA         = 0.8
 DEFAULT_MAX_BETA         = 2.4
 DEFAULT_MIN_VOL_PCT      = 30.0
+DEFAULT_MAX_RSI          = 50.0
+DEFAULT_MIN_DTE          = 3
+DEFAULT_MAX_DTE          = 46
 
 # yfinance informal rate-limit
 _INFO_BATCH_SIZE    = 50
@@ -101,8 +104,8 @@ AVAILABLE_CONDITIONS: list[dict] = [
     },
     {
         "id": "price_near_lower_bb",
-        "label": "Near Lower Bollinger Band",
-        "description": "Price within 2% of lower Bollinger Band (20-period, 2σ) — mean reversion setup",
+        "label": "Below BB Midline",
+        "description": "Price below Bollinger Band midline (20 SMA) — includes below lower band; broad mean-reversion setup",
         "group": "Bollinger Bands",
     },
     {
@@ -110,12 +113,6 @@ AVAILABLE_CONDITIONS: list[dict] = [
         "label": "Price < 50 SMA",
         "description": "Price pulled back below medium-term MA — potential CSP entry on weakness",
         "group": "Price vs MA",
-    },
-    {
-        "id": "rsi_oversold_bounce",
-        "label": "RSI Oversold Bounce",
-        "description": "RSI(14) between 30–45 — pulled back from overbought, not in freefall",
-        "group": "Momentum",
     },
 ]
 
@@ -137,6 +134,9 @@ class ScannerParams:
     min_beta:         float = DEFAULT_MIN_BETA
     max_beta:         float = DEFAULT_MAX_BETA
     min_vol_pct:      float = DEFAULT_MIN_VOL_PCT
+    max_rsi:          float = DEFAULT_MAX_RSI
+    min_dte:          int   = DEFAULT_MIN_DTE
+    max_dte:          int   = DEFAULT_MAX_DTE
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
 
@@ -153,6 +153,9 @@ class ScannerParams:
         min_beta: float | None = None,
         max_beta: float | None = None,
         min_vol: float | None = None,
+        max_rsi: float | None = None,
+        min_dte: int | None = None,
+        max_dte: int | None = None,
         conditions: str | None = None,
     ) -> "ScannerParams":
         """Build ScannerParams from API query parameters (all optional)."""
@@ -168,6 +171,9 @@ class ScannerParams:
             min_beta         = min_beta  if min_beta  is not None else DEFAULT_MIN_BETA,
             max_beta         = max_beta  if max_beta  is not None else DEFAULT_MAX_BETA,
             min_vol_pct      = min_vol   if min_vol   is not None else DEFAULT_MIN_VOL_PCT,
+            max_rsi          = max_rsi   if max_rsi   is not None else DEFAULT_MAX_RSI,
+            min_dte          = int(min_dte) if min_dte is not None else DEFAULT_MIN_DTE,
+            max_dte          = int(max_dte) if max_dte is not None else DEFAULT_MAX_DTE,
             conditions       = sorted(parsed_conditions),
         )
 
@@ -542,10 +548,7 @@ def _check_conditions(indicators: dict, conditions: list[str]) -> tuple[bool, di
         elif cond == "price_below_sma50":
             results[cond] = bool(p is not None and s50 is not None and p < s50)
         elif cond == "price_near_lower_bb":
-            # Within 2% above the lower band
-            results[cond] = bool(bb_d is not None and 0.0 <= bb_d <= 2.0)
-        elif cond == "rsi_oversold_bounce":
-            results[cond] = bool(rsi is not None and 30.0 <= rsi <= 45.0)
+            results[cond] = bool(p is not None and s20 is not None and p < s20)
         else:
             logger.warning("Unknown condition id '%s' — treating as failed", cond)
             results[cond] = False  # unknown condition — fail-safe
@@ -557,13 +560,15 @@ def _check_conditions(indicators: dict, conditions: list[str]) -> tuple[bool, di
 def apply_technical_conditions(
     vol_rows: list[dict],
     conditions: list[str],
+    max_rsi: float = 100.0,
 ) -> tuple[list[str], list[dict]]:
-    """Apply all active stacked technical conditions.
+    """Apply all active stacked technical conditions plus the RSI threshold gate.
 
     Reads OHLCV from the local store (2y of data). Falls back to yfinance
     if a ticker has no local data.
     """
-    if not conditions:
+    rsi_filter_active = max_rsi < 100.0
+    if not conditions and not rsi_filter_active:
         # No conditions active — pass everyone through
         tickers = [r["symbol"] for r in vol_rows]
         for row in vol_rows:
@@ -598,14 +603,22 @@ def apply_technical_conditions(
             continue
 
         all_passed, results = _check_conditions(indicators, conditions)
+
+        rsi_passed = True
+        if rsi_filter_active:
+            rsi_val = indicators.get("rsi")
+            rsi_passed = rsi_val is not None and rsi_val < max_rsi
+
         row["technical_indicators"] = indicators
         row["technical_conditions"] = results
 
-        if all_passed:
+        if all_passed and rsi_passed:
             passing_tickers.append(symbol)
             passing_rows.append(row)
         else:
             failed = [k for k, v in results.items() if not v]
+            if not rsi_passed:
+                failed.append(f"rsi_max({max_rsi})")
             logger.debug("Conditions failed for %s: %s", symbol, failed)
 
     logger.info(
@@ -676,8 +689,8 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
             "warnings": data_warnings,
         }
 
-    # 4. Technical conditions (only runs if conditions are selected)
-    tech_passing, tech_rows = apply_technical_conditions(vol_rows, params.conditions)
+    # 4. Technical conditions + RSI threshold gate
+    tech_passing, tech_rows = apply_technical_conditions(vol_rows, params.conditions, params.max_rsi)
     if not tech_passing:
         logger.warning("No tickers passed technical conditions filter")
         return {
@@ -693,7 +706,7 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
 
     # 5. Options screener
     logger.info("Passing %d tickers to CSP options screener", len(tech_passing))
-    candidates = screen_csp_candidates(tickers=tech_passing)
+    candidates = screen_csp_candidates(tickers=tech_passing, min_dte=params.min_dte, max_dte=params.max_dte)
 
     filter_summary: FilterSummary = {
         "sp500_count":               len(sp500_tickers),

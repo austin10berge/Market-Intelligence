@@ -155,7 +155,11 @@ def _score_candidate(
     return round(composite, 1)
 
 
-def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
+def screen_csp_candidates(
+    tickers: list[str] | None = None,
+    min_dte: int | None = None,
+    max_dte: int | None = None,
+) -> list[dict]:
     """Find CSP candidates with live Alpaca pricing, technical quality filters
     (RSI, ADX via pandas-ta), and a composite score modelled on mLabs methodology.
 
@@ -173,6 +177,10 @@ def screen_csp_candidates(tickers: list[str] | None = None) -> list[dict]:
         tickers = get_watchlist()
 
     settings = get_csp_settings()
+    if min_dte is not None:
+        settings["min_dte"] = min_dte
+    if max_dte is not None:
+        settings["max_dte"] = max_dte
     logger.info(
         "Screening CSP candidates across %d tickers with settings: %s",
         len(tickers), settings,

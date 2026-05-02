@@ -26,6 +26,9 @@ const _state = {
         min_beta:  0.8,
         max_beta:  2.4,
         min_vol:   30,
+        rsi_max:   50,
+        dte_min:   3,
+        dte_max:   46,
         conditions: [],   // list of active condition IDs
     },
     // Available conditions fetched from API
@@ -38,6 +41,7 @@ const _state = {
     scanPollId: null,
     scanStart:  null,
     conditionsOpen: false,
+    groupByTicker: false,
 };
 
 // ── Param config — drives badge rendering ─────────────────────────────────────
@@ -48,6 +52,9 @@ const PARAM_CONFIG = [
     { key: 'min_beta',  label: 'Beta min',   suffix: '',   min: 0.1, max: 3.0,  step: 0.1, decimals: 1 },
     { key: 'max_beta',  label: 'Beta max',   suffix: '',   min: 0.5, max: 5.0,  step: 0.1, decimals: 1 },
     { key: 'min_vol',   label: 'Vol ≥',      suffix: '%',  min: 10,  max: 100,  step: 5,   decimals: 0 },
+    { key: 'rsi_max',   label: 'RSI <',      suffix: '',   min: 10,  max: 100,  step: 1,   decimals: 0 },
+    { key: 'dte_min',   label: 'DTE ≥',      suffix: 'd',  min: 1,   max: 90,   step: 1,   decimals: 0 },
+    { key: 'dte_max',   label: 'DTE ≤',      suffix: 'd',  min: 1,   max: 180,  step: 1,   decimals: 0 },
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -248,6 +255,9 @@ function _buildQueryString() {
         min_beta:  p.min_beta,
         max_beta:  p.max_beta,
         min_vol:   p.min_vol,
+        max_rsi:   p.rsi_max,
+        min_dte:   p.dte_min,
+        max_dte:   p.dte_max,
     });
     if (p.conditions.length) {
         qs.set('conditions', p.conditions.join(','));
@@ -355,7 +365,6 @@ function _handleScanResult(data) {
 
     document.getElementById('cache-badge-scan').textContent =
         `${data.cached ? 'cached' : 'live'} · ${data.market_status || ''}`;
-    document.getElementById('results-count').textContent = `${candidates.length} results`;
 
     _state.results = candidates;
     _state.sortKey  = 'composite_score';
@@ -365,6 +374,22 @@ function _handleScanResult(data) {
 
 // ── Render results ────────────────────────────────────────────────────────────
 
+function _bestPerTicker(rows) {
+    const best = new Map();
+    for (const c of rows) {
+        const prev = best.get(c.symbol);
+        if (!prev || (c.annualized_roc ?? -Infinity) > (prev.annualized_roc ?? -Infinity)) {
+            best.set(c.symbol, c);
+        }
+    }
+    return [...best.values()];
+}
+
+function toggleGroupByTicker(on) {
+    _state.groupByTicker = on;
+    renderResults();
+}
+
 function renderResults() {
     const container = document.getElementById('results-list');
     if (!_state.results || !_state.results.length) {
@@ -372,7 +397,13 @@ function renderResults() {
         return;
     }
 
-    const sorted = [..._state.results].sort((a, b) => {
+    const display = _state.groupByTicker ? _bestPerTicker(_state.results) : _state.results;
+
+    document.getElementById('results-count').textContent = _state.groupByTicker
+        ? `${display.length} of ${_state.results.length} results`
+        : `${_state.results.length} results`;
+
+    const sorted = [...display].sort((a, b) => {
         const va = _numOrStr(a[_state.sortKey]);
         const vb = _numOrStr(b[_state.sortKey]);
         if (typeof va === 'number' && typeof vb === 'number') {

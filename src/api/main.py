@@ -308,6 +308,9 @@ async def get_csp_scan_candidates(
     min_beta:   float | None = None,
     max_beta:   float | None = None,
     min_vol:    float | None = None,
+    max_rsi:    float | None = None,
+    min_dte:    int   | None = None,
+    max_dte:    int   | None = None,
     conditions: str   | None = None,
 ):
     """Run the broad-universe CSP scanner (S&P 500 + NASDAQ 100).
@@ -335,6 +338,9 @@ async def get_csp_scan_candidates(
         min_beta=min_beta,
         max_beta=max_beta,
         min_vol=min_vol,
+        max_rsi=max_rsi,
+        min_dte=min_dte,
+        max_dte=max_dte,
         conditions=conditions,
     )
     # Each unique param combination gets its own cache key
@@ -372,13 +378,18 @@ async def invalidate_csp_scan_cache(
     min_beta:   float | None = None,
     max_beta:   float | None = None,
     min_vol:    float | None = None,
+    max_rsi:    float | None = None,
+    min_dte:    int   | None = None,
+    max_dte:    int   | None = None,
     conditions: str   | None = None,
 ):
     """Bust the cache for a specific param combination (or the default set)."""
     params = ScannerParams.from_query(
         min_cap=min_cap, max_price=max_price,
         min_beta=min_beta, max_beta=max_beta,
-        min_vol=min_vol, conditions=conditions,
+        min_vol=min_vol, max_rsi=max_rsi,
+        min_dte=min_dte, max_dte=max_dte,
+        conditions=conditions,
     )
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
     await cache_delete(cache_key)
