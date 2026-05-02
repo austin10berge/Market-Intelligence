@@ -119,11 +119,15 @@ class TestApplyFundamentalFilterUsesStore:
         mock_yf.Ticker.assert_not_called()
 
     def test_results_come_from_seeded_data(self):
-        """Results should match what we seeded — all 10 tickers pass."""
+        """Results should match what we seeded — all 10 tickers pass, yfinance never called."""
         params = ScannerParams()
         tickers_to_scan = _TEST_TICKERS[:10]
 
-        passing, rows = apply_fundamental_filter(tickers_to_scan, params)
+        with patch("src.screener.csp_scanner.yf") as mock_yf:
+            passing, rows = apply_fundamental_filter(tickers_to_scan, params)
+
+        # Store path taken — yfinance never touched
+        mock_yf.Ticker.assert_not_called()
 
         # All seeded tickers should pass (values chosen to clear every threshold)
         assert set(passing) == set(tickers_to_scan)
@@ -193,7 +197,7 @@ class TestRunCspScanDataSource:
         assert result["data_source"] == "local_store"
 
     def test_output_has_expected_shape(self):
-        """Output must contain candidates, filter_summary, and warnings keys."""
+        """Output must contain candidates, filter_summary, warnings, and data_source keys."""
         params = ScannerParams()
 
         with (
@@ -206,6 +210,7 @@ class TestRunCspScanDataSource:
         assert "candidates" in result
         assert "filter_summary" in result
         assert "warnings" in result
+        assert result["data_source"] == "local_store"
 
     def test_filter_summary_has_expected_keys(self):
         """filter_summary must expose the stage-by-stage counts."""
@@ -218,6 +223,7 @@ class TestRunCspScanDataSource:
         ):
             result = run_csp_scan(params)
 
+        assert result["data_source"] == "local_store"
         summary = result["filter_summary"]
         expected_keys = {
             "sp500_count", "nasdaq100_count", "combined_unique",
