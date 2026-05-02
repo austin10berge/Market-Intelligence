@@ -16,6 +16,11 @@ COPY discord_bot/ discord_bot/
 # Ensure data directory exists
 RUN mkdir -p data
 
+# ── test target ──────────────────────────────────────────────────────────────
+FROM base AS test
+COPY tests/ tests/
+CMD ["python3", "-m", "pytest", "tests/", "-v", "--tb=short"]
+
 # ── api target ────────────────────────────────────────────────────────────────
 FROM base AS api
 # Clear any stale bytecode so rebuilt images always run fresh .py source

@@ -111,6 +111,38 @@ services:
     profiles:
       - prewarm
 
+  # ── Test runner (profile=test) ───────────────────────────────────────────────
+  # Run: docker compose run --rm test
+  # Run specific file: docker compose run --rm test python3 -m pytest tests/test_market_data_store.py -v
+  test:
+    build:
+      context: .
+      target: test
+    container_name: market-intelligence-test
+    volumes:
+      - sqlite_data:/app/data
+    restart: "no"
+    profiles:
+      - test
+
+  # ── Market data refresh (daily OHLCV + fundamentals, profile=refresh) ───────
+  # Cron entry (LXC host, ET timezone):
+  #   30 16 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm market-data-refresh
+  # Initial backfill (2 years, run once manually):
+  #   docker compose run --rm market-data-refresh python3 -m src.market_data.refresh --full
+  market-data-refresh:
+    build:
+      context: .
+      target: pipeline
+    container_name: market-intelligence-data-refresh
+    env_file: .env
+    command: python3 -m src.market_data.refresh
+    volumes:
+      - sqlite_data:/app/data
+    restart: "no"
+    profiles:
+      - refresh
+
 volumes:
   sqlite_data:
     driver: local
