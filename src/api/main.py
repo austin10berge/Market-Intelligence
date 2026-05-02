@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import sqlite3
-from contextlib import closing
+from contextlib import asynccontextmanager, closing
 from typing import Dict, Any
 
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
@@ -34,12 +34,47 @@ from ..cache import (
 )
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
-from ..screener.csp_scanner import run_csp_scan
+from ..screener.csp_scanner import run_csp_scan, ScannerParams, AVAILABLE_CONDITIONS
+from ..market_data.store import get_store_status, ensure_tables as ensure_market_data_tables
+from ..market_data.refresh import refresh_universe
 from ..main import run_pipeline
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Market Intelligence API")
+
+def _background_backfill() -> None:
+    """Run a full 2-year backfill in a background thread. Called once on first startup."""
+    try:
+        logger.info("Market data store empty — starting initial full backfill (2y)...")
+        result = refresh_universe(full=True)
+        logger.info(
+            "Initial backfill complete: %d OHLCV rows, %d fundamentals in %.1fs",
+            result.get("ohlcv_rows_upserted", 0),
+            result.get("fundamentals_upserted", 0),
+            result.get("total_elapsed_s", 0),
+        )
+    except Exception as exc:
+        logger.error("Initial backfill failed: %s", exc, exc_info=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    ensure_market_data_tables()
+    status = get_store_status()
+    if status["ohlcv_ticker_count"] == 0:
+        # Store is empty — kick off the initial 2-year backfill in the background
+        # so the API starts immediately and the backfill runs concurrently (~2-3 min).
+        asyncio.get_event_loop().run_in_executor(None, _background_backfill)
+    else:
+        logger.info(
+            "Market data store ready: %d tickers, last update %s",
+            status["ohlcv_ticker_count"],
+            status.get("ohlcv_latest_date", "unknown"),
+        )
+    yield
+
+
+app = FastAPI(title="Market Intelligence API", lifespan=lifespan)
 
 # Allow local frontend to access API
 app.add_middleware(
@@ -260,36 +295,67 @@ async def get_csp_candidates():
 
 # ── Screener: CSP Scan (broad universe) ─────────────────────────────────────
 
+@app.get("/api/screener/csp-scan/conditions")
+def get_scan_conditions():
+    """Return the full list of available technical conditions for the scanner UI."""
+    return {"conditions": AVAILABLE_CONDITIONS}
+
+
 @app.get("/api/screener/csp-scan")
-async def get_csp_scan_candidates():
+async def get_csp_scan_candidates(
+    min_cap:    float | None = None,
+    max_price:  float | None = None,
+    min_beta:   float | None = None,
+    max_beta:   float | None = None,
+    min_vol:    float | None = None,
+    conditions: str   | None = None,
+):
     """Run the broad-universe CSP scanner (S&P 500 + NASDAQ 100).
 
-    Designed to be run once at or after EOD close. Results are cached for
-    23 hours regardless of market status — the scan captures a daily snapshot
-    and does not need to refresh intraday.
+    All parameters are optional and default to the scanner defaults when omitted.
+    Different parameter combinations produce independent cache entries so prior
+    results are never overwritten by a different param set.
 
-    A zero-result scan (all filter counts = 0) is never cached — this indicates
-    a bad run (e.g. market closed with no Alpaca data) rather than a valid result.
-    Use DELETE /api/screener/csp-scan to manually bust a stale cache.
+    Query params
+    ------------
+    min_cap    : minimum market cap in billions (default 10)
+    max_price  : maximum stock price (default 150)
+    min_beta   : minimum beta (default 0.8)
+    max_beta   : maximum beta (default 2.4)
+    min_vol    : minimum IV/RV threshold % (default 30)
+    conditions : comma-separated list of technical condition IDs to apply
+
+    Cache TTL: 23 hours regardless of market status (EOD snapshot design).
+    Zero-universe results are never cached.
+    Use DELETE /api/screener/csp-scan to bust any cached result.
     """
-    envelope = await cache_get(KEY_SCREENER_CSP_SCAN)
+    params = ScannerParams.from_query(
+        min_cap=min_cap,
+        max_price=max_price,
+        min_beta=min_beta,
+        max_beta=max_beta,
+        min_vol=min_vol,
+        conditions=conditions,
+    )
+    # Each unique param combination gets its own cache key
+    cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
+
+    envelope = await cache_get(cache_key)
     if envelope is not None:
         payload = envelope["data"]
         payload.update(_cache_meta(envelope))
         return payload
 
     try:
-        result = await asyncio.to_thread(run_csp_scan)
+        result = await asyncio.to_thread(run_csp_scan, params)
 
-        # Refuse to cache a zero-result scan — it means Alpaca returned no
-        # options data (market closed, bad run) rather than a valid empty screen.
         summary = result.get("filter_summary", {})
         if summary.get("combined_unique", 0) > 0:
-            await cache_set(KEY_SCREENER_CSP_SCAN, result, ttl=scanner_ttl())
+            await cache_set(cache_key, result, ttl=scanner_ttl())
         else:
             logger.warning(
                 "CSP scan returned zero universe tickers — result not cached. "
-                "Run after market close (4 PM ET) when Alpaca options data is available."
+                "Params: %s", params
             )
 
         result.update(_cache_meta(None))
@@ -300,10 +366,23 @@ async def get_csp_scan_candidates():
 
 
 @app.delete("/api/screener/csp-scan")
-async def invalidate_csp_scan_cache():
-    """Bust the CSP scan cache so the next GET triggers a fresh scan."""
-    await cache_delete(KEY_SCREENER_CSP_SCAN)
-    return {"status": "ok", "message": "CSP scan cache cleared. Next GET will run a fresh scan."}
+async def invalidate_csp_scan_cache(
+    min_cap:    float | None = None,
+    max_price:  float | None = None,
+    min_beta:   float | None = None,
+    max_beta:   float | None = None,
+    min_vol:    float | None = None,
+    conditions: str   | None = None,
+):
+    """Bust the cache for a specific param combination (or the default set)."""
+    params = ScannerParams.from_query(
+        min_cap=min_cap, max_price=max_price,
+        min_beta=min_beta, max_beta=max_beta,
+        min_vol=min_vol, conditions=conditions,
+    )
+    cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
+    await cache_delete(cache_key)
+    return {"status": "ok", "message": f"Cache cleared for key {cache_key}"}
 
 
 # ── Screener: LEAPS ───────────────────────────────────────────────────────────
@@ -532,3 +611,46 @@ def api_delete_strategy(strategy_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Market Data Store ─────────────────────────────────────────────────────────
+
+@app.get("/api/market-data/status")
+def api_market_data_status():
+    """Return metadata about the local OHLCV + fundamentals store.
+
+    Includes ticker count, row count, last update time, and staleness warning.
+    """
+    try:
+        ensure_market_data_tables()
+        return get_store_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/market-data/refresh")
+async def api_market_data_refresh(
+    background_tasks: BackgroundTasks,
+    full: bool = False,
+):
+    """Trigger an OHLCV + fundamentals data refresh.
+
+    Query params:
+        full: If true, download 2 years of history (initial backfill).
+              If false (default), download last 5 trading days (incremental).
+
+    The refresh runs as a background task — this endpoint returns immediately.
+    """
+    def _run_refresh():
+        try:
+            result = refresh_universe(full=full)
+            logger.info("Market data refresh complete: %s", result)
+        except Exception as exc:
+            logger.error("Market data refresh failed: %s", exc, exc_info=True)
+
+    background_tasks.add_task(asyncio.to_thread, _run_refresh)
+    return {
+        "status": "started",
+        "mode": "full" if full else "incremental",
+        "message": "Data refresh started in the background. Check /api/market-data/status for progress.",
+    }
