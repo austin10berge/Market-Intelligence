@@ -27,6 +27,8 @@ const _state = {
         max_beta:  2.4,
         min_vol:   30,
         rsi_max:   50,
+        adx_min:   15,
+        adx_max:   50,
         dte_min:   3,
         dte_max:   46,
         conditions: [],   // list of active condition IDs
@@ -61,6 +63,8 @@ const PARAM_CONFIG = [
     { key: 'max_beta',  label: 'Beta max',   suffix: '',   min: 0.5, max: 5.0,  step: 0.1, decimals: 1 },
     { key: 'min_vol',   label: 'Vol ≥',      suffix: '%',  min: 10,  max: 100,  step: 5,   decimals: 0 },
     { key: 'rsi_max',   label: 'RSI <',      suffix: '',   min: 10,  max: 100,  step: 1,   decimals: 0 },
+    { key: 'adx_min',   label: 'ADX ≥',      suffix: '',   min: 0,   max: 100,  step: 1,   decimals: 0 },
+    { key: 'adx_max',   label: 'ADX ≤',      suffix: '',   min: 0,   max: 100,  step: 1,   decimals: 0 },
     { key: 'dte_min',   label: 'DTE ≥',      suffix: 'd',  min: 1,   max: 90,   step: 1,   decimals: 0 },
     { key: 'dte_max',   label: 'DTE ≤',      suffix: 'd',  min: 1,   max: 180,  step: 1,   decimals: 0 },
 ];
@@ -264,6 +268,8 @@ function _buildQueryString() {
         max_beta:  p.max_beta,
         min_vol:   p.min_vol,
         max_rsi:   p.rsi_max,
+        min_adx:   p.adx_min,
+        max_adx:   p.adx_max,
         min_dte:   p.dte_min,
         max_dte:   p.dte_max,
     });
