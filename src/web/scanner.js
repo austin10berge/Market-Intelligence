@@ -18,6 +18,34 @@ const API_BASE = (() => {
 
 const SCANNER_PARAMS_KEY = 'market-intelligence:csp-scanner-params';
 
+// ── Scanner state ─────────────────────────────────────────────────────────────
+
+const _state = {
+    // Current param values — editable by user.
+    // Defaults here must match DEFAULT_SCANNER_PARAMS in technical-analysis-helpers.js.
+    params: {
+        min_cap:   10,
+        max_price: 150,
+        min_beta:  0.8,
+        max_beta:  2.4,
+        min_vol:   30,
+        rsi_max:   50,
+        adx_min:   15,
+        adx_max:   50,
+        dte_min:   3,
+        dte_max:   46,
+        conditions: [],   // list of active condition IDs
+    },
+    // Available conditions fetched from API
+    availableConditions: [],
+    // UI
+    scanPollId: null,
+    scanStart:  null,
+    conditionsOpen: false,
+};
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+
 function _persistParams() {
     try {
         window.localStorage.setItem(SCANNER_PARAMS_KEY, JSON.stringify(_state.params));
@@ -43,31 +71,6 @@ function _restoreParams() {
         if (Array.isArray(saved.conditions)) p.conditions = saved.conditions;
     } catch { /* corrupt storage — use defaults */ }
 }
-
-// ── Scanner state ─────────────────────────────────────────────────────────────
-
-const _state = {
-    // Current param values — editable by user
-    params: {
-        min_cap:   10,
-        max_price: 150,
-        min_beta:  0.8,
-        max_beta:  2.4,
-        min_vol:   30,
-        rsi_max:   50,
-        adx_min:   15,
-        adx_max:   50,
-        dte_min:   3,
-        dte_max:   46,
-        conditions: [],   // list of active condition IDs
-    },
-    // Available conditions fetched from API
-    availableConditions: [],
-    // UI
-    scanPollId: null,
-    scanStart:  null,
-    conditionsOpen: false,
-};
 
 // ── Stock table state ─────────────────────────────────────────────────────────
 
