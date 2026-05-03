@@ -583,7 +583,7 @@ def apply_technical_conditions(
     min_adx: float = 0.0,
     max_adx: float = 100.0,
 ) -> tuple[list[str], list[dict]]:
-    """Apply all active stacked technical conditions plus the RSI threshold gate.
+    """Apply stacked technical conditions plus the RSI and ADX threshold gates.
 
     Reads OHLCV from the local store (2y of data). Falls back to yfinance
     if a ticker has no local data.
