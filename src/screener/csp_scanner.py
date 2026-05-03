@@ -707,7 +707,13 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
     fundamental_passing, fundamental_rows = apply_fundamental_filter(universe, params)
     if not fundamental_passing:
         logger.warning("No tickers passed fundamental filter")
-        return {"candidates": [], "filter_summary": empty_summary, "fundamental_data": [], "warnings": data_warnings}
+        return {
+            "candidates": [],
+            "filter_summary": empty_summary,
+            "fundamental_data": [],
+            "data_source": "local_store" if store_status["fundamentals_count"] >= 50 else "yfinance_live",
+            "warnings": data_warnings,
+        }
 
     # 3. Vol filter
     vol_passing, vol_rows = apply_vol_filter(fundamental_rows, params)
@@ -717,6 +723,7 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
             "candidates": [],
             "filter_summary": {**empty_summary, "fundamental_passed": len(fundamental_passing)},
             "fundamental_data": fundamental_rows,
+            "data_source": "local_store" if store_status["fundamentals_count"] >= 50 else "yfinance_live",
             "warnings": data_warnings,
         }
 
@@ -734,6 +741,7 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
                 "vol_passed": len(vol_passing),
             },
             "fundamental_data": vol_rows,
+            "data_source": "local_store" if store_status["fundamentals_count"] >= 50 else "yfinance_live",
             "warnings": data_warnings,
         }
 

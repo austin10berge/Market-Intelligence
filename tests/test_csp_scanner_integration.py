@@ -185,7 +185,7 @@ class TestRunCspScanDataSource:
 
     def test_data_source_is_local_store(self):
         """run_csp_scan must report local_store when ≥50 fundamentals are seeded."""
-        params = ScannerParams()
+        params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
             patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
@@ -198,7 +198,7 @@ class TestRunCspScanDataSource:
 
     def test_output_has_expected_shape(self):
         """Output must contain candidates, filter_summary, warnings, and data_source keys."""
-        params = ScannerParams()
+        params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
             patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
@@ -214,7 +214,7 @@ class TestRunCspScanDataSource:
 
     def test_filter_summary_has_expected_keys(self):
         """filter_summary must expose the stage-by-stage counts."""
-        params = ScannerParams()
+        params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
             patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
@@ -234,7 +234,7 @@ class TestRunCspScanDataSource:
 
     def test_no_http_requests_during_scan(self):
         """Neither yfinance nor the index fetchers should make real HTTP calls."""
-        params = ScannerParams()
+        params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
             patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
