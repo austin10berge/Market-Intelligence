@@ -453,3 +453,77 @@ class TestScannerParamsAdx:
         p1 = ScannerParams(min_adx=15.0, max_adx=50.0)
         p2 = ScannerParams(min_adx=20.0, max_adx=50.0)
         assert p1.cache_key_suffix() != p2.cache_key_suffix()
+
+
+class TestAdxGate:
+    """ADX min/max gate in apply_technical_conditions."""
+
+    def _fake_indicators_with_adx(self, adx: float | None) -> dict:
+        return {
+            "price": 100.0, "sma20": 95.0, "sma50": 90.0, "sma200": 80.0,
+            "bb_lower": 85.0, "bb_pct_from_lower": 15.0, "rsi": 40.0,
+            "adx": adx,
+        }
+
+    def test_adx_gate_inactive_at_zero_to_100(self):
+        """min_adx=0, max_adx=100 never filters anything — pass-through."""
+        rows = [{"symbol": "AAPL"}, {"symbol": "MSFT"}]
+        tickers, _ = apply_technical_conditions(rows, conditions=[], min_adx=0.0, max_adx=100.0)
+        assert tickers == ["AAPL", "MSFT"]
+
+    def test_adx_gate_passes_ticker_in_range(self):
+        from unittest.mock import patch, MagicMock
+        fake_ind = self._fake_indicators_with_adx(25.0)
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_ind):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], min_adx=15.0, max_adx=50.0)
+        assert "TEST" in tickers
+
+    def test_adx_gate_blocks_ticker_below_min(self):
+        from unittest.mock import patch, MagicMock
+        fake_ind = self._fake_indicators_with_adx(10.0)  # below min_adx=15
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_ind):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], min_adx=15.0, max_adx=50.0)
+        assert "TEST" not in tickers
+
+    def test_adx_gate_blocks_ticker_above_max(self):
+        from unittest.mock import patch, MagicMock
+        fake_ind = self._fake_indicators_with_adx(60.0)  # above max_adx=50
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_ind):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], min_adx=15.0, max_adx=50.0)
+        assert "TEST" not in tickers
+
+    def test_adx_gate_passes_at_exact_min(self):
+        """Boundary: ADX == min_adx should pass (inclusive)."""
+        from unittest.mock import patch, MagicMock
+        fake_ind = self._fake_indicators_with_adx(15.0)
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_ind):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], min_adx=15.0, max_adx=50.0)
+        assert "TEST" in tickers
+
+    def test_adx_gate_passes_at_exact_max(self):
+        """Boundary: ADX == max_adx should pass (inclusive)."""
+        from unittest.mock import patch, MagicMock
+        fake_ind = self._fake_indicators_with_adx(50.0)
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_ind):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], min_adx=15.0, max_adx=50.0)
+        assert "TEST" in tickers
+
+    def test_adx_gate_blocks_when_adx_none(self):
+        """If ADX cannot be computed, the ticker is dropped when filter is active."""
+        from unittest.mock import patch, MagicMock
+        fake_ind = self._fake_indicators_with_adx(None)
+        with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \
+             patch("src.screener.csp_scanner._compute_technical_indicators", return_value=fake_ind):
+            rows = [{"symbol": "TEST"}]
+            tickers, _ = apply_technical_conditions(rows, conditions=[], min_adx=15.0, max_adx=50.0)
+        assert "TEST" not in tickers

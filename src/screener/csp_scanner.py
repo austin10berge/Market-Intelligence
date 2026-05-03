@@ -580,6 +580,8 @@ def apply_technical_conditions(
     vol_rows: list[dict],
     conditions: list[str],
     max_rsi: float = 100.0,
+    min_adx: float = 0.0,
+    max_adx: float = 100.0,
 ) -> tuple[list[str], list[dict]]:
     """Apply all active stacked technical conditions plus the RSI threshold gate.
 
@@ -587,7 +589,8 @@ def apply_technical_conditions(
     if a ticker has no local data.
     """
     rsi_filter_active = max_rsi < 100.0
-    if not conditions and not rsi_filter_active:
+    adx_filter_active = min_adx > 0 or max_adx < 100.0
+    if not conditions and not rsi_filter_active and not adx_filter_active:
         # No conditions active — pass everyone through
         tickers = [r["symbol"] for r in vol_rows]
         for row in vol_rows:
@@ -597,8 +600,10 @@ def apply_technical_conditions(
     passing_tickers: list[str] = []
     passing_rows: list[dict] = []
 
-    logger.info("Technical conditions filter: %d tickers, %d active conditions: %s",
-                len(vol_rows), len(conditions), conditions)
+    logger.info(
+        "Technical conditions filter: %d tickers, %d conditions: %s, RSI<%.0f, ADX %.0f-%.0f",
+        len(vol_rows), len(conditions), conditions, max_rsi, min_adx, max_adx,
+    )
 
     for row in vol_rows:
         symbol = row["symbol"]
@@ -628,16 +633,23 @@ def apply_technical_conditions(
             rsi_val = indicators.get("rsi")
             rsi_passed = rsi_val is not None and rsi_val < max_rsi
 
+        adx_passed = True
+        if adx_filter_active:
+            adx_val = indicators.get("adx")
+            adx_passed = adx_val is not None and min_adx <= adx_val <= max_adx
+
         row["technical_indicators"] = indicators
         row["technical_conditions"] = results
 
-        if all_passed and rsi_passed:
+        if all_passed and rsi_passed and adx_passed:
             passing_tickers.append(symbol)
             passing_rows.append(row)
         else:
             failed = [k for k, v in results.items() if not v]
             if not rsi_passed:
                 failed.append(f"rsi_max({max_rsi})")
+            if not adx_passed:
+                failed.append(f"adx_range({min_adx}-{max_adx})")
             logger.debug("Conditions failed for %s: %s", symbol, failed)
 
     logger.info(
@@ -709,7 +721,9 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         }
 
     # 4. Technical conditions + RSI threshold gate
-    tech_passing, tech_rows = apply_technical_conditions(vol_rows, params.conditions, params.max_rsi)
+    tech_passing, tech_rows = apply_technical_conditions(
+        vol_rows, params.conditions, params.max_rsi, params.min_adx, params.max_adx
+    )
     if not tech_passing:
         logger.warning("No tickers passed technical conditions filter")
         return {
