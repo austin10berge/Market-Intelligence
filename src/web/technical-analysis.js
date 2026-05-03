@@ -229,7 +229,7 @@ async function renderCandidates() {
     }).join("");
 
     for (const [index, candidate] of tickerCandidates.entries()) {
-        renderTradingViewWidget(candidate, index);
+        await renderTradingViewWidget(candidate, index);
     }
 }
 
@@ -247,13 +247,30 @@ function dedupeCandidatesBySymbol(allCandidates) {
     });
 }
 
-function renderTradingViewWidget(candidate, index) {
+let tvLibReady = null;
+
+function loadTvLib() {
+    if (tvLibReady) return tvLibReady;
+    tvLibReady = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://s3.tradingview.com/tv.js";
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+    });
+    return tvLibReady;
+}
+
+async function renderTradingViewWidget(candidate, index) {
     const containerId = `ta-chart-${index}`;
     const container = document.getElementById(containerId);
     if (!container) return;
 
+    await loadTvLib();
+
     const studies = buildWidgetStudies(indicatorSettings);
-    const config = {
+    new window.TradingView.widget({
+        container_id: containerId,
         autosize: true,
         symbol: candidate.symbol || "SPY",
         interval: indicatorSettings.interval,
@@ -267,19 +284,7 @@ function renderTradingViewWidget(candidate, index) {
         allow_symbol_change: false,
         save_image: false,
         studies,
-    };
-
-    const widgetDiv = document.createElement("div");
-    widgetDiv.className = "tradingview-widget-container__widget";
-    widgetDiv.style.cssText = "height:100%;width:100%";
-    container.appendChild(widgetDiv);
-
-    const script = document.createElement("script");
-    script.type = "text/javascript";
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.async = true;
-    script.textContent = JSON.stringify(config);
-    container.appendChild(script);
+    });
 }
 
 function destroyWidgets() {
@@ -289,9 +294,6 @@ function destroyWidgets() {
     widgets = [];
 }
 
-function resolveTradingViewSymbol(symbol) {
-    return symbol || "SPY";
-}
 
 function buildContractSummary(candidate) {
     const expiration = candidate.expiration || "No expiration";
