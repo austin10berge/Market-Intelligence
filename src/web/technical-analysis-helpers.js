@@ -150,7 +150,7 @@ export const DEFAULT_SCANNER_PARAMS = {
 export function loadScannerParams() {
     try {
         const raw = window.localStorage.getItem(SCANNER_PARAMS_STORAGE_KEY);
-        if (!raw) return { ...DEFAULT_SCANNER_PARAMS, conditions: [] };
+        if (!raw) return { ...DEFAULT_SCANNER_PARAMS };
         const parsed = JSON.parse(raw);
         return {
             min_cap:   typeof parsed.min_cap   === 'number' ? parsed.min_cap   : DEFAULT_SCANNER_PARAMS.min_cap,
@@ -166,7 +166,7 @@ export function loadScannerParams() {
             conditions: Array.isArray(parsed.conditions) ? parsed.conditions : [],
         };
     } catch {
-        return { ...DEFAULT_SCANNER_PARAMS, conditions: [] };
+        return { ...DEFAULT_SCANNER_PARAMS };
     }
 }
 
