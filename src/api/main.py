@@ -328,6 +328,9 @@ async def get_csp_scan_candidates(
     min_beta   : minimum beta (default 0.8)
     max_beta   : maximum beta (default 2.4)
     min_vol    : minimum IV/RV threshold % (default 30)
+    max_rsi    : maximum RSI(14) threshold (default 65)
+    min_adx    : minimum ADX(14) threshold (default 15)
+    max_adx    : maximum ADX(14) threshold (default 50)
     conditions : comma-separated list of technical condition IDs to apply
 
     Cache TTL: 23 hours regardless of market status (EOD snapshot design).
