@@ -21,8 +21,10 @@ The Technical Analysis page currently shows CSP candidates sourced from `GET /ap
 
 ### 2. Scanner Param Persistence (`scanner.js`)
 
-- `scanner.js` currently holds params in memory only (`_state.params`). Add a localStorage write on each successful scan run, saving `_state.params` to key `market-intelligence:csp-scanner-params`.
-- This enables the Technical Analysis page to reuse whatever params the user last ran on the Scanner page.
+- `scanner.js` currently holds all state in memory only (`_state.params` + selected conditions). Params are lost on every page reload.
+- **On page load:** restore `_state.params` (all numeric filters + conditions array) from `market-intelligence:csp-scanner-params` in localStorage, falling back to hardcoded defaults. Sync the restored values into every form input and condition checkbox so the UI reflects the loaded state.
+- **On every input change:** write the full `_state.params` to `market-intelligence:csp-scanner-params` immediately (not just on scan run). This covers numeric filter changes and condition toggle changes.
+- This ensures the Scanner page survives page reloads and browser restarts, and also enables the Technical Analysis page to reuse whatever params the user last configured.
 
 ### 3. Universe Data Loading (`technical-analysis.js`)
 
