@@ -502,6 +502,15 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
             if rsi_series is not None and not rsi_series.empty:
                 rsi = float(rsi_series.iloc[-1])
 
+        # ADX(14) — needs High/Low/Close; 2× period (28 bars) to warm up
+        adx: float | None = None
+        if len(hist) >= 28:
+            adx_df = ta.adx(hist["High"], hist["Low"], hist["Close"], length=14)
+            if adx_df is not None and not adx_df.empty:
+                adx_col = [c for c in adx_df.columns if c.upper().startswith("ADX")]
+                if adx_col:
+                    adx = round(float(adx_df[adx_col[0]].iloc[-1]), 2)
+
         return {
             "price":               round(last_price, 2),
             "sma20":               round(sma20, 2)  if sma20  is not None else None,
@@ -510,6 +519,7 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
             "bb_lower":            round(bb_lower, 2) if bb_lower is not None else None,
             "bb_pct_from_lower":   bb_pct_from_lower,
             "rsi":                 round(rsi, 2) if rsi is not None else None,
+            "adx":                 adx,
         }
     except Exception as exc:
         logger.warning("Technical indicators failed for %s: %s", symbol, exc)

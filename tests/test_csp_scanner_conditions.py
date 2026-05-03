@@ -389,6 +389,26 @@ class TestComputeTechnicalIndicators:
         assert result is not None
         assert result["sma20"] > result["sma50"] > result["sma200"]
 
+    def test_contains_adx_key(self):
+        hist = _make_hist(n=250)
+        result = _compute_technical_indicators("TEST", hist)
+        assert result is not None
+        assert "adx" in result
+
+    def test_adx_is_float_for_sufficient_history(self):
+        hist = _make_hist(n=250)
+        result = _compute_technical_indicators("TEST", hist)
+        assert result is not None
+        assert isinstance(result["adx"], float)
+
+    def test_adx_in_valid_range(self):
+        """ADX is always 0–100."""
+        hist = _make_hist(n=250)
+        result = _compute_technical_indicators("TEST", hist)
+        assert result is not None
+        assert result["adx"] is not None
+        assert 0.0 <= result["adx"] <= 100.0
+
 
 # ── apply_technical_conditions: pass-through when no conditions ───────────────
 
