@@ -4,22 +4,31 @@ import {
     sanitizeIndicatorSettings,
     buildWidgetStudies,
     buildWidgetStudyOverrides,
+    loadScannerParams,
+    buildScanQueryString,
 } from "./technical-analysis-helpers.js";
 
 const API_BASE = window.MARKET_INTELLIGENCE_CONFIG?.apiBase || "/MISSING_CONFIG_JS_SEE_CONSOLE";
 
 let candidates = [];
-/** Map of symbol → stock screener row, used to fill in IV/RV20, IV PCT, P/E */
 let stockDataBySymbol = {};
 let indicatorSettings = loadIndicatorSettings();
 let widgets = [];
+let activeTab = "watchlist";   // "watchlist" | "universe"
+let universeData = null;       // null = not yet loaded; [] = loaded (may be empty)
 
 document.addEventListener("DOMContentLoaded", async () => {
     renderControls();
-    // Fetch CSP candidates and stock screener data concurrently so the stock
-    // screener's already-computed IV/RV20, IV PCT, and P/E values are available
-    // when we render each chart card.
-    await Promise.allSettled([loadCandidates(), loadStockData()]);
+    initTabs();
+
+    const refreshBtn = document.getElementById("btn-universe-refresh");
+    refreshBtn.style.display = activeTab === "universe" ? "" : "none";
+
+    if (activeTab === "universe") {
+        await Promise.allSettled([loadUniverseCandidates(), loadStockData()]);
+    } else {
+        await Promise.allSettled([loadCandidates(), loadStockData()]);
+    }
 });
 
 function getControlsEl() {
@@ -37,7 +46,10 @@ function getMessageEl() {
 function loadIndicatorSettings() {
     try {
         const raw = window.localStorage.getItem(INDICATOR_STORAGE_KEY);
-        return raw ? sanitizeIndicatorSettings(JSON.parse(raw)) : DEFAULT_INDICATOR_SETTINGS;
+        if (!raw) return DEFAULT_INDICATOR_SETTINGS;
+        const parsed = JSON.parse(raw);
+        if (parsed.activeTab === "universe") activeTab = "universe";
+        return sanitizeIndicatorSettings(parsed);
     } catch {
         return DEFAULT_INDICATOR_SETTINGS;
     }
@@ -45,9 +57,67 @@ function loadIndicatorSettings() {
 
 function persistIndicatorSettings() {
     try {
-        window.localStorage.setItem(INDICATOR_STORAGE_KEY, JSON.stringify(indicatorSettings));
+        window.localStorage.setItem(INDICATOR_STORAGE_KEY, JSON.stringify({
+            ...indicatorSettings,
+            activeTab,
+        }));
     } catch {
         // Preserve interactivity even if storage is unavailable.
+    }
+}
+
+function initTabs() {
+    document.getElementById("tab-watchlist").classList.toggle("active", activeTab === "watchlist");
+    document.getElementById("tab-universe").classList.toggle("active", activeTab === "universe");
+}
+
+window.switchTab = async function switchTab(tab) {
+    if (tab === activeTab) return;
+    activeTab = tab;
+    persistIndicatorSettings();
+
+    document.getElementById("tab-watchlist").classList.toggle("active", tab === "watchlist");
+    document.getElementById("tab-universe").classList.toggle("active", tab === "universe");
+
+    const refreshBtn = document.getElementById("btn-universe-refresh");
+    refreshBtn.style.display = tab === "universe" ? "" : "none";
+
+    if (tab === "watchlist") {
+        await renderCandidates(candidates);
+    } else {
+        if (universeData !== null) {
+            await renderCandidates(universeData);
+        } else {
+            await loadUniverseCandidates();
+        }
+    }
+};
+
+window.refreshUniverse = async function refreshUniverse() {
+    universeData = null;
+    await loadUniverseCandidates();
+};
+
+async function loadUniverseCandidates() {
+    setMessage("Loading universe candidates…");
+    destroyWidgets();
+    getListEl().innerHTML = "";
+
+    try {
+        const params = loadScannerParams();
+        const qs = buildScanQueryString(params);
+        const response = await fetch(`${API_BASE}/screener/csp-scan?${qs}`);
+        if (!response.ok) throw new Error(`Server error: ${response.status}`);
+        const payload = await response.json();
+        universeData = Array.isArray(payload.candidates) ? payload.candidates : [];
+        await renderCandidates(universeData);
+    } catch (error) {
+        setMessage("Unable to load universe candidates.");
+        getListEl().innerHTML = `
+            <section class="glass card full-width">
+                <p class="subtitle">${escapeHtml(error.message)}</p>
+            </section>
+        `;
     }
 }
 
@@ -64,18 +134,19 @@ async function loadStockData() {
 }
 
 async function loadCandidates() {
+    if (activeTab !== "watchlist") return;
     setMessage("Loading CSP candidates...");
 
     try {
         const response = await fetch(`${API_BASE}/screener/csp`);
-        if (!response.ok) {
-            throw new Error("Failed to fetch CSP candidates");
-        }
-
+        if (!response.ok) throw new Error("Failed to fetch CSP candidates");
         const payload = await response.json();
         candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-        await renderCandidates();
+        if (activeTab === "watchlist") {
+            await renderCandidates(candidates);
+        }
     } catch (error) {
+        if (activeTab !== "watchlist") return;
         setMessage("Unable to load CSP candidates.");
         getListEl().innerHTML = `
             <section class="glass card full-width">
@@ -163,7 +234,8 @@ async function handleControlsChanged() {
     indicatorSettings = sanitizeIndicatorSettings(next);
     persistIndicatorSettings();
     renderControls();
-    await renderCandidates();
+    const source = activeTab === "universe" ? (universeData ?? []) : candidates;
+    await renderCandidates(source);
 }
 
 /**
@@ -182,20 +254,25 @@ function resolveStockMetrics(candidate) {
     };
 }
 
-async function renderCandidates() {
+async function renderCandidates(source) {
     destroyWidgets();
 
-    const tickerCandidates = dedupeCandidatesBySymbol(candidates);
+    const tickerCandidates = dedupeCandidatesBySymbol(source);
 
     if (!tickerCandidates.length) {
-        setMessage("No viable CSP candidates found.");
+        const label = activeTab === "universe" ? "universe" : "CSP";
+        setMessage(`No viable ${label} candidates found.`);
         getListEl().innerHTML = "";
         return;
     }
 
-    setMessage(`${tickerCandidates.length} tickers loaded from ${candidates.length} CSP candidates.`);
+    const label = activeTab === "universe" ? "universe" : "CSP";
+    setMessage(`${tickerCandidates.length} tickers loaded from ${source.length} ${label} candidates.`);
     getListEl().innerHTML = tickerCandidates.map((candidate, index) => {
         const stockMetrics = resolveStockMetrics(candidate);
+        const score = Number.isFinite(candidate.composite_score)
+            ? candidate.composite_score.toFixed(1)
+            : "—";
         return `
         <section class="glass card full-width ta-ticker-card" data-symbol="${escapeHtml(candidate.symbol || "")}">
             <div class="card-header">
@@ -205,6 +282,7 @@ async function renderCandidates() {
                 </div>
             </div>
             <div class="ta-stock-grid">
+                ${metricCell("Score", score)}
                 ${metricCell("RSI", formatMetric(candidate.rsi))}
                 ${metricCell("ADX", formatMetric(candidate.adx))}
                 ${metricCell("IV/RV20", formatMetric(stockMetrics.atm_iv_rv20))}
