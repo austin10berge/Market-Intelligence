@@ -269,18 +269,17 @@ function renderTradingViewWidget(candidate, index) {
         studies,
     };
 
-    // The embed-widget-advanced-chart.js script requires the <script> tag to be
-    // present in the DOM as parsed HTML — not injected via createElement.
-    // Setting innerHTML directly causes the browser's HTML parser to process the
-    // script tag correctly, which triggers the widget to initialize.
-    container.innerHTML = `
-        <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
-        <script type="text/javascript"
-            src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
-            async>
-        ${JSON.stringify(config)}
-        <\/script>
-    `;
+    const widgetDiv = document.createElement("div");
+    widgetDiv.className = "tradingview-widget-container__widget";
+    widgetDiv.style.cssText = "height:100%;width:100%";
+    container.appendChild(widgetDiv);
+
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.async = true;
+    script.textContent = JSON.stringify(config);
+    container.appendChild(script);
 }
 
 function destroyWidgets() {
