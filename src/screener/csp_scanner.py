@@ -51,6 +51,8 @@ DEFAULT_MIN_VOL_PCT      = 30.0
 DEFAULT_MAX_RSI          = 50.0
 DEFAULT_MIN_DTE          = 3
 DEFAULT_MAX_DTE          = 46
+DEFAULT_MIN_ADX          = 15.0
+DEFAULT_MAX_ADX          = 50.0
 
 # yfinance informal rate-limit
 _INFO_BATCH_SIZE    = 50
@@ -138,6 +140,8 @@ class ScannerParams:
     max_rsi:          float = DEFAULT_MAX_RSI
     min_dte:          int   = DEFAULT_MIN_DTE
     max_dte:          int   = DEFAULT_MAX_DTE
+    min_adx:          float = DEFAULT_MIN_ADX
+    max_adx:          float = DEFAULT_MAX_ADX
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
 
@@ -157,6 +161,8 @@ class ScannerParams:
         max_rsi: float | None = None,
         min_dte: int | None = None,
         max_dte: int | None = None,
+        min_adx: float | None = None,
+        max_adx: float | None = None,
         conditions: str | None = None,
     ) -> "ScannerParams":
         """Build ScannerParams from API query parameters (all optional)."""
@@ -175,6 +181,8 @@ class ScannerParams:
             max_rsi          = max_rsi   if max_rsi   is not None else DEFAULT_MAX_RSI,
             min_dte          = int(min_dte) if min_dte is not None else DEFAULT_MIN_DTE,
             max_dte          = int(max_dte) if max_dte is not None else DEFAULT_MAX_DTE,
+            min_adx          = min_adx   if min_adx   is not None else DEFAULT_MIN_ADX,
+            max_adx          = max_adx   if max_adx   is not None else DEFAULT_MAX_ADX,
             conditions       = sorted(parsed_conditions),
         )
 

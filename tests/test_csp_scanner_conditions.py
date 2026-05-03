@@ -427,3 +427,29 @@ class TestApplyTechnicalConditions:
         # Each row should have an empty technical_conditions dict
         for row in out_rows:
             assert row.get("technical_conditions") == {}
+
+
+class TestScannerParamsAdx:
+    def test_default_min_adx(self):
+        assert ScannerParams().min_adx == 15.0
+
+    def test_default_max_adx(self):
+        assert ScannerParams().max_adx == 50.0
+
+    def test_from_query_uses_defaults_when_none(self):
+        p = ScannerParams.from_query()
+        assert p.min_adx == 15.0
+        assert p.max_adx == 50.0
+
+    def test_from_query_accepts_min_adx(self):
+        p = ScannerParams.from_query(min_adx=20.0)
+        assert p.min_adx == 20.0
+
+    def test_from_query_accepts_max_adx(self):
+        p = ScannerParams.from_query(max_adx=40.0)
+        assert p.max_adx == 40.0
+
+    def test_cache_key_changes_with_adx_params(self):
+        p1 = ScannerParams(min_adx=15.0, max_adx=50.0)
+        p2 = ScannerParams(min_adx=20.0, max_adx=50.0)
+        assert p1.cache_key_suffix() != p2.cache_key_suffix()
