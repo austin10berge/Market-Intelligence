@@ -16,6 +16,34 @@ const API_BASE = (() => {
     return '';
 })();
 
+const SCANNER_PARAMS_KEY = 'market-intelligence:csp-scanner-params';
+
+function _persistParams() {
+    try {
+        window.localStorage.setItem(SCANNER_PARAMS_KEY, JSON.stringify(_state.params));
+    } catch { /* storage unavailable — ignore */ }
+}
+
+function _restoreParams() {
+    try {
+        const raw = window.localStorage.getItem(SCANNER_PARAMS_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        const p = _state.params;
+        if (typeof saved.min_cap   === 'number') p.min_cap   = saved.min_cap;
+        if (typeof saved.max_price === 'number') p.max_price = saved.max_price;
+        if (typeof saved.min_beta  === 'number') p.min_beta  = saved.min_beta;
+        if (typeof saved.max_beta  === 'number') p.max_beta  = saved.max_beta;
+        if (typeof saved.min_vol   === 'number') p.min_vol   = saved.min_vol;
+        if (typeof saved.rsi_max   === 'number') p.rsi_max   = saved.rsi_max;
+        if (typeof saved.adx_min   === 'number') p.adx_min   = saved.adx_min;
+        if (typeof saved.adx_max   === 'number') p.adx_max   = saved.adx_max;
+        if (typeof saved.dte_min   === 'number') p.dte_min   = saved.dte_min;
+        if (typeof saved.dte_max   === 'number') p.dte_max   = saved.dte_max;
+        if (Array.isArray(saved.conditions)) p.conditions = saved.conditions;
+    } catch { /* corrupt storage — use defaults */ }
+}
+
 // ── Scanner state ─────────────────────────────────────────────────────────────
 
 const _state = {
@@ -72,6 +100,7 @@ const PARAM_CONFIG = [
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+    _restoreParams();
     renderParamBadges();
     loadAvailableConditions().then(() => renderConditionPicker());
     loadDataFreshness();
@@ -162,6 +191,7 @@ function commitParamEdit(key) {
     _state.params[key] = val;
 
     renderParamBadges();
+    _persistParams();
 }
 
 function closeAllParamEdits() {
@@ -216,6 +246,7 @@ function toggleCondition(id, checked) {
     const item = document.getElementById(`cp-item-${id}`);
     if (item) item.classList.toggle('active', checked);
     renderConditionChips();
+    _persistParams();
 }
 
 function removeCondition(id) {
@@ -228,6 +259,7 @@ function removeCondition(id) {
         if (cb) cb.checked = false;
     }
     renderConditionChips();
+    _persistParams();
 }
 
 function renderConditionChips() {
