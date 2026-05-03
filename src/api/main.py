@@ -418,8 +418,28 @@ async def get_leaps_candidates():
 # ── Screener: Stocks ──────────────────────────────────────────────────────────
 
 @app.get("/api/screener/stocks")
-async def get_stock_candidates():
-    """Return stock screener results. Market-hours-aware TTL caching."""
+async def get_stock_candidates(tickers: str | None = None):
+    """Return stock screener results. Market-hours-aware TTL caching.
+
+    When ``tickers`` is provided (comma-separated symbols), only those tickers
+    are screened and results are cached under a ticker-specific key so the
+    static-watchlist cache is never polluted.
+    """
+    if tickers:
+        ticker_list = sorted(set(t.strip().upper() for t in tickers.split(",") if t.strip()))
+        cache_key = f"{KEY_SCREENER_STOCKS}:{'_'.join(ticker_list)}"
+        envelope = await cache_get(cache_key)
+        if envelope is not None:
+            return {"candidates": envelope["data"], **_cache_meta(envelope)}
+        try:
+            candidates = await asyncio.to_thread(screen_stocks, ticker_list)
+            ttl = screener_ttl()
+            await cache_set(cache_key, candidates, ttl=ttl)
+            return {"candidates": candidates, **_cache_meta(None)}
+        except Exception as e:
+            logger.exception("Stock screener (dynamic tickers) failed")
+            raise HTTPException(status_code=500, detail=str(e))
+
     envelope = await cache_get(KEY_SCREENER_STOCKS)
     if envelope is not None:
         return {"candidates": envelope["data"], **_cache_meta(envelope)}

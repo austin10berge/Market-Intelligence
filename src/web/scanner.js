@@ -33,16 +33,24 @@ const _state = {
     },
     // Available conditions fetched from API
     availableConditions: [],
-    // Results
-    results: [],
-    sortKey: 'composite_score',
-    sortAsc: false,
     // UI
     scanPollId: null,
     scanStart:  null,
     conditionsOpen: false,
-    groupByTicker: false,
 };
+
+// ── Stock table state ─────────────────────────────────────────────────────────
+
+let allStockCandidates = [];
+let currentStockSort = { column: 'pct_1d', asc: false };
+
+// ── CSP table state ───────────────────────────────────────────────────────────
+
+let allCspCandidates = [];
+let currentCspSort = 'annualized_roc';
+let currentCspSortDesc = true;
+let currentCspPage = 1;
+const CSP_PER_PAGE = 7;
 
 // ── Param config — drives badge rendering ─────────────────────────────────────
 
@@ -352,12 +360,11 @@ function _handleScanResult(data) {
         document.getElementById('fc-cache-at').textContent     = data.market_status || '';
     }
 
-    document.getElementById('funnel-strip').style.display  = '';
-    document.getElementById('results-section').style.display = '';
+    document.getElementById('funnel-strip').style.display = '';
 
     const elapsed = _state.scanStart ? `in ${((Date.now() - _state.scanStart) / 1000).toFixed(0)}s` : '';
     setStatus(
-        data.cached ? 'done' : 'done',
+        'done',
         data.cached
             ? `✓ Showing cached results (${data.market_status || ''})`
             : `✓ Scan complete ${elapsed} — ${candidates.length} candidate${candidates.length !== 1 ? 's' : ''} found`
@@ -366,82 +373,231 @@ function _handleScanResult(data) {
     document.getElementById('cache-badge-scan').textContent =
         `${data.cached ? 'cached' : 'live'} · ${data.market_status || ''}`;
 
-    _state.results = candidates;
-    _state.sortKey  = 'composite_score';
-    _state.sortAsc  = false;
-    renderResults();
-}
+    // ── Render CSP table ──────────────────────────────────────────────────────
+    allCspCandidates = candidates;
+    currentCspSort     = 'annualized_roc';
+    currentCspSortDesc = true;
+    currentCspPage     = 1;
+    document.getElementById('csp-section').style.display = '';
+    sortAndRenderCsp();
 
-// ── Render results ────────────────────────────────────────────────────────────
+    // ── Render stock table (async fetch for rich data) ────────────────────────
+    const uniqueTickers = [...new Set(candidates.map(c => c.symbol))];
+    document.getElementById('stocks-section').style.display = '';
+    const stocksList = document.getElementById('stocks-list');
+    stocksList.innerHTML = "<div class='trade-item' style='justify-content:center'>Loading stock data…</div>";
+    stocksList.classList.add('loading');
 
-function _bestPerTicker(rows) {
-    const best = new Map();
-    for (const c of rows) {
-        const prev = best.get(c.symbol);
-        if (!prev || (c.annualized_roc ?? -Infinity) > (prev.annualized_roc ?? -Infinity)) {
-            best.set(c.symbol, c);
-        }
+    if (uniqueTickers.length > 0) {
+        fetch(`${API_BASE}/screener/stocks?tickers=${uniqueTickers.join(',')}`)
+            .then(res => { if (!res.ok) throw new Error(res.statusText); return res.json(); })
+            .then(stockData => {
+                allStockCandidates = stockData.candidates || [];
+                stocksList.classList.remove('loading');
+                sortStocks(currentStockSort.column, currentStockSort.asc);
+            })
+            .catch(err => {
+                stocksList.classList.remove('loading');
+                stocksList.innerHTML = "<div class='trade-item'>Error loading stock data</div>";
+                console.error('Stock fetch failed:', err);
+            });
+    } else {
+        stocksList.classList.remove('loading');
+        stocksList.innerHTML = "<div class='trade-item' style='justify-content:center'>No tickers to display</div>";
     }
-    return [...best.values()];
 }
 
-function toggleGroupByTicker(on) {
-    _state.groupByTicker = on;
-    renderResults();
+// ── Stock table ───────────────────────────────────────────────────────────────
+
+function buildSparklineSVG(prices, isUp) {
+    if (!prices || prices.length < 2) return '<div class="sparkline-empty">—</div>';
+
+    const width = 60, height = 24, padding = 2;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const range = max - min || 1;
+
+    const points = prices.map((p, i) => {
+        const x = padding + (i / (prices.length - 1)) * (width - padding * 2);
+        const y = padding + (1 - (p - min) / range) * (height - padding * 2);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+
+    const color = isUp ? '#34d399' : '#f87171';
+    return `<svg class="sparkline-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+        <polyline fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" points="${points}" />
+    </svg>`;
 }
 
-function renderResults() {
-    const container = document.getElementById('results-list');
-    if (!_state.results || !_state.results.length) {
-        container.innerHTML = '<div class="state-msg">No CSP candidates found for this scan run.</div>';
+function renderStockCandidates(candidates) {
+    const listEl = document.getElementById('stocks-list');
+    if (!candidates || candidates.length === 0) {
+        listEl.innerHTML = "<div class='trade-item' style='justify-content:center'>No stock data</div>";
         return;
     }
 
-    const display = _state.groupByTicker ? _bestPerTicker(_state.results) : _state.results;
+    listEl.innerHTML = candidates.map(c => {
+        const d1Class = c.pct_1d >= 0 ? 'text-green' : 'text-red';
+        const d1Sign  = c.pct_1d >= 0 ? '+' : '';
+        const w1Class = c.pct_1w >= 0 ? 'text-green' : 'text-red';
+        const w1Sign  = c.pct_1w >= 0 ? '+' : '';
+        const m1Class = c.pct_1m >= 0 ? 'text-green' : 'text-red';
+        const m1Sign  = c.pct_1m >= 0 ? '+' : '';
+        const ivRv20Display = c.atm_iv_rv20 === 'N/A' ? 'N/A' : c.atm_iv_rv20.toFixed(2);
+        const ivPctDisplay  = c.iv_percentile === 'N/A' ? 'N/A' : `${c.iv_percentile.toFixed(2)}%`;
+        const ivHistoryPoints = Number.isFinite(c.iv_history_points) ? c.iv_history_points : 0;
+        const ivPctTooltip = c.iv_percentile === 'N/A'
+            ? `IV Percentile unavailable. History points: ${ivHistoryPoints}`
+            : `IV was below current level ${c.iv_percentile.toFixed(1)}% of the time over ${ivHistoryPoints} trading days`;
+        const ivRv20Tooltip = c.atm_iv_rv20 === 'N/A'
+            ? 'IV/RV20 unavailable'
+            : 'Higher values mean options are pricing more movement than the stock has recently realized';
 
-    document.getElementById('results-count').textContent = _state.groupByTicker
-        ? `${display.length} of ${_state.results.length} results`
-        : `${_state.results.length} results`;
-
-    const sorted = [...display].sort((a, b) => {
-        const va = _numOrStr(a[_state.sortKey]);
-        const vb = _numOrStr(b[_state.sortKey]);
-        if (typeof va === 'number' && typeof vb === 'number') {
-            return _state.sortAsc ? va - vb : vb - va;
-        }
-        return _state.sortAsc
-            ? String(va).localeCompare(String(vb))
-            : String(vb).localeCompare(String(va));
-    });
-
-    container.innerHTML = sorted.map(c => {
-        const score    = typeof c.composite_score === 'number' ? c.composite_score : 0;
-        const scoreCls = score >= 60 ? 'score-high' : score >= 40 ? 'score-mid' : 'score-low';
-        const ivCls    = c.impliedVolatility >= 40 ? 'positive' : c.impliedVolatility >= 25 ? 'neutral' : 'negative';
-        const rocCls   = c.annualized_roc >= 20 ? 'positive' : c.annualized_roc >= 10 ? 'neutral' : 'negative';
-        const ratio    = c.iv_rv_ratio;
-        const ratioCls = ratio == null ? 'neutral' : ratio >= 1.2 ? 'positive' : ratio >= 0.8 ? 'neutral' : 'negative';
-
-        return `<div class="scan-row">
-            <div class="symbol">${_esc(c.symbol)}</div>
-            <div>${_esc(c.expiration || '—')}</div>
-            <div>$${_fmt2(c.strike)}</div>
-            <div>$${_fmt2(c.premium)}</div>
-            <div>${_fmt0(c.dte)}d</div>
-            <div>${_fmt1(c.otm_percent)}%</div>
-            <div class="${rocCls}">${_fmt1(c.annualized_roc)}%</div>
-            <div class="${ivCls}">${_fmt1(c.impliedVolatility)}%</div>
-            <div class="neutral">${_fmt1(c.rv20)}%</div>
-            <div class="${ratioCls}">${ratio != null ? ratio.toFixed(2) : '—'}</div>
-            <div><span class="score-pill ${scoreCls}">${score.toFixed(1)}</span></div>
-        </div>`;
+        return `
+            <div class="trade-item">
+                <div class="ticker-block">
+                    <span class="symbol">${_esc(c.symbol)}</span>
+                </div>
+                <div class="metric stock-name" data-label="Name">${_esc(c.name)}</div>
+                <div class="metric sparkline-cell">${buildSparklineSVG(c.price_history_1m, c.pct_1m >= 0)}</div>
+                <div class="metric" data-label="Price"><span class="m-val">$${c.price.toFixed(2)}</span></div>
+                <div class="metric" data-label="Sector" style="font-size: 0.8rem;">${_esc(c.sector)}</div>
+                <div class="metric ${d1Class}" data-label="1D">${d1Sign}${c.pct_1d.toFixed(2)}%</div>
+                <div class="metric ${w1Class}" data-label="1W">${w1Sign}${c.pct_1w.toFixed(2)}%</div>
+                <div class="metric ${m1Class}" data-label="1M">${m1Sign}${c.pct_1m.toFixed(2)}%</div>
+                <div class="metric" data-label="P/E">${c.pe}</div>
+                <div class="metric" data-label="Beta">${c.beta}</div>
+                <div class="metric" data-label="IV/RV20" title="${ivRv20Tooltip}">${ivRv20Display}</div>
+                <div class="metric" data-label="IV Pct" title="${ivPctTooltip}">${ivPctDisplay}</div>
+            </div>
+        `;
     }).join('');
 }
 
-function sortResults(key) {
-    if (_state.sortKey === key) { _state.sortAsc = !_state.sortAsc; }
-    else { _state.sortKey = key; _state.sortAsc = false; }
-    renderResults();
+function sortStocks(column, forceAsc = null) {
+    if (forceAsc !== null) {
+        currentStockSort.asc = forceAsc;
+    } else {
+        currentStockSort.asc = currentStockSort.column === column ? !currentStockSort.asc : false;
+    }
+    currentStockSort.column = column;
+
+    allStockCandidates.sort((a, b) => {
+        let valA = a[column];
+        let valB = b[column];
+
+        if (typeof valA === 'string' && valA === 'N/A') return 1;
+        if (typeof valB === 'string' && valB === 'N/A') return -1;
+        if (typeof valA === 'string' && column !== 'symbol' && column !== 'name' && column !== 'sector') {
+            valA = parseFloat(valA) || 0; valB = parseFloat(valB) || 0;
+        }
+
+        if (typeof valA === 'string') {
+            return currentStockSort.asc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+        return currentStockSort.asc ? valA - valB : valB - valA;
+    });
+
+    renderStockCandidates(allStockCandidates);
+}
+
+// ── CSP table ─────────────────────────────────────────────────────────────────
+
+function renderCspCandidates(candidates) {
+    const list = document.getElementById('csp-list');
+    list.classList.remove('loading');
+
+    if (!candidates || candidates.length === 0) {
+        list.innerHTML = "<div class='trade-item'>No viable candidates found.</div>";
+        return;
+    }
+
+    list.innerHTML = candidates.map(c => `
+        <div class="trade-item">
+            <div class="ticker-block">
+                <span class="ticker">${_esc(c.symbol)}</span>
+                <span class="ticker-sub">Stock: ${c.current_price.toFixed(2)}</span>
+            </div>
+            <div class="metric">
+                <span class="m-val">${c.strike.toFixed(2)}</span>
+                <span class="m-lbl">Strike</span>
+            </div>
+            <div class="metric">
+                <span class="m-val">${c.premium.toFixed(2)}</span>
+                <span class="m-lbl">Premium</span>
+            </div>
+            <div class="metric">
+                <span class="m-val highlight">${c.roc_percent}%</span>
+                <span class="m-lbl">ROC</span>
+            </div>
+            <div class="metric">
+                <span class="m-val highlight">${c.annualized_roc ? c.annualized_roc + '%' : '—'}</span>
+                <span class="m-lbl">Yield (Ann.)</span>
+            </div>
+            <div class="metric">
+                <span class="m-val">${c.otm_percent}%</span>
+                <span class="m-lbl">% OTM</span>
+            </div>
+            <div class="metric">
+                <span class="m-val ${c.spread_pct > 10 ? 'text-red' : ''}">${c.spread_pct > 0 ? c.spread_pct.toFixed(1) + '%' : '—'}</span>
+                <span class="m-lbl">Spread %</span>
+            </div>
+            <div class="metric">
+                <span class="m-val">${c.impliedVolatility > 0 ? c.impliedVolatility.toFixed(1) + '%' : '—'}</span>
+                <span class="m-lbl">IV</span>
+            </div>
+            <div class="metric">
+                <span class="m-val">${c.volume > 0 ? c.volume.toLocaleString() : '—'}</span>
+                <span class="m-lbl">Volume</span>
+            </div>
+            <div class="metric">
+                <span class="m-val">${c.dte ?? '—'}</span>
+                <span class="m-lbl">DTE</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function sortCsp(field) {
+    if (currentCspSort === field) {
+        currentCspSortDesc = !currentCspSortDesc;
+    } else {
+        currentCspSort = field;
+        currentCspSortDesc = true;
+    }
+    currentCspPage = 1;
+    sortAndRenderCsp();
+}
+
+function prevCspPage() {
+    if (currentCspPage > 1) { currentCspPage--; sortAndRenderCsp(); }
+}
+
+function nextCspPage() {
+    const totalPages = Math.ceil(allCspCandidates.length / CSP_PER_PAGE);
+    if (currentCspPage < totalPages) { currentCspPage++; sortAndRenderCsp(); }
+}
+
+function sortAndRenderCsp() {
+    allCspCandidates.sort((a, b) => {
+        let valA = a[currentCspSort];
+        let valB = b[currentCspSort];
+        if (typeof valA === 'string') {
+            return currentCspSortDesc ? valB.localeCompare(valA) : valA.localeCompare(valB);
+        }
+        return currentCspSortDesc ? valB - valA : valA - valB;
+    });
+
+    const startIndex    = (currentCspPage - 1) * CSP_PER_PAGE;
+    const paginatedItems = allCspCandidates.slice(startIndex, startIndex + CSP_PER_PAGE);
+    const totalPages    = Math.ceil(allCspCandidates.length / CSP_PER_PAGE) || 1;
+
+    document.getElementById('results-count').textContent  = `${allCspCandidates.length} results`;
+    document.getElementById('csp-page-info').innerText    = `Page ${currentCspPage} / ${totalPages}`;
+    document.getElementById('csp-prev').disabled          = currentCspPage === 1;
+    document.getElementById('csp-next').disabled          = currentCspPage === totalPages;
+
+    renderCspCandidates(paginatedItems);
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
@@ -461,11 +617,6 @@ function setStatus(type, html) {
     el.innerHTML = html;
 }
 
-function _numOrStr(v) {
-    if (v === null || v === undefined || v === 'N/A') return -Infinity;
-    const n = parseFloat(v);
-    return isNaN(n) ? String(v) : n;
-}
 
 function _fmt(n)  { return n != null ? Number(n).toLocaleString() : '—'; }
 function _fmt0(n) { return n != null && n !== 'N/A' ? Number(n).toFixed(0) : '—'; }

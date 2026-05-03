@@ -245,53 +245,7 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* ── Results table ────────────────────────────────────────────────── */
-        .table-headers,
-        .scan-row {
-            display: grid;
-            grid-template-columns: 68px 1fr 76px 76px 56px 64px 76px 72px 72px 64px 72px;
-            gap: 0.4rem;
-            padding: 0.6rem 1rem;
-            align-items: center;
-        }
-
-        .table-headers {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--text-secondary);
-            border-bottom: 1px solid var(--glass-border);
-        }
-
-        .scan-row {
-            font-size: 0.82rem;
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-            transition: background 0.15s;
-        }
-
-        .scan-row:last-child { border-bottom: none; }
-        .scan-row:hover { background: rgba(255,255,255,0.03); }
-
-        .scan-row .symbol { font-weight: 700; color: var(--accent-blue); font-size: 0.87rem; }
-        .th-sortable { cursor: pointer; user-select: none; }
-        .th-sortable:hover { color: var(--text-primary); }
-
-        .positive { color: var(--accent-green); }
-        .negative { color: var(--accent-red); }
-        .neutral  { color: var(--text-secondary); }
-
-        .score-pill { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.76rem; font-weight: 600; }
-        .score-high { background: rgba(16,185,129,0.15); color: var(--accent-green); }
-        .score-mid  { background: rgba(245,158,11,0.15);  color: #f59e0b; }
-        .score-low  { background: rgba(148,163,184,0.12); color: var(--text-secondary); }
-
         .cache-badge { font-size: 0.7rem; padding: 0.18rem 0.55rem; border-radius: 9999px; background: rgba(148,163,184,0.12); color: var(--text-secondary); margin-left: 0.5rem; }
-
-        .group-toggle { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.78rem; color: var(--text-secondary); cursor: pointer; user-select: none; }
-        .group-toggle input[type="checkbox"] { appearance: none; width: 2rem; height: 1.1rem; background: rgba(148,163,184,0.2); border-radius: 9999px; position: relative; cursor: pointer; transition: background 0.2s; flex-shrink: 0; }
-        .group-toggle input[type="checkbox"]::after { content: ''; position: absolute; top: 0.15rem; left: 0.15rem; width: 0.8rem; height: 0.8rem; border-radius: 50%; background: var(--text-secondary); transition: transform 0.2s, background 0.2s; }
-        .group-toggle input[type="checkbox"]:checked { background: rgba(59,130,246,0.35); }
-        .group-toggle input[type="checkbox"]:checked::after { transform: translateX(0.9rem); background: var(--accent-blue); }
         .state-msg { padding: 3rem 1rem; text-align: center; color: var(--text-secondary); font-size: 0.9rem; }
 
         /* ── Nav ──────────────────────────────────────────────────────────── */
@@ -356,21 +310,8 @@
         }
 
         /* ── Responsive ───────────────────────────────────────────────────── */
-        @media (max-width: 900px) {
-            .table-headers, .scan-row {
-                grid-template-columns: 60px 1fr 68px 68px 52px 60px 68px 64px;
-            }
-            .table-headers > :nth-child(n+9),
-            .scan-row       > :nth-child(n+9) { display: none; }
-        }
-
         @media (max-width: 600px) {
             .funnel-card { flex: 1 1 100px; }
-            .table-headers, .scan-row {
-                grid-template-columns: 52px 1fr 60px 60px 50px 56px 60px;
-            }
-            .table-headers > :nth-child(n+8),
-            .scan-row       > :nth-child(n+8) { display: none; }
         }
     </style>
 </head>
@@ -473,38 +414,61 @@
             </div>
         </section>
 
-        <!-- ── Results ── -->
-        <section id="results-section" class="glass card full-width" style="display:none;">
-            <div class="card-header" style="padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--glass-border);">
-                <h2>
-                    CSP Candidates
-                    <span id="results-count" class="cache-badge"></span>
-                </h2>
-                <div style="display:flex; align-items:center; gap:1rem;">
-                    <label class="group-toggle">
-                        <input type="checkbox" id="group-by-ticker" onchange="toggleGroupByTicker(this.checked)">
-                        Group by Ticker
-                    </label>
-                    <div id="cache-badge-scan" class="cache-badge"></div>
-                </div>
+        <!-- ── Stock Performance ── -->
+        <section id="stocks-section" class="glass card full-width" style="display:none; margin-bottom: 1.5rem;">
+            <div class="card-header">
+                <h2>Stock Performance</h2>
+                <div class="badge blue">Dynamic Watchlist</div>
             </div>
 
             <div class="table-headers">
-                <div class="th-sortable" onclick="sortResults('symbol')">Symbol ↕</div>
-                <div>Expiry</div>
-                <div class="th-sortable" onclick="sortResults('strike')">Strike ↕</div>
-                <div class="th-sortable" onclick="sortResults('premium')">Prem ↕</div>
-                <div class="th-sortable" onclick="sortResults('dte')">DTE ↕</div>
-                <div class="th-sortable" onclick="sortResults('otm_percent')">OTM% ↕</div>
-                <div class="th-sortable" onclick="sortResults('annualized_roc')">Ann.ROC ↕</div>
-                <div class="th-sortable" onclick="sortResults('impliedVolatility')">IV% ↕</div>
-                <div class="th-sortable" onclick="sortResults('rv20')">RV-20 ↕</div>
-                <div class="th-sortable" onclick="sortResults('iv_rv_ratio')">IV/RV ↕</div>
-                <div class="th-sortable" onclick="sortResults('composite_score')">Score ↕</div>
+                <div class="th-sortable" onclick="sortStocks('symbol')">Symbol ↕</div>
+                <div class="th-sortable" onclick="sortStocks('name')">Name ↕</div>
+                <div class="th-label">1M</div>
+                <div class="th-sortable" onclick="sortStocks('price')">Price ↕</div>
+                <div class="th-sortable" onclick="sortStocks('sector')">Sector ↕</div>
+                <div class="th-sortable" onclick="sortStocks('pct_1d')">1D % ↕</div>
+                <div class="th-sortable" onclick="sortStocks('pct_1w')">1W % ↕</div>
+                <div class="th-sortable" onclick="sortStocks('pct_1m')">1M % ↕</div>
+                <div class="th-sortable" onclick="sortStocks('pe')">P/E ↕</div>
+                <div class="th-sortable" onclick="sortStocks('beta')">Beta ↕</div>
+                <div class="th-sortable" onclick="sortStocks('atm_iv_rv20')">IV/RV20 ↕</div>
+                <div class="th-sortable" onclick="sortStocks('iv_percentile')">IV Pct ↕</div>
             </div>
 
-            <div id="results-list">
-                <div class="state-msg">No results yet.</div>
+            <div id="stocks-list" class="data-list loading">Loading stock data...</div>
+        </section>
+
+        <!-- ── CSP Candidates ── -->
+        <section id="csp-section" class="glass card full-width" style="display:none;">
+            <div class="card-header">
+                <h2>
+                    Cash Secured Puts
+                    <span id="results-count" class="cache-badge"></span>
+                </h2>
+                <div id="cache-badge-scan" class="cache-badge"></div>
+            </div>
+            <p class="subtitle">CSP candidates from scanner universe filters.</p>
+
+            <div class="table-headers">
+                <div class="th-sortable" onclick="sortCsp('symbol')">Ticker ↕</div>
+                <div class="th-sortable" onclick="sortCsp('strike')">Strike ↕</div>
+                <div class="th-sortable" onclick="sortCsp('premium')">Premium ↕</div>
+                <div class="th-sortable" onclick="sortCsp('roc_percent')">ROC % ↕</div>
+                <div class="th-sortable" onclick="sortCsp('annualized_roc')">Ann. Yield ↕</div>
+                <div class="th-sortable" onclick="sortCsp('otm_percent')">% OTM ↕</div>
+                <div class="th-sortable" onclick="sortCsp('spread_pct')">Spread % ↕</div>
+                <div class="th-sortable" onclick="sortCsp('impliedVolatility')">IV % ↕</div>
+                <div class="th-sortable" onclick="sortCsp('volume')">Volume ↕</div>
+                <div class="th-sortable" onclick="sortCsp('dte')">DTE ↕</div>
+            </div>
+
+            <div id="csp-list" class="data-list loading">Scanning option chains...</div>
+
+            <div class="pagination">
+                <button id="csp-prev" class="btn-icon" onclick="prevCspPage()">&#8592;</button>
+                <span id="csp-page-info" class="page-info">Page 1 / 1</span>
+                <button id="csp-next" class="btn-icon" onclick="nextCspPage()">&#8594;</button>
             </div>
         </section>
     </main>
