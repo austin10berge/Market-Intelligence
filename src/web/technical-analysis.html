@@ -25,6 +25,11 @@
         </header>
 
         <main>
+            <div class="ta-tabs">
+                <button class="ta-tab active" id="tab-watchlist" onclick="switchTab('watchlist')">Watchlist</button>
+                <button class="ta-tab" id="tab-universe" onclick="switchTab('universe')">Universe</button>
+            </div>
+
             <section class="glass card ta-controls-card">
                 <div class="card-header">
                     <h2>Indicators</h2>
@@ -34,6 +39,7 @@
 
             <section id="technical-analysis-state" class="glass card full-width">
                 <div id="technical-analysis-message" class="subtitle">Loading CSP candidates...</div>
+                <button id="btn-universe-refresh" style="display:none;margin-top:0.75rem;" class="btn-scan" onclick="refreshUniverse()">Refresh Universe</button>
             </section>
 
             <section id="technical-analysis-list" class="ta-list"></section>
