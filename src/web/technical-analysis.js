@@ -3,7 +3,6 @@ import {
     INDICATOR_STORAGE_KEY,
     sanitizeIndicatorSettings,
     buildWidgetStudies,
-    buildWidgetStudyOverrides,
     loadScannerParams,
     buildScanQueryString,
 } from "./technical-analysis-helpers.js";
@@ -12,10 +11,10 @@ const API_BASE = window.MARKET_INTELLIGENCE_CONFIG?.apiBase || "/MISSING_CONFIG_
 
 let candidates = [];
 let stockDataBySymbol = {};
-let indicatorSettings = loadIndicatorSettings();
 let widgets = [];
 let activeTab = "watchlist";   // "watchlist" | "universe"
 let universeData = null;       // null = not yet loaded; [] = loaded (may be empty)
+let indicatorSettings = loadIndicatorSettings(); // must come after activeTab declaration
 
 document.addEventListener("DOMContentLoaded", async () => {
     renderControls();
@@ -110,8 +109,11 @@ async function loadUniverseCandidates() {
         if (!response.ok) throw new Error(`Server error: ${response.status}`);
         const payload = await response.json();
         universeData = Array.isArray(payload.candidates) ? payload.candidates : [];
-        await renderCandidates(universeData);
+        if (activeTab === "universe") {
+            await renderCandidates(universeData);
+        }
     } catch (error) {
+        if (activeTab !== "universe") return;
         setMessage("Unable to load universe candidates.");
         getListEl().innerHTML = `
             <section class="glass card full-width">
@@ -134,7 +136,6 @@ async function loadStockData() {
 }
 
 async function loadCandidates() {
-    if (activeTab !== "watchlist") return;
     setMessage("Loading CSP candidates...");
 
     try {
