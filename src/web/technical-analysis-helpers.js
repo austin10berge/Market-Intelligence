@@ -130,3 +130,61 @@ export function buildWidgetStudyOverrides(_settings) {
     // directly in the studies array objects above.
     return {};
 }
+
+export const SCANNER_PARAMS_STORAGE_KEY = "market-intelligence:csp-scanner-params";
+
+export const DEFAULT_SCANNER_PARAMS = {
+    min_cap:   10,
+    max_price: 150,
+    min_beta:  0.8,
+    max_beta:  2.4,
+    min_vol:   30,
+    rsi_max:   50,
+    adx_min:   15,
+    adx_max:   50,
+    dte_min:   3,
+    dte_max:   46,
+    conditions: [],
+};
+
+export function loadScannerParams() {
+    try {
+        const raw = window.localStorage.getItem(SCANNER_PARAMS_STORAGE_KEY);
+        if (!raw) return { ...DEFAULT_SCANNER_PARAMS, conditions: [] };
+        const parsed = JSON.parse(raw);
+        return {
+            min_cap:   typeof parsed.min_cap   === 'number' ? parsed.min_cap   : DEFAULT_SCANNER_PARAMS.min_cap,
+            max_price: typeof parsed.max_price === 'number' ? parsed.max_price : DEFAULT_SCANNER_PARAMS.max_price,
+            min_beta:  typeof parsed.min_beta  === 'number' ? parsed.min_beta  : DEFAULT_SCANNER_PARAMS.min_beta,
+            max_beta:  typeof parsed.max_beta  === 'number' ? parsed.max_beta  : DEFAULT_SCANNER_PARAMS.max_beta,
+            min_vol:   typeof parsed.min_vol   === 'number' ? parsed.min_vol   : DEFAULT_SCANNER_PARAMS.min_vol,
+            rsi_max:   typeof parsed.rsi_max   === 'number' ? parsed.rsi_max   : DEFAULT_SCANNER_PARAMS.rsi_max,
+            adx_min:   typeof parsed.adx_min   === 'number' ? parsed.adx_min   : DEFAULT_SCANNER_PARAMS.adx_min,
+            adx_max:   typeof parsed.adx_max   === 'number' ? parsed.adx_max   : DEFAULT_SCANNER_PARAMS.adx_max,
+            dte_min:   typeof parsed.dte_min   === 'number' ? parsed.dte_min   : DEFAULT_SCANNER_PARAMS.dte_min,
+            dte_max:   typeof parsed.dte_max   === 'number' ? parsed.dte_max   : DEFAULT_SCANNER_PARAMS.dte_max,
+            conditions: Array.isArray(parsed.conditions) ? parsed.conditions : [],
+        };
+    } catch {
+        return { ...DEFAULT_SCANNER_PARAMS, conditions: [] };
+    }
+}
+
+export function buildScanQueryString(params) {
+    const qs = new URLSearchParams({
+        min_cap:   params.min_cap,
+        max_price: params.max_price,
+        min_beta:  params.min_beta,
+        max_beta:  params.max_beta,
+        min_vol:   params.min_vol,
+        max_rsi:   params.rsi_max,
+        min_adx:   params.adx_min,
+        max_adx:   params.adx_max,
+        min_dte:   params.dte_min,
+        max_dte:   params.dte_max,
+    });
+    if (params.conditions.length) {
+        qs.set('conditions', params.conditions.join(','));
+    }
+    return qs.toString();
+}
