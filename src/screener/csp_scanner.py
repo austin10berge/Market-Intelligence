@@ -23,6 +23,7 @@ import io
 import json
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass, field, asdict
 from typing import TypedDict
@@ -507,7 +508,7 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
         if len(hist) >= 28:
             adx_df = ta.adx(hist["High"], hist["Low"], hist["Close"], length=14)
             if adx_df is not None and not adx_df.empty:
-                adx_col = [c for c in adx_df.columns if c.upper().startswith("ADX")]
+                adx_col = [c for c in adx_df.columns if re.match(r"ADX_\d+$", c.upper())]
                 if adx_col:
                     adx = round(float(adx_df[adx_col[0]].iloc[-1]), 2)
 

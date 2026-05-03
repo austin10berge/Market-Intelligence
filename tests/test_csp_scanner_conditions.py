@@ -32,6 +32,7 @@ def _make_indicators(
     sma200: float | None = 80.0,
     bb_pct_from_lower: float | None = 1.0,
     rsi: float | None = 37.0,
+    adx: float | None = 25.0,
 ) -> dict:
     """Return a minimal indicators dict with controllable fields."""
     return {
@@ -42,6 +43,7 @@ def _make_indicators(
         "bb_lower": None,
         "bb_pct_from_lower": bb_pct_from_lower,
         "rsi": rsi,
+        "adx": adx,
     }
 
 
@@ -358,7 +360,7 @@ class TestComputeTechnicalIndicators:
         hist = _make_hist(n=250)
         result = _compute_technical_indicators("TEST", hist)
         assert result is not None
-        expected_keys = {"price", "sma20", "sma50", "sma200", "bb_lower", "bb_pct_from_lower", "rsi"}
+        expected_keys = {"price", "sma20", "sma50", "sma200", "bb_lower", "bb_pct_from_lower", "rsi", "adx"}
         assert expected_keys.issubset(result.keys())
 
     def test_sma200_is_none_for_short_history(self):
