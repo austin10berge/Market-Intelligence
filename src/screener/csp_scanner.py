@@ -286,9 +286,9 @@ def fetch_nasdaq_large_cap_tickers() -> list[str]:
         resp = _requests.get(_NASDAQ_SCREENER_URL, headers=_NASDAQ_HEADERS, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-        rows = data.get("data", {}).get("rows", [])
+        rows = data.get("data", {}).get("table", {}).get("rows", [])
         if not rows:
-            logger.error("NASDAQ screener API returned no rows. Keys: %s", list(data.keys()))
+            logger.error("NASDAQ screener API returned no rows. Keys: %s", list(data.get("data", {}).keys()))
             return []
 
         tickers: list[str] = []
@@ -298,7 +298,7 @@ def fetch_nasdaq_large_cap_tickers() -> list[str]:
             if not sym:
                 continue
             try:
-                cap = float(r.get("marketCap") or 0)
+                cap = float(str(r.get("marketCap") or "0").replace(",", ""))
             except (TypeError, ValueError):
                 continue
             if cap >= min_cap:

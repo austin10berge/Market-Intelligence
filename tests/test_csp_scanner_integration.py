@@ -249,13 +249,15 @@ class TestRunCspScanDataSource:
 
 MOCK_NASDAQ_SCREENER_RESPONSE = {
     "data": {
-        "rows": [
-            {"symbol": "AAPL", "marketCap": "2700000000000"},
-            {"symbol": "MSFT", "marketCap": "3000000000000"},
-            {"symbol": "SMLC", "marketCap": "500000000"},   # < $2B — filtered out
-            {"symbol": "SMLL", "marketCap": "1999999999"},  # < $2B — filtered out
-            {"symbol": "MIDC", "marketCap": "2000000001"},  # just over $2B — kept
-        ]
+        "table": {
+            "rows": [
+                {"symbol": "AAPL", "marketCap": "2,700,000,000,000"},
+                {"symbol": "MSFT", "marketCap": "3,000,000,000,000"},
+                {"symbol": "SMLC", "marketCap": "500,000,000"},     # < $2B — filtered out
+                {"symbol": "SMLL", "marketCap": "1,999,999,999"},   # < $2B — filtered out
+                {"symbol": "MIDC", "marketCap": "2,000,000,001"},   # just over $2B — kept
+            ]
+        }
     }
 }
 
