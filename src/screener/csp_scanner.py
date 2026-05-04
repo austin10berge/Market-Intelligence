@@ -65,8 +65,10 @@ _INFO_BATCH_SIZE    = 50
 _INFO_BATCH_SLEEP_S = 1.0
 
 # Source URLs
-_SP500_WIKI_URL    = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-_NASDAQ100_API_URL = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+_SP500_WIKI_URL        = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+_NASDAQ100_API_URL     = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+_NASDAQ_SCREENER_URL   = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&exchange=nasdaq"
+_NASDAQ_LARGE_CAP_MIN_B = 2.0
 
 _WIKI_USER_AGENT = "Mozilla/5.0 (compatible; MarketIntelligenceBot/1.0; +https://github.com/)"
 _NASDAQ_HEADERS  = {
@@ -276,12 +278,52 @@ def fetch_nasdaq100_tickers() -> list[str]:
         return []
 
 
+def fetch_nasdaq_large_cap_tickers() -> list[str]:
+    """Fetch all NASDAQ-listed stocks with market cap ≥ $2B from the NASDAQ screener API."""
+    try:
+        import httpx as _httpx
+        resp = _httpx.get(_NASDAQ_SCREENER_URL, headers=_NASDAQ_HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data.get("data", {}).get("rows", [])
+        if not rows:
+            logger.error("NASDAQ screener API returned no rows. Keys: %s", list(data.keys()))
+            return []
+
+        tickers: list[str] = []
+        min_cap = _NASDAQ_LARGE_CAP_MIN_B * 1e9
+        for r in rows:
+            sym = str(r.get("symbol", "")).upper().strip().replace(".", "-")
+            if not sym:
+                continue
+            try:
+                cap = float(r.get("marketCap") or 0)
+            except (TypeError, ValueError):
+                continue
+            if cap >= min_cap:
+                tickers.append(sym)
+
+        tickers = sorted(set(tickers))
+        logger.info(
+            "Fetched %d NASDAQ large-cap tickers (≥$%.0fB) from NASDAQ screener",
+            len(tickers), _NASDAQ_LARGE_CAP_MIN_B,
+        )
+        return tickers
+    except Exception as exc:
+        logger.error("Failed to fetch NASDAQ large-cap tickers: %s", exc, exc_info=True)
+        return []
+
+
 def fetch_universe() -> list[str]:
-    """Return the deduplicated union of S&P 500 and NASDAQ 100 tickers."""
-    sp500  = fetch_sp500_tickers()
-    nasdaq = fetch_nasdaq100_tickers()
-    combined = sorted(set(sp500) | set(nasdaq))
-    logger.info("Universe: %d S&P500 + %d NDX100 = %d unique", len(sp500), len(nasdaq), len(combined))
+    """Return the deduplicated union of S&P 500, NASDAQ 100, and NASDAQ large-cap tickers."""
+    sp500        = fetch_sp500_tickers()
+    nasdaq100    = fetch_nasdaq100_tickers()
+    nasdaq_large = fetch_nasdaq_large_cap_tickers()
+    combined = sorted(set(sp500) | set(nasdaq100) | set(nasdaq_large))
+    logger.info(
+        "Universe: %d S&P500 + %d NDX100 + %d NASDAQ≥$2B = %d unique",
+        len(sp500), len(nasdaq100), len(nasdaq_large), len(combined),
+    )
     return combined
 
 
@@ -399,6 +441,8 @@ def _fundamental_filter_from_store(
             "price":        round(price, 2),
             "beta":         round(beta, 2),
             "iv":           iv_pct,
+            "fcf":          row.get("fcf"),
+            "forward_pe":   row.get("forward_pe"),
         })
 
     logger.info("Fundamental filter (store): %d/%d tickers passed", len(passing_tickers), len(tickers))
@@ -808,6 +852,13 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         min_adx=params.min_adx,
         max_adx=params.max_adx,
     )
+
+    # Merge fundamental fields (fcf, forward_pe) into each candidate
+    fundamentals_by_symbol = {r["symbol"]: r for r in tech_rows}
+    for c in candidates:
+        fund = fundamentals_by_symbol.get(c["symbol"], {})
+        c["fcf"] = fund.get("fcf")
+        c["pe"]  = fund.get("forward_pe")
 
     filter_summary: FilterSummary = {
         "sp500_count":               len(sp500_tickers),

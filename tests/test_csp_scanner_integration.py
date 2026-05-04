@@ -13,8 +13,10 @@ import os
 import tempfile
 from unittest.mock import patch, MagicMock
 
+import httpx
 import pandas as pd
 import pytest
+import respx
 
 # ── Shared temp DB ─────────────────────────────────────────────────────────────
 # Create once for the module; patched via autouse fixture below.
@@ -246,3 +248,43 @@ class TestRunCspScanDataSource:
 
         # The fundamental filter should have used the store; yf never called
         mock_yf.Ticker.assert_not_called()
+
+
+# ── Test: fetch_nasdaq_large_cap_tickers ─────────────────────────────────────
+
+MOCK_NASDAQ_SCREENER_RESPONSE = {
+    "data": {
+        "rows": [
+            {"symbol": "AAPL", "marketCap": "2700000000000"},
+            {"symbol": "MSFT", "marketCap": "3000000000000"},
+            {"symbol": "SMLC", "marketCap": "500000000"},   # < $2B — filtered out
+            {"symbol": "SMLL", "marketCap": "1999999999"},  # < $2B — filtered out
+            {"symbol": "MIDC", "marketCap": "2000000001"},  # just over $2B — kept
+        ]
+    }
+}
+
+
+@respx.mock
+def test_fetch_nasdaq_large_cap_tickers_filters_by_market_cap():
+    respx.get("https://api.nasdaq.com/api/screener/stocks").mock(
+        return_value=httpx.Response(200, json=MOCK_NASDAQ_SCREENER_RESPONSE)
+    )
+    from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
+    tickers = fetch_nasdaq_large_cap_tickers()
+    assert "AAPL" in tickers
+    assert "MSFT" in tickers
+    assert "MIDC" in tickers
+    assert "SMLC" not in tickers
+    assert "SMLL" not in tickers
+    assert tickers == sorted(tickers)  # must be sorted
+
+
+@respx.mock
+def test_fetch_nasdaq_large_cap_tickers_returns_empty_on_api_failure():
+    respx.get("https://api.nasdaq.com/api/screener/stocks").mock(
+        return_value=httpx.Response(500)
+    )
+    from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
+    result = fetch_nasdaq_large_cap_tickers()
+    assert result == []
