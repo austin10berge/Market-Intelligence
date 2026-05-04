@@ -935,3 +935,19 @@ header {
         height: 420px;
     }
 }
+
+/* ── Param badge variants (scanner page) ────────────────────────────────────── */
+.param-badge--disabled {
+    opacity: 0.45;
+    border-style: dashed;
+    cursor: pointer;
+}
+.badge-clear {
+    margin-left: 4px;
+    color: var(--text-muted, #888);
+    font-size: 0.85em;
+    cursor: pointer;
+}
+.badge-clear:hover {
+    color: var(--text, #333);
+}
