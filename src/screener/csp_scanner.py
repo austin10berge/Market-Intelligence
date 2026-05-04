@@ -362,6 +362,36 @@ def _fundamental_filter_from_store(
         if beta is None or not (params.min_beta <= beta <= params.max_beta):
             continue
 
+        # FCF gate (stored in billions)
+        fcf = row.get("fcf")
+        if params.min_fcf_b is not None and fcf is not None:
+            if fcf < params.min_fcf_b:
+                continue
+
+        # Debt-to-equity gate
+        debt_to_equity = row.get("debt_to_equity")
+        if params.max_debt_to_equity is not None and debt_to_equity is not None:
+            if debt_to_equity > params.max_debt_to_equity:
+                continue
+
+        # Revenue growth gate
+        revenue_growth = row.get("revenue_growth")
+        if params.min_revenue_growth is not None and revenue_growth is not None:
+            if revenue_growth < params.min_revenue_growth:
+                continue
+
+        # Earnings growth gate
+        earnings_growth = row.get("earnings_growth")
+        if params.min_earnings_growth is not None and earnings_growth is not None:
+            if earnings_growth < params.min_earnings_growth:
+                continue
+
+        # Dividend yield gate
+        dividend_yield = row.get("dividend_yield")
+        if params.min_dividend_yield is not None and dividend_yield is not None:
+            if dividend_yield < params.min_dividend_yield:
+                continue
+
         passing_tickers.append(symbol)
         fundamental_rows.append({
             "symbol":       symbol,
