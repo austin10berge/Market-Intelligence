@@ -799,7 +799,15 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
 
     # 5. Options screener
     logger.info("Passing %d tickers to CSP options screener", len(tech_passing))
-    candidates = screen_csp_candidates(tickers=tech_passing, min_dte=params.min_dte, max_dte=params.max_dte)
+    candidates = screen_csp_candidates(
+        tickers=tech_passing,
+        min_dte=params.min_dte,
+        max_dte=params.max_dte,
+        min_rsi=0.0,
+        max_rsi=params.max_rsi,
+        min_adx=params.min_adx,
+        max_adx=params.max_adx,
+    )
 
     filter_summary: FilterSummary = {
         "sp500_count":               len(sp500_tickers),

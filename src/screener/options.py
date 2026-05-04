@@ -159,6 +159,10 @@ def screen_csp_candidates(
     tickers: list[str] | None = None,
     min_dte: int | None = None,
     max_dte: int | None = None,
+    min_rsi: float | None = None,
+    max_rsi: float | None = None,
+    min_adx: float | None = None,
+    max_adx: float | None = None,
 ) -> list[dict]:
     """Find CSP candidates with live Alpaca pricing, technical quality filters
     (RSI, ADX via pandas-ta), and a composite score modelled on mLabs methodology.
@@ -181,6 +185,14 @@ def screen_csp_candidates(
         settings["min_dte"] = min_dte
     if max_dte is not None:
         settings["max_dte"] = max_dte
+    if min_rsi is not None:
+        settings["min_rsi"] = min_rsi
+    if max_rsi is not None:
+        settings["max_rsi"] = max_rsi
+    if min_adx is not None:
+        settings["min_adx"] = min_adx
+    if max_adx is not None:
+        settings["max_adx"] = max_adx
     logger.info(
         "Screening CSP candidates across %d tickers with settings: %s",
         len(tickers), settings,

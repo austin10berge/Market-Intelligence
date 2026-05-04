@@ -340,9 +340,27 @@ header {
     grid-template-columns: 2fr 1fr 1fr 1.25fr 1fr 1.25fr 1.25fr;
 }
 
+.stocks-scroll-wrapper {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 500px;
+}
+
+#stocks-section .table-headers,
+#stocks-list {
+    min-width: 1580px;
+}
+
+#stocks-section .table-headers {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: rgb(26 37 54);
+}
+
 #stocks-list .trade-item,
 #stocks-section .table-headers {
-    grid-template-columns: 1fr 2fr 0.8fr 1fr 1.5fr 1fr 1fr 1fr 1fr 1fr 1.1fr 1.25fr;
+    grid-template-columns: 80px 140px 70px 80px 110px 65px 65px 65px 70px 80px 70px 85px 80px 80px 70px 90px 85px 70px 85px;
 }
 
 .th-sortable {
@@ -713,7 +731,8 @@ header {
     border-radius: 99px;
     letter-spacing: 0.02em;
     white-space: nowrap;
-    margin-left: auto;  /* push to right side of card-header */
+    margin-left: auto;
+    /* push to right side of card-header */
     opacity: 0.85;
     transition: opacity 0.2s;
 }
@@ -816,9 +835,19 @@ header {
     transition: opacity 0.2s, transform 0.1s;
 }
 
-.btn-scan:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
-.btn-scan:active:not(:disabled) { transform: translateY(0); }
-.btn-scan:disabled { opacity: 0.42; cursor: not-allowed; }
+.btn-scan:hover:not(:disabled) {
+    opacity: 0.88;
+    transform: translateY(-1px);
+}
+
+.btn-scan:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.btn-scan:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+}
 
 #btn-universe-refresh {
     margin-top: 0.75rem;
@@ -916,8 +945,15 @@ header {
 }
 
 @keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.35; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.35;
+    }
 }
 
 @media (max-width: 768px) {
@@ -942,12 +978,14 @@ header {
     border-style: dashed;
     cursor: pointer;
 }
+
 .badge-clear {
     margin-left: 4px;
     color: var(--text-muted, #888);
     font-size: 0.85em;
     cursor: pointer;
 }
+
 .badge-clear:hover {
     color: var(--text-primary);
 }

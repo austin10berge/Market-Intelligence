@@ -539,8 +539,21 @@ function renderStockCandidates(candidates) {
             ? 'IV/RV20 unavailable'
             : 'Higher values mean options are pricing more movement than the stock has recently realized';
 
+        const fcfDisplay = c.fcf == null ? 'N/A' : (c.fcf >= 0 ? `$${c.fcf.toFixed(1)}B` : `-$${Math.abs(c.fcf).toFixed(1)}B`);
+        const fcfClass = c.fcf == null ? '' : (c.fcf >= 0 ? 'text-green' : 'text-red');
+        const deClass = c.debt_to_equity === 'N/A' ? '' : (c.debt_to_equity > 2 ? 'text-red' : '');
+        const revDisplay = c.revenue == null ? 'N/A' : `$${c.revenue.toFixed(1)}B`;
+        const revGrSign = typeof c.revenue_growth === 'number' && c.revenue_growth >= 0 ? '+' : '';
+        const revGrClass = c.revenue_growth === 'N/A' ? '' : (c.revenue_growth >= 0 ? 'text-green' : 'text-red');
+        const revGrDisplay = c.revenue_growth === 'N/A' ? 'N/A' : `${revGrSign}${c.revenue_growth}%`;
+        const epsSign = typeof c.eps === 'number' && c.eps >= 0 ? '' : '';
+        const epsDisplay = c.eps === 'N/A' ? 'N/A' : `$${c.eps.toFixed(2)}`;
+        const epsGrSign = typeof c.eps_growth === 'number' && c.eps_growth >= 0 ? '+' : '';
+        const epsGrClass = c.eps_growth === 'N/A' ? '' : (c.eps_growth >= 0 ? 'text-green' : 'text-red');
+        const epsGrDisplay = c.eps_growth === 'N/A' ? 'N/A' : `${epsGrSign}${c.eps_growth}%`;
+
         return `
-            <div class="trade-item">
+            <div class="trade-item" onclick="window.open('https://www.tradingview.com/chart/?symbol=${_esc(c.symbol)}', '_blank')" title="Open ${_esc(c.symbol)} on TradingView">
                 <div class="ticker-block">
                     <span class="symbol">${_esc(c.symbol)}</span>
                 </div>
@@ -552,9 +565,16 @@ function renderStockCandidates(candidates) {
                 <div class="metric ${w1Class}" data-label="1W">${w1Sign}${c.pct_1w.toFixed(2)}%</div>
                 <div class="metric ${m1Class}" data-label="1M">${m1Sign}${c.pct_1m.toFixed(2)}%</div>
                 <div class="metric" data-label="P/E">${c.pe}</div>
+                <div class="metric" data-label="Fwd P/E">${c.forward_pe}</div>
                 <div class="metric" data-label="Beta">${c.beta}</div>
                 <div class="metric" data-label="IV/RV20" title="${ivRv20Tooltip}">${ivRv20Display}</div>
                 <div class="metric" data-label="IV Pct" title="${ivPctTooltip}">${ivPctDisplay}</div>
+                <div class="metric ${fcfClass}" data-label="FCF ($B)">${fcfDisplay}</div>
+                <div class="metric ${deClass}" data-label="D/E">${c.debt_to_equity}</div>
+                <div class="metric" data-label="Rev ($B)">${revDisplay}</div>
+                <div class="metric ${revGrClass}" data-label="Rev Gr %">${revGrDisplay}</div>
+                <div class="metric" data-label="EPS">${epsDisplay}</div>
+                <div class="metric ${epsGrClass}" data-label="EPS Gr %">${epsGrDisplay}</div>
             </div>
         `;
     }).join('');

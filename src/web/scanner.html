@@ -405,22 +405,31 @@
                 <div class="badge blue">Dynamic Watchlist</div>
             </div>
 
-            <div class="table-headers">
-                <div class="th-sortable" onclick="sortStocks('symbol')">Symbol ↕</div>
-                <div class="th-sortable" onclick="sortStocks('name')">Name ↕</div>
-                <div class="th-label">1M</div>
-                <div class="th-sortable" onclick="sortStocks('price')">Price ↕</div>
-                <div class="th-sortable" onclick="sortStocks('sector')">Sector ↕</div>
-                <div class="th-sortable" onclick="sortStocks('pct_1d')">1D % ↕</div>
-                <div class="th-sortable" onclick="sortStocks('pct_1w')">1W % ↕</div>
-                <div class="th-sortable" onclick="sortStocks('pct_1m')">1M % ↕</div>
-                <div class="th-sortable" onclick="sortStocks('pe')">P/E ↕</div>
-                <div class="th-sortable" onclick="sortStocks('beta')">Beta ↕</div>
-                <div class="th-sortable" onclick="sortStocks('atm_iv_rv20')">IV/RV20 ↕</div>
-                <div class="th-sortable" onclick="sortStocks('iv_percentile')">IV Pct ↕</div>
-            </div>
+            <div class="stocks-scroll-wrapper">
+                <div class="table-headers">
+                    <div class="th-sortable" onclick="sortStocks('symbol')">Symbol ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('name')">Name ↕</div>
+                    <div class="th-label">1M</div>
+                    <div class="th-sortable" onclick="sortStocks('price')">Price ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('sector')">Sector ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1d')">1D % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1w')">1W % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1m')">1M % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pe')">P/E ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('forward_pe')">Fwd P/E ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('beta')">Beta ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('atm_iv_rv20')">IV/RV20 ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('iv_percentile')">IV Pct ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('fcf')">FCF ($B) ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('debt_to_equity')">D/E ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('revenue')">Rev ($B) ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('revenue_growth')">Rev Gr % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('eps')">EPS ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('eps_growth')">EPS Gr % ↕</div>
+                </div>
 
-            <div id="stocks-list" class="data-list loading">Loading stock data...</div>
+                <div id="stocks-list" class="data-list loading">Loading stock data...</div>
+            </div>
         </section>
 
         <!-- ── CSP Candidates ── -->
