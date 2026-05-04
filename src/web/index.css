@@ -949,5 +949,5 @@ header {
     cursor: pointer;
 }
 .badge-clear:hover {
-    color: var(--text, #333);
+    color: var(--text-primary);
 }
