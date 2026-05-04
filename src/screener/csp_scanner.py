@@ -54,6 +54,12 @@ DEFAULT_MAX_DTE          = 46
 DEFAULT_MIN_ADX          = 15.0
 DEFAULT_MAX_ADX          = 50.0
 
+DEFAULT_MIN_FCF_B:           float | None = 0.0
+DEFAULT_MAX_DEBT_TO_EQUITY:  float | None = 2.0
+DEFAULT_MIN_REVENUE_GROWTH:  float | None = -0.10
+DEFAULT_MIN_EARNINGS_GROWTH: float | None = None
+DEFAULT_MIN_DIVIDEND_YIELD:  float | None = None
+
 # yfinance informal rate-limit
 _INFO_BATCH_SIZE    = 50
 _INFO_BATCH_SLEEP_S = 1.0
@@ -142,6 +148,11 @@ class ScannerParams:
     max_dte:          int   = DEFAULT_MAX_DTE
     min_adx:          float = DEFAULT_MIN_ADX
     max_adx:          float = DEFAULT_MAX_ADX
+    min_fcf_b:           float | None = DEFAULT_MIN_FCF_B
+    max_debt_to_equity:  float | None = DEFAULT_MAX_DEBT_TO_EQUITY
+    min_revenue_growth:  float | None = DEFAULT_MIN_REVENUE_GROWTH
+    min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH
+    min_dividend_yield:  float | None = DEFAULT_MIN_DIVIDEND_YIELD
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
 
@@ -164,6 +175,11 @@ class ScannerParams:
         min_adx: float | None = None,
         max_adx: float | None = None,
         conditions: str | None = None,
+        min_fcf_b: float | None = DEFAULT_MIN_FCF_B,
+        max_debt_to_equity: float | None = DEFAULT_MAX_DEBT_TO_EQUITY,
+        min_revenue_growth: float | None = DEFAULT_MIN_REVENUE_GROWTH,
+        min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH,
+        min_dividend_yield: float | None = DEFAULT_MIN_DIVIDEND_YIELD,
     ) -> "ScannerParams":
         """Build ScannerParams from API query parameters (all optional)."""
         parsed_conditions: list[str] = []
@@ -184,6 +200,11 @@ class ScannerParams:
             min_adx          = min_adx   if min_adx   is not None else DEFAULT_MIN_ADX,
             max_adx          = max_adx   if max_adx   is not None else DEFAULT_MAX_ADX,
             conditions       = sorted(parsed_conditions),
+            min_fcf_b           = min_fcf_b,
+            max_debt_to_equity  = max_debt_to_equity,
+            min_revenue_growth  = min_revenue_growth,
+            min_earnings_growth = min_earnings_growth,
+            min_dividend_yield  = min_dividend_yield,
         )
 
 
