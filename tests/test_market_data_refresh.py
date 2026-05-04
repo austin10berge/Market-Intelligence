@@ -245,6 +245,7 @@ class TestRefreshUniverseIncremental:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=["GOOG"]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", return_value=multi_df),
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),
@@ -261,6 +262,7 @@ class TestRefreshUniverseIncremental:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=["GOOG"]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", return_value=multi_df) as mock_dl,
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),
@@ -279,6 +281,7 @@ class TestRefreshUniverseIncremental:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=["MSFT", "GOOG"]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", return_value=multi_df),
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),
@@ -302,6 +305,7 @@ class TestRefreshUniverseFull:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=["GOOG"]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", return_value=multi_df),
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),
@@ -318,6 +322,7 @@ class TestRefreshUniverseFull:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=["GOOG"]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", return_value=multi_df) as mock_dl,
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),
@@ -342,6 +347,7 @@ class TestRefreshUniverseOhlcvUpsert:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", return_value=multi_df),
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),
@@ -359,6 +365,7 @@ class TestRefreshUniverseOhlcvUpsert:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             # Single-ticker universe → yf.download returns a flat DataFrame (not MultiIndex)
             patch("src.market_data.refresh.yf.download", return_value=_make_ohlcv_df(n=4)),
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
@@ -387,6 +394,7 @@ class TestRefreshUniverseFundamentalsUpsert:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", return_value=multi_df),
             patch("src.market_data.refresh.yf.Ticker", side_effect=_ticker_factory),
             patch("src.market_data.refresh.time.sleep"),
@@ -406,6 +414,7 @@ class TestRefreshUniverseFundamentalsUpsert:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["GOOG"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             # Single-ticker universe → flat DataFrame path
             patch("src.market_data.refresh.yf.download", return_value=_make_ohlcv_df(n=2)),
             patch("src.market_data.refresh.yf.Ticker", side_effect=_ticker_factory),
@@ -462,6 +471,7 @@ class TestRefreshUniverseEmptyGuard:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=[]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
         ):
             result = refresh_universe(full=False)
 
@@ -473,6 +483,7 @@ class TestRefreshUniverseEmptyGuard:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=[]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.bulk_upsert_ohlcv_multi") as mock_ohlcv,
             patch("src.market_data.refresh.bulk_upsert_fundamentals") as mock_fund,
         ):
@@ -495,6 +506,7 @@ class TestRefreshUniverseDownloadErrorHandling:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", side_effect=RuntimeError("network error")),
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),
@@ -515,6 +527,7 @@ class TestRefreshUniverseDownloadErrorHandling:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=[]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", side_effect=RuntimeError("network error")),
             patch("src.market_data.refresh.yf.Ticker", side_effect=_ticker_factory),
             patch("src.market_data.refresh.time.sleep"),
@@ -532,6 +545,7 @@ class TestRefreshUniverseDownloadErrorHandling:
         with (
             patch("src.market_data.refresh.fetch_sp500_tickers", return_value=["AAPL", "MSFT"]),
             patch("src.market_data.refresh.fetch_nasdaq100_tickers", return_value=["GOOG"]),
+            patch("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", return_value=[]),
             patch("src.market_data.refresh.yf.download", return_value=multi_df),
             patch("src.market_data.refresh.yf.Ticker", return_value=ticker_mock),
             patch("src.market_data.refresh.time.sleep"),

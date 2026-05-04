@@ -1,4 +1,4 @@
-"""Daily refresh job — downloads OHLCV + fundamentals for the S&P 500 / NASDAQ 100 universe.
+"""Daily refresh job — downloads OHLCV + fundamentals for the S&P 500, NASDAQ 100, and NASDAQ large-cap (>=$2B) universe.
 
 Usage (from Docker):
     python -m src.market_data.refresh          # incremental (last 5 trading days)
@@ -154,7 +154,7 @@ def _download_ohlcv_batch(
 # ── Main refresh entry point ─────────────────────────────────────────────────
 
 def refresh_universe(full: bool = False) -> dict:
-    """Download and store OHLCV + fundamentals for the S&P 500 / NASDAQ 100 universe.
+    """Download and store OHLCV + fundamentals for the S&P 500, NASDAQ 100, and NASDAQ large-cap (>=$2B) universe.
 
     Args:
         full: If True, download 2 years of history (initial backfill).
