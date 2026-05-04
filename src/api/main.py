@@ -319,8 +319,9 @@ async def get_csp_scan_candidates(
     min_revenue_growth:  float | None = Query(default=-0.10),
     min_earnings_growth: float | None = Query(default=None),
     min_dividend_yield:  float | None = Query(default=None),
+    restrict_to_watchlist_universe: bool = False,
 ):
-    """Run the broad-universe CSP scanner (S&P 500 + NASDAQ 100).
+    """Run the broad-universe CSP scanner (S&P 500, NASDAQ 100, and NASDAQ large-cap ≥$2B).
 
     All parameters are optional and default to the scanner defaults when omitted.
     Different parameter combinations produce independent cache entries so prior
@@ -337,6 +338,7 @@ async def get_csp_scan_candidates(
     min_adx    : minimum ADX(14) threshold (default 15)
     max_adx    : maximum ADX(14) threshold (default 50)
     conditions : comma-separated list of technical condition IDs to apply
+    restrict_to_watchlist_universe : if true, limit to S&P 500 + NASDAQ 100 tickers only (default false)
 
     Cache TTL: 23 hours regardless of market status (EOD snapshot design).
     Zero-universe results are never cached.
@@ -359,6 +361,7 @@ async def get_csp_scan_candidates(
         min_revenue_growth=min_revenue_growth,
         min_earnings_growth=min_earnings_growth,
         min_dividend_yield=min_dividend_yield,
+        restrict_to_watchlist_universe=restrict_to_watchlist_universe,
     )
     # Each unique param combination gets its own cache key
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
@@ -406,6 +409,7 @@ async def invalidate_csp_scan_cache(
     min_revenue_growth:  float | None = Query(default=-0.10),
     min_earnings_growth: float | None = Query(default=None),
     min_dividend_yield:  float | None = Query(default=None),
+    restrict_to_watchlist_universe: bool = False,
 ):
     """Bust the cache for a specific param combination (or the default set)."""
     params = ScannerParams.from_query(
@@ -420,6 +424,7 @@ async def invalidate_csp_scan_cache(
         min_revenue_growth=min_revenue_growth,
         min_earnings_growth=min_earnings_growth,
         min_dividend_yield=min_dividend_yield,
+        restrict_to_watchlist_universe=restrict_to_watchlist_universe,
     )
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
     await cache_delete(cache_key)
