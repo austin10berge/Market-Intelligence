@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS universe_fundamentals (
     earnings_growth REAL,
     dividend_yield  REAL,
     forward_pe      REAL,
+    universes       TEXT NOT NULL DEFAULT '',
     updated_at      TEXT NOT NULL
 );
 """
