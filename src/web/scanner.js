@@ -394,7 +394,7 @@ async function startScan() {
     _state.scanStart = Date.now();
     const universeLabel = _state.params.restrict_to_watchlist_universe
         ? 'S&P 500 + NASDAQ 100 universe'
-        : 'Full NASDAQ universe (>=\$2B)';
+        : 'full universe (NASDAQ ≥$2B)';
     setStatus('running', `<span class="spinner"></span> Scanning ${universeLabel}… This may take 3–6 minutes on a cold cache.`);
 
     if (_state.scanPollId) { clearInterval(_state.scanPollId); _state.scanPollId = null; }
