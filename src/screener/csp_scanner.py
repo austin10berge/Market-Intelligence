@@ -415,6 +415,7 @@ def _fundamental_filter_from_yfinance(
 
     total_batches = math.ceil(len(tickers) / _INFO_BATCH_SIZE)
     logger.info("Fundamental filter (yfinance fallback): %d tickers, %d batches", len(tickers), total_batches)
+    logger.warning("Balance-sheet gates (FCF, D/E, growth, yield) are not applied in the yfinance fallback path")
 
     for batch_idx, batch_start in enumerate(range(0, len(tickers), _INFO_BATCH_SIZE)):
         batch = tickers[batch_start : batch_start + _INFO_BATCH_SIZE]
