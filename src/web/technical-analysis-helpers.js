@@ -86,38 +86,105 @@ export function buildStudyDefinitions(settings) {
 export function buildWidgetStudies(settings) {
     const studies = [];
 
-    if (settings.sma.some((item) => item.enabled)) {
-        studies.push("MAMultiple@tv-basicstudies");
-    }
+    // embed-widget-advanced-chart.js accepts study objects with `id` and `inputs`.
+    // The correct internal ID for a Simple Moving Average is "MASimple@tv-basicstudies".
+    // SMA color palette — one color per slot in order.
+    // To change a color: edit the hex value. To change opacity: edit the alpha (0.0–1.0).
+    const SMA_COLORS = [
+        "rgba(255, 179, 0, 1.0)",   // SMA 1 — amber
+        "rgba(33, 150, 243, 1.0)",  // SMA 2 — blue
+        "rgba(76, 175, 80, 1.0)",   // SMA 3 — green
+    ];
+
+    let colorIdx = 0;
+    settings.sma.forEach((item) => {
+        if (item.enabled) {
+            const color = SMA_COLORS[colorIdx] ?? "rgba(255, 255, 255, 1.0)";
+            studies.push({
+                id: "MASimple@tv-basicstudies",
+                inputs: { length: item.length },
+                styles: {
+                    "Plot.color": color,
+                    "Plot.linewidth": 2,
+                },
+            });
+            colorIdx++;
+        }
+    });
 
     if (settings.bollinger.enabled) {
-        studies.push("BB@tv-basicstudies");
+        studies.push({
+            id: "BB@tv-basicstudies",
+            inputs: {
+                length: settings.bollinger.length,
+                mult: settings.bollinger.multiplier,
+            },
+        });
     }
 
     return studies;
 }
 
-export function buildWidgetStudyOverrides(settings) {
-    const overrides = {
-        // Bollinger Bands overrides
-        "BB.length": settings.bollinger.length,
-        "BB.mult": settings.bollinger.multiplier,
-        // MAMultiple: set each of the 6 period slots; hide unused slots by
-        // setting their length to something large and toggling display off.
-        "MAMultiple.MA #1 Length": settings.sma[0].length,
-        "MAMultiple.MA #2 Length": settings.sma[1].length,
-        "MAMultiple.MA #3 Length": settings.sma[2].length,
-        "MAMultiple.MA #4 Length": 400,
-        "MAMultiple.MA #5 Length": 500,
-        "MAMultiple.MA #6 Length": 600,
-        // display bitmask: 15 = show on all panes, 0 = hidden
-        "MAMultiple.plot_0.display": settings.sma[0].enabled ? 15 : 0,
-        "MAMultiple.plot_1.display": settings.sma[1].enabled ? 15 : 0,
-        "MAMultiple.plot_2.display": settings.sma[2].enabled ? 15 : 0,
-        "MAMultiple.plot_3.display": 0,
-        "MAMultiple.plot_4.display": 0,
-        "MAMultiple.plot_5.display": 0,
-    };
+export function buildWidgetStudyOverrides(_settings) {
+    // Not used with embed-widget-advanced-chart.js — inputs are passed
+    // directly in the studies array objects above.
+    return {};
+}
 
-    return overrides;
+export const SCANNER_PARAMS_STORAGE_KEY = "market-intelligence:csp-scanner-params";
+
+export const DEFAULT_SCANNER_PARAMS = {
+    min_cap:   10,
+    max_price: 150,
+    min_beta:  0.8,
+    max_beta:  2.4,
+    min_vol:   30,
+    rsi_max:   50,
+    adx_min:   15,
+    adx_max:   50,
+    dte_min:   3,
+    dte_max:   46,
+    conditions: [],
+};
+
+export function loadScannerParams() {
+    try {
+        const raw = window.localStorage.getItem(SCANNER_PARAMS_STORAGE_KEY);
+        if (!raw) return { ...DEFAULT_SCANNER_PARAMS };
+        const parsed = JSON.parse(raw);
+        return {
+            min_cap:   typeof parsed.min_cap   === 'number' ? parsed.min_cap   : DEFAULT_SCANNER_PARAMS.min_cap,
+            max_price: typeof parsed.max_price === 'number' ? parsed.max_price : DEFAULT_SCANNER_PARAMS.max_price,
+            min_beta:  typeof parsed.min_beta  === 'number' ? parsed.min_beta  : DEFAULT_SCANNER_PARAMS.min_beta,
+            max_beta:  typeof parsed.max_beta  === 'number' ? parsed.max_beta  : DEFAULT_SCANNER_PARAMS.max_beta,
+            min_vol:   typeof parsed.min_vol   === 'number' ? parsed.min_vol   : DEFAULT_SCANNER_PARAMS.min_vol,
+            rsi_max:   typeof parsed.rsi_max   === 'number' ? parsed.rsi_max   : DEFAULT_SCANNER_PARAMS.rsi_max,
+            adx_min:   typeof parsed.adx_min   === 'number' ? parsed.adx_min   : DEFAULT_SCANNER_PARAMS.adx_min,
+            adx_max:   typeof parsed.adx_max   === 'number' ? parsed.adx_max   : DEFAULT_SCANNER_PARAMS.adx_max,
+            dte_min:   typeof parsed.dte_min   === 'number' ? parsed.dte_min   : DEFAULT_SCANNER_PARAMS.dte_min,
+            dte_max:   typeof parsed.dte_max   === 'number' ? parsed.dte_max   : DEFAULT_SCANNER_PARAMS.dte_max,
+            conditions: Array.isArray(parsed.conditions) ? parsed.conditions : [],
+        };
+    } catch {
+        return { ...DEFAULT_SCANNER_PARAMS };
+    }
+}
+
+export function buildScanQueryString(params) {
+    const qs = new URLSearchParams({
+        min_cap:   params.min_cap,
+        max_price: params.max_price,
+        min_beta:  params.min_beta,
+        max_beta:  params.max_beta,
+        min_vol:   params.min_vol,
+        max_rsi:   params.rsi_max,
+        min_adx:   params.adx_min,
+        max_adx:   params.adx_max,
+        min_dte:   params.dte_min,
+        max_dte:   params.dte_max,
+    });
+    if (params.conditions.length) {
+        qs.set('conditions', params.conditions.join(','));
+    }
+    return qs.toString();
 }

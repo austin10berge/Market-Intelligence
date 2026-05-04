@@ -771,6 +771,59 @@ header {
     flex-shrink: 0;
 }
 
+/* ── Technical Analysis — source tabs ──────────────────────────────────────── */
+.ta-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.ta-tab {
+    padding: 0.45rem 1.1rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(15, 23, 42, 0.45);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    font-family: var(--font-main);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.ta-tab:hover {
+    color: var(--text-primary);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.ta-tab.active {
+    color: var(--accent-blue);
+    border-color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.08);
+}
+
+/* ── Shared action button (used on scanner and technical-analysis pages) ──────── */
+.btn-scan {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0.65rem 1.5rem;
+    font-size: 0.92rem;
+    font-weight: 600;
+    font-family: var(--font-main);
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-scan:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+.btn-scan:active:not(:disabled) { transform: translateY(0); }
+.btn-scan:disabled { opacity: 0.42; cursor: not-allowed; }
+
+#btn-universe-refresh {
+    margin-top: 0.75rem;
+}
+
 .ta-controls-card {
     margin-bottom: 1.5rem;
 }

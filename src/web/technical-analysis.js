@@ -3,24 +3,31 @@ import {
     INDICATOR_STORAGE_KEY,
     sanitizeIndicatorSettings,
     buildWidgetStudies,
-    buildWidgetStudyOverrides,
+    loadScannerParams,
+    buildScanQueryString,
 } from "./technical-analysis-helpers.js";
 
 const API_BASE = window.MARKET_INTELLIGENCE_CONFIG?.apiBase || "/MISSING_CONFIG_JS_SEE_CONSOLE";
-const TRADING_VIEW_SCRIPT_SRC = "https://s3.tradingview.com/tv.js";
 
 let candidates = [];
-/** Map of symbol → stock screener row, used to fill in IV/RV20, IV PCT, P/E */
 let stockDataBySymbol = {};
-let indicatorSettings = loadIndicatorSettings();
 let widgets = [];
+let activeTab = "watchlist";   // "watchlist" | "universe"
+let universeData = null;       // null = not yet loaded; [] = loaded (may be empty)
+let indicatorSettings = loadIndicatorSettings(); // must come after activeTab declaration
 
 document.addEventListener("DOMContentLoaded", async () => {
     renderControls();
-    // Fetch CSP candidates and stock screener data concurrently so the stock
-    // screener's already-computed IV/RV20, IV PCT, and P/E values are available
-    // when we render each chart card.
-    await Promise.allSettled([loadCandidates(), loadStockData()]);
+    initTabs();
+
+    const refreshBtn = document.getElementById("btn-universe-refresh");
+    refreshBtn.style.display = activeTab === "universe" ? "" : "none";
+
+    if (activeTab === "universe") {
+        await Promise.allSettled([loadUniverseCandidates(), loadStockData()]);
+    } else {
+        await Promise.allSettled([loadCandidates(), loadStockData()]);
+    }
 });
 
 function getControlsEl() {
@@ -38,7 +45,10 @@ function getMessageEl() {
 function loadIndicatorSettings() {
     try {
         const raw = window.localStorage.getItem(INDICATOR_STORAGE_KEY);
-        return raw ? sanitizeIndicatorSettings(JSON.parse(raw)) : DEFAULT_INDICATOR_SETTINGS;
+        if (!raw) return DEFAULT_INDICATOR_SETTINGS;
+        const parsed = JSON.parse(raw);
+        if (parsed.activeTab === "universe") activeTab = "universe";
+        return sanitizeIndicatorSettings(parsed);
     } catch {
         return DEFAULT_INDICATOR_SETTINGS;
     }
@@ -46,9 +56,70 @@ function loadIndicatorSettings() {
 
 function persistIndicatorSettings() {
     try {
-        window.localStorage.setItem(INDICATOR_STORAGE_KEY, JSON.stringify(indicatorSettings));
+        window.localStorage.setItem(INDICATOR_STORAGE_KEY, JSON.stringify({
+            ...indicatorSettings,
+            activeTab,
+        }));
     } catch {
         // Preserve interactivity even if storage is unavailable.
+    }
+}
+
+function initTabs() {
+    document.getElementById("tab-watchlist").classList.toggle("active", activeTab === "watchlist");
+    document.getElementById("tab-universe").classList.toggle("active", activeTab === "universe");
+}
+
+window.switchTab = async function switchTab(tab) {
+    if (tab === activeTab) return;
+    activeTab = tab;
+    persistIndicatorSettings();
+
+    document.getElementById("tab-watchlist").classList.toggle("active", tab === "watchlist");
+    document.getElementById("tab-universe").classList.toggle("active", tab === "universe");
+
+    const refreshBtn = document.getElementById("btn-universe-refresh");
+    refreshBtn.style.display = tab === "universe" ? "" : "none";
+
+    if (tab === "watchlist") {
+        await renderCandidates(candidates);
+    } else {
+        if (universeData !== null) {
+            await renderCandidates(universeData);
+        } else {
+            await loadUniverseCandidates();
+        }
+    }
+};
+
+window.refreshUniverse = async function refreshUniverse() {
+    universeData = null;
+    await loadUniverseCandidates();
+};
+
+async function loadUniverseCandidates() {
+    setMessage("Loading universe candidates…");
+    destroyWidgets();
+    getListEl().innerHTML = "";
+
+    try {
+        const params = loadScannerParams();
+        const qs = buildScanQueryString(params);
+        const response = await fetch(`${API_BASE}/screener/csp-scan?${qs}`);
+        if (!response.ok) throw new Error(`Server error: ${response.status}`);
+        const payload = await response.json();
+        universeData = Array.isArray(payload.candidates) ? payload.candidates : [];
+        if (activeTab === "universe") {
+            await renderCandidates(universeData);
+        }
+    } catch (error) {
+        if (activeTab !== "universe") return;
+        setMessage("Unable to load universe candidates.");
+        getListEl().innerHTML = `
+            <section class="glass card full-width">
+                <p class="subtitle">${escapeHtml(error.message)}</p>
+            </section>
+        `;
     }
 }
 
@@ -69,14 +140,14 @@ async function loadCandidates() {
 
     try {
         const response = await fetch(`${API_BASE}/screener/csp`);
-        if (!response.ok) {
-            throw new Error("Failed to fetch CSP candidates");
-        }
-
+        if (!response.ok) throw new Error("Failed to fetch CSP candidates");
         const payload = await response.json();
         candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-        await renderCandidates();
+        if (activeTab === "watchlist") {
+            await renderCandidates(candidates);
+        }
     } catch (error) {
+        if (activeTab !== "watchlist") return;
         setMessage("Unable to load CSP candidates.");
         getListEl().innerHTML = `
             <section class="glass card full-width">
@@ -164,7 +235,8 @@ async function handleControlsChanged() {
     indicatorSettings = sanitizeIndicatorSettings(next);
     persistIndicatorSettings();
     renderControls();
-    await renderCandidates();
+    const source = activeTab === "universe" ? (universeData ?? []) : candidates;
+    await renderCandidates(source);
 }
 
 /**
@@ -183,20 +255,25 @@ function resolveStockMetrics(candidate) {
     };
 }
 
-async function renderCandidates() {
+async function renderCandidates(source) {
     destroyWidgets();
 
-    const tickerCandidates = dedupeCandidatesBySymbol(candidates);
+    const tickerCandidates = dedupeCandidatesBySymbol(source);
 
     if (!tickerCandidates.length) {
-        setMessage("No viable CSP candidates found.");
+        const label = activeTab === "universe" ? "universe" : "CSP";
+        setMessage(`No viable ${label} candidates found.`);
         getListEl().innerHTML = "";
         return;
     }
 
-    setMessage(`${tickerCandidates.length} tickers loaded from ${candidates.length} CSP candidates.`);
+    const label = activeTab === "universe" ? "universe" : "CSP";
+    setMessage(`${tickerCandidates.length} tickers loaded from ${source.length} ${label} candidates.`);
     getListEl().innerHTML = tickerCandidates.map((candidate, index) => {
         const stockMetrics = resolveStockMetrics(candidate);
+        const score = Number.isFinite(candidate.composite_score)
+            ? candidate.composite_score.toFixed(1)
+            : "—";
         return `
         <section class="glass card full-width ta-ticker-card" data-symbol="${escapeHtml(candidate.symbol || "")}">
             <div class="card-header">
@@ -206,6 +283,7 @@ async function renderCandidates() {
                 </div>
             </div>
             <div class="ta-stock-grid">
+                ${metricCell("Score", score)}
                 ${metricCell("RSI", formatMetric(candidate.rsi))}
                 ${metricCell("ADX", formatMetric(candidate.adx))}
                 ${metricCell("IV/RV20", formatMetric(stockMetrics.atm_iv_rv20))}
@@ -229,10 +307,8 @@ async function renderCandidates() {
     `;
     }).join("");
 
-    await loadTradingViewScript();
-
     for (const [index, candidate] of tickerCandidates.entries()) {
-        renderTradingViewWidget(candidate, index);
+        await renderTradingViewWidget(candidate, index);
     }
 }
 
@@ -250,99 +326,53 @@ function dedupeCandidatesBySymbol(allCandidates) {
     });
 }
 
-function renderTradingViewWidget(candidate, index) {
+let tvLibReady = null;
+
+function loadTvLib() {
+    if (tvLibReady) return tvLibReady;
+    tvLibReady = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://s3.tradingview.com/tv.js";
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+    });
+    return tvLibReady;
+}
+
+async function renderTradingViewWidget(candidate, index) {
     const containerId = `ta-chart-${index}`;
     const container = document.getElementById(containerId);
+    if (!container) return;
 
-    if (!container || !window.TradingView?.widget) {
-        if (container) {
-            container.innerHTML = "<div class='trade-item'>Chart failed to initialize.</div>";
-        }
-        return;
-    }
+    await loadTvLib();
 
-    try {
-        container.innerHTML = "";
-
-        const widget = new window.TradingView.widget({
-            autosize: true,
-            symbol: resolveTradingViewSymbol(candidate.symbol),
-            interval: indicatorSettings.interval,
-            timezone: "exchange",
-            theme: indicatorSettings.theme,
-            style: "1",
-            locale: "en",
-            backgroundColor: "rgba(11, 15, 25, 1)",
-            withdateranges: true,
-            hide_side_toolbar: false,
-            allow_symbol_change: false,
-            save_image: false,
-            studies: buildWidgetStudies(indicatorSettings),
-            studies_overrides: buildWidgetStudyOverrides(indicatorSettings),
-            container_id: containerId,
-            support_host: "https://www.tradingview.com",
-        });
-
-        widgets.push(widget);
-    } catch (error) {
-        container.innerHTML = `<div class="trade-item">${escapeHtml(error.message || "Chart failed to render.")}</div>`;
-    }
+    const studies = buildWidgetStudies(indicatorSettings);
+    new window.TradingView.widget({
+        container_id: containerId,
+        autosize: true,
+        symbol: candidate.symbol || "SPY",
+        interval: indicatorSettings.interval,
+        timezone: "exchange",
+        theme: indicatorSettings.theme,
+        style: "1",
+        locale: "en",
+        backgroundColor: "rgba(11, 15, 25, 1)",
+        withdateranges: true,
+        hide_side_toolbar: false,
+        allow_symbol_change: false,
+        save_image: false,
+        studies,
+    });
 }
 
 function destroyWidgets() {
-    widgets.forEach((widget) => {
-        if (typeof widget.remove === "function") {
-            widget.remove();
-        }
+    document.querySelectorAll(".ta-chart-shell").forEach((el) => {
+        el.innerHTML = "";
     });
     widgets = [];
 }
 
-function resolveTradingViewSymbol(symbol) {
-    return symbol || "SPY";
-}
-
-function loadTradingViewScript() {
-    if (window.TradingView?.widget) {
-        return Promise.resolve();
-    }
-
-    const existing = document.querySelector(`script[data-tradingview-script="true"]`);
-    if (existing) {
-        return waitForTradingView();
-    }
-
-    const script = document.createElement("script");
-    script.src = TRADING_VIEW_SCRIPT_SRC;
-    script.async = true;
-    script.dataset.tradingviewScript = "true";
-    document.head.appendChild(script);
-
-    return waitForTradingView();
-}
-
-function waitForTradingView() {
-    return new Promise((resolve, reject) => {
-        let attempts = 0;
-
-        const tick = () => {
-            if (window.TradingView?.widget) {
-                resolve();
-                return;
-            }
-
-            attempts += 1;
-            if (attempts > 100) {
-                reject(new Error("TradingView failed to load"));
-                return;
-            }
-
-            window.setTimeout(tick, 100);
-        };
-
-        tick();
-    });
-}
 
 function buildContractSummary(candidate) {
     const expiration = candidate.expiration || "No expiration";
