@@ -68,12 +68,26 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
             iv_raw = _to_float(info.get("impliedVolatility"))
             iv_pct = round(iv_raw * 100, 2) if iv_raw is not None else None
 
+            # Balance sheet / profitability fields
+            fcf_raw = _to_float(info.get("freeCashflow"))
+            fcf = round(fcf_raw / 1e9, 4) if fcf_raw is not None else None  # stored in billions
+
+            debt_to_equity = _to_float(info.get("debtToEquity"))
+            revenue_growth = _to_float(info.get("revenueGrowth"))
+            earnings_growth = _to_float(info.get("earningsGrowth"))
+            dividend_yield = _to_float(info.get("dividendYield"))
+
             rows.append({
                 "symbol": symbol,
                 "market_cap_b": round(market_cap_b, 2),
                 "price": round(price, 2),
                 "beta": round(beta, 2) if beta is not None else None,
                 "iv_pct": iv_pct,
+                "fcf": fcf,
+                "debt_to_equity": round(debt_to_equity, 4) if debt_to_equity is not None else None,
+                "revenue_growth": round(revenue_growth, 4) if revenue_growth is not None else None,
+                "earnings_growth": round(earnings_growth, 4) if earnings_growth is not None else None,
+                "dividend_yield": round(dividend_yield, 4) if dividend_yield is not None else None,
             })
         except Exception as exc:
             logger.warning("Fundamental fetch failed for %s: %s", symbol, exc)
