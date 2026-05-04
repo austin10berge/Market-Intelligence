@@ -420,6 +420,43 @@ class TestRefreshUniverseFundamentalsUpsert:
 
 # ── refresh_universe — empty universe guard ───────────────────────────────────
 
+def test_refresh_universe_stamps_universes_tag(monkeypatch):
+    """refresh_universe() should tag each fundamental row with its universe membership."""
+    ensure_tables()
+
+    # Stub universe fetchers: AAPL in all three, MSFT in sp500+nasdaq100, AMZN only in nasdaq_large
+    monkeypatch.setattr("src.market_data.refresh.fetch_sp500_tickers",     lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr("src.market_data.refresh.fetch_nasdaq100_tickers", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr("src.market_data.refresh.fetch_nasdaq_large_cap_tickers", lambda: ["AAPL", "AMZN"])
+
+    # Stub OHLCV download to return empty (we only care about fundamentals here)
+    monkeypatch.setattr("src.market_data.refresh._download_ohlcv_batch", lambda symbols, period="5d": {})
+
+    # Stub fundamental fetch to return bare rows (no universes yet)
+    def _mock_fundamentals(symbols):
+        return [{"symbol": s, "market_cap_b": 10.0, "price": 100.0, "beta": 1.0, "iv_pct": None}
+                for s in symbols]
+    monkeypatch.setattr("src.market_data.refresh._fetch_fundamentals_batch", _mock_fundamentals)
+
+    refresh_universe(full=False)
+
+    all_rows = get_all_fundamentals()
+    lookup = {r["symbol"]: r for r in all_rows}
+
+    # AAPL: sp500 + nasdaq100 + nasdaq_large
+    assert "nasdaq_large" in lookup["AAPL"]["universes"]
+    assert "nasdaq100" in lookup["AAPL"]["universes"]
+    assert "sp500" in lookup["AAPL"]["universes"]
+
+    # MSFT: sp500 + nasdaq100 only
+    assert "sp500" in lookup["MSFT"]["universes"]
+    assert "nasdaq100" in lookup["MSFT"]["universes"]
+    assert "nasdaq_large" not in lookup["MSFT"]["universes"]
+
+    # AMZN: nasdaq_large only
+    assert lookup["AMZN"]["universes"] == "nasdaq_large"
+
+
 class TestRefreshUniverseEmptyGuard:
     def test_returns_error_dict_when_universe_empty(self):
         with (

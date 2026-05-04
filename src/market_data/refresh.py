@@ -14,12 +14,13 @@ import logging
 import math
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
 
-from ..screener.csp_scanner import fetch_sp500_tickers, fetch_nasdaq100_tickers
+from ..screener.csp_scanner import fetch_sp500_tickers, fetch_nasdaq100_tickers, fetch_nasdaq_large_cap_tickers
 from .store import (
     ensure_tables,
     bulk_upsert_ohlcv_multi,
@@ -76,6 +77,7 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
             revenue_growth = _to_float(info.get("revenueGrowth"))
             earnings_growth = _to_float(info.get("earningsGrowth"))
             dividend_yield = _to_float(info.get("dividendYield"))
+            forward_pe = _to_float(info.get("forwardPE"))
 
             rows.append({
                 "symbol": symbol,
@@ -88,6 +90,7 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
                 "revenue_growth": round(revenue_growth, 4) if revenue_growth is not None else None,
                 "earnings_growth": round(earnings_growth, 4) if earnings_growth is not None else None,
                 "dividend_yield": round(dividend_yield, 4) if dividend_yield is not None else None,
+                "forward_pe": round(forward_pe, 2) if forward_pe is not None else None,
             })
         except Exception as exc:
             logger.warning("Fundamental fetch failed for %s: %s", symbol, exc)
@@ -162,12 +165,22 @@ def refresh_universe(full: bool = False) -> dict:
     t0 = time.time()
     ensure_tables()
 
-    # 1. Fetch universe
+    # 1. Fetch universe and build membership map
     logger.info("Fetching universe constituent lists...")
-    sp500 = fetch_sp500_tickers()
-    nasdaq = fetch_nasdaq100_tickers()
-    universe = sorted(set(sp500) | set(nasdaq))
-    logger.info("Universe: %d S&P500 + %d NDX100 = %d unique tickers", len(sp500), len(nasdaq), len(universe))
+    sp500        = fetch_sp500_tickers()
+    nasdaq100    = fetch_nasdaq100_tickers()
+    nasdaq_large = fetch_nasdaq_large_cap_tickers()
+
+    membership: dict[str, set[str]] = defaultdict(set)
+    for sym in sp500:        membership[sym].add("sp500")
+    for sym in nasdaq100:    membership[sym].add("nasdaq100")
+    for sym in nasdaq_large: membership[sym].add("nasdaq_large")
+
+    universe = sorted(membership.keys())
+    logger.info(
+        "Universe: %d S&P500 + %d NDX100 + %d NASDAQ>=$2B = %d unique tickers",
+        len(sp500), len(nasdaq100), len(nasdaq_large), len(universe),
+    )
 
     if not universe:
         logger.error("Empty universe — aborting refresh")
@@ -204,6 +217,8 @@ def refresh_universe(full: bool = False) -> dict:
         logger.info("Fundamentals batch %d/%d (%d tickers)...", batch_idx + 1, n_fund_batches, len(batch))
 
         fund_rows = _fetch_fundamentals_batch(batch)
+        for row in fund_rows:
+            row["universes"] = ",".join(sorted(membership.get(row["symbol"], set())))
         if fund_rows:
             upserted = bulk_upsert_fundamentals(fund_rows)
             total_fund_rows += upserted
