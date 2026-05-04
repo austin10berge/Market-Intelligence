@@ -223,7 +223,7 @@ class TestRunCspScanDataSource:
         assert result["data_source"] == "local_store"
         summary = result["filter_summary"]
         expected_keys = {
-            "sp500_count", "nasdaq100_count", "combined_unique",
+            "combined_unique",
             "fundamental_passed", "vol_passed", "technical_passed",
             "options_screener_returned",
         }

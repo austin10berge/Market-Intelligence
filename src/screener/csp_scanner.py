@@ -213,8 +213,6 @@ class ScannerParams:
 # ── Type helpers ──────────────────────────────────────────────────────────────
 
 class FilterSummary(TypedDict):
-    sp500_count: int
-    nasdaq100_count: int
     combined_unique: int
     fundamental_passed: int
     vol_passed: int
@@ -788,8 +786,6 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
     logger.info("CSP scan started — universe: %d tickers, params: %s", len(universe), asdict(params))
 
     empty_summary = {
-        "sp500_count":               0,
-        "nasdaq100_count":           0,
         "combined_unique":           len(universe),
         "fundamental_passed":        0,
         "vol_passed":                0,
@@ -859,8 +855,6 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         c["pe"]  = fund.get("forward_pe")
 
     filter_summary: FilterSummary = {
-        "sp500_count":               0,
-        "nasdaq100_count":           0,
         "combined_unique":           len(universe),
         "fundamental_passed":        len(fundamental_passing),
         "vol_passed":                len(vol_passing),
