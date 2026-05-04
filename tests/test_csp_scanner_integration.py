@@ -13,10 +13,8 @@ import os
 import tempfile
 from unittest.mock import patch, MagicMock
 
-import httpx
 import pandas as pd
 import pytest
-import respx
 
 # ── Shared temp DB ─────────────────────────────────────────────────────────────
 # Create once for the module; patched via autouse fixture below.
@@ -190,8 +188,7 @@ class TestRunCspScanDataSource:
         params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
-            patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
-            patch("src.screener.csp_scanner.fetch_nasdaq100_tickers", return_value=_TEST_TICKERS[30:60]),
+            patch("src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS),
             patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
         ):
             result = run_csp_scan(params)
@@ -203,8 +200,7 @@ class TestRunCspScanDataSource:
         params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
-            patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
-            patch("src.screener.csp_scanner.fetch_nasdaq100_tickers", return_value=_TEST_TICKERS[30:60]),
+            patch("src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS),
             patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
         ):
             result = run_csp_scan(params)
@@ -219,8 +215,7 @@ class TestRunCspScanDataSource:
         params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
-            patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
-            patch("src.screener.csp_scanner.fetch_nasdaq100_tickers", return_value=_TEST_TICKERS[30:60]),
+            patch("src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS),
             patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
         ):
             result = run_csp_scan(params)
@@ -239,8 +234,7 @@ class TestRunCspScanDataSource:
         params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
-            patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
-            patch("src.screener.csp_scanner.fetch_nasdaq100_tickers", return_value=_TEST_TICKERS[30:60]),
+            patch("src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS),
             patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
             patch("src.screener.csp_scanner.yf") as mock_yf,
         ):
@@ -265,13 +259,13 @@ MOCK_NASDAQ_SCREENER_RESPONSE = {
 }
 
 
-@respx.mock
 def test_fetch_nasdaq_large_cap_tickers_filters_by_market_cap():
-    respx.get("https://api.nasdaq.com/api/screener/stocks").mock(
-        return_value=httpx.Response(200, json=MOCK_NASDAQ_SCREENER_RESPONSE)
-    )
-    from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
-    tickers = fetch_nasdaq_large_cap_tickers()
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = MOCK_NASDAQ_SCREENER_RESPONSE
+    mock_resp.raise_for_status = MagicMock()
+    with patch("requests.get", return_value=mock_resp):
+        from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
+        tickers = fetch_nasdaq_large_cap_tickers()
     assert "AAPL" in tickers
     assert "MSFT" in tickers
     assert "MIDC" in tickers
@@ -280,11 +274,8 @@ def test_fetch_nasdaq_large_cap_tickers_filters_by_market_cap():
     assert tickers == sorted(tickers)  # must be sorted
 
 
-@respx.mock
 def test_fetch_nasdaq_large_cap_tickers_returns_empty_on_api_failure():
-    respx.get("https://api.nasdaq.com/api/screener/stocks").mock(
-        return_value=httpx.Response(500)
-    )
-    from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
-    result = fetch_nasdaq_large_cap_tickers()
+    with patch("requests.get", side_effect=Exception("connection error")):
+        from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
+        result = fetch_nasdaq_large_cap_tickers()
     assert result == []

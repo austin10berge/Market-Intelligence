@@ -281,8 +281,8 @@ def fetch_nasdaq100_tickers() -> list[str]:
 def fetch_nasdaq_large_cap_tickers() -> list[str]:
     """Fetch all NASDAQ-listed stocks with market cap ≥ $2B from the NASDAQ screener API."""
     try:
-        import httpx as _httpx
-        resp = _httpx.get(_NASDAQ_SCREENER_URL, headers=_NASDAQ_HEADERS, timeout=15)
+        import requests as _requests
+        resp = _requests.get(_NASDAQ_SCREENER_URL, headers=_NASDAQ_HEADERS, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         rows = data.get("data", {}).get("rows", [])
@@ -305,7 +305,7 @@ def fetch_nasdaq_large_cap_tickers() -> list[str]:
 
         tickers = sorted(set(tickers))
         logger.info(
-            "Fetched %d NASDAQ large-cap tickers (≥$%.0fB) from NASDAQ screener",
+            "Fetched %d NASDAQ large-cap tickers (>=$%.0fB) from NASDAQ screener",
             len(tickers), _NASDAQ_LARGE_CAP_MIN_B,
         )
         return tickers
@@ -784,14 +784,12 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         logger.warning("Local store is stale (%.1fh old)", store_status.get("stale_hours", 0))
 
     # 1. Universe
-    sp500_tickers  = fetch_sp500_tickers()
-    nasdaq_tickers = fetch_nasdaq100_tickers()
-    universe       = sorted(set(sp500_tickers) | set(nasdaq_tickers))
+    universe = fetch_universe()
     logger.info("CSP scan started — universe: %d tickers, params: %s", len(universe), asdict(params))
 
     empty_summary = {
-        "sp500_count":               len(sp500_tickers),
-        "nasdaq100_count":           len(nasdaq_tickers),
+        "sp500_count":               0,
+        "nasdaq100_count":           0,
         "combined_unique":           len(universe),
         "fundamental_passed":        0,
         "vol_passed":                0,
@@ -861,8 +859,8 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         c["pe"]  = fund.get("forward_pe")
 
     filter_summary: FilterSummary = {
-        "sp500_count":               len(sp500_tickers),
-        "nasdaq100_count":           len(nasdaq_tickers),
+        "sp500_count":               0,
+        "nasdaq100_count":           0,
         "combined_unique":           len(universe),
         "fundamental_passed":        len(fundamental_passing),
         "vol_passed":                len(vol_passing),
