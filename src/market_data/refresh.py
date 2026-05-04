@@ -26,6 +26,7 @@ from .store import (
     bulk_upsert_ohlcv_multi,
     bulk_upsert_fundamentals,
     get_store_status,
+    get_universe_tickers,
 )
 
 logging.basicConfig(
@@ -186,22 +187,38 @@ def refresh_universe(full: bool = False) -> dict:
         logger.error("Empty universe — aborting refresh")
         return {"error": "Empty universe", "elapsed_s": round(time.time() - t0, 1)}
 
-    period = "2y" if full else "5d"
-    logger.info("OHLCV download mode: %s (period=%s)", "FULL" if full else "INCREMENTAL", period)
+    # 2. Download OHLCV in batches — new tickers always get a full 2y backfill
+    if full:
+        new_tickers: list[str] = []
+        existing_tickers: list[str] = universe
+        logger.info("OHLCV download mode: FULL (period=2y)")
+    else:
+        stored = set(get_universe_tickers())
+        new_tickers = [t for t in universe if t not in stored]
+        existing_tickers = [t for t in universe if t in stored]
+        logger.info(
+            "OHLCV download mode: INCREMENTAL — %d existing (5d) + %d new (2y backfill)",
+            len(existing_tickers), len(new_tickers),
+        )
 
-    # 2. Download OHLCV in batches
     total_ohlcv_rows = 0
-    n_batches = math.ceil(len(universe) / _OHLCV_DOWNLOAD_BATCH_SIZE)
 
-    for batch_idx, batch_start in enumerate(range(0, len(universe), _OHLCV_DOWNLOAD_BATCH_SIZE)):
-        batch = universe[batch_start: batch_start + _OHLCV_DOWNLOAD_BATCH_SIZE]
-        logger.info("OHLCV batch %d/%d (%d tickers)...", batch_idx + 1, n_batches, len(batch))
+    def _download_batches(tickers: list[str], period: str) -> None:
+        nonlocal total_ohlcv_rows
+        n = math.ceil(len(tickers) / _OHLCV_DOWNLOAD_BATCH_SIZE)
+        for i, start in enumerate(range(0, len(tickers), _OHLCV_DOWNLOAD_BATCH_SIZE)):
+            batch = tickers[start: start + _OHLCV_DOWNLOAD_BATCH_SIZE]
+            logger.info("OHLCV batch %d/%d (%d tickers, period=%s)...", i + 1, n, len(batch), period)
+            batch_data = _download_ohlcv_batch(batch, period=period)
+            if batch_data:
+                rows_upserted = bulk_upsert_ohlcv_multi(batch_data)
+                total_ohlcv_rows += rows_upserted
+                logger.info("  → %d tickers, %d rows upserted", len(batch_data), rows_upserted)
 
-        batch_data = _download_ohlcv_batch(batch, period=period)
-        if batch_data:
-            rows_upserted = bulk_upsert_ohlcv_multi(batch_data)
-            total_ohlcv_rows += rows_upserted
-            logger.info("  → %d tickers, %d rows upserted", len(batch_data), rows_upserted)
+    if new_tickers:
+        _download_batches(new_tickers, "2y")
+    if existing_tickers:
+        _download_batches(existing_tickers, "2y" if full else "5d")
 
     ohlcv_elapsed = round(time.time() - t0, 1)
     logger.info("OHLCV download complete: %d total rows in %.1fs", total_ohlcv_rows, ohlcv_elapsed)
@@ -240,6 +257,7 @@ def refresh_universe(full: bool = False) -> dict:
         "fundamentals_elapsed_s": fund_elapsed,
         "total_elapsed_s": total_elapsed,
         "mode": "full" if full else "incremental",
+        "new_tickers": len(new_tickers),
         "store_status": status,
     }
     logger.info(
