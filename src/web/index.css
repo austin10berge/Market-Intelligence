@@ -332,7 +332,7 @@ header {
 
 #csp-list .trade-item,
 #csp-section .table-headers {
-    grid-template-columns: 2fr 1fr 1fr 1.25fr 1.25fr 1.25fr 1fr 1fr 1fr 0.75fr;
+    grid-template-columns: 2fr 1fr 1fr 1.25fr 1.25fr 1fr 0.9fr 1fr 1fr 1fr 0.75fr;
 }
 
 #leaps-list .trade-item,

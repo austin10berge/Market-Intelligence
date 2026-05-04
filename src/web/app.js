@@ -228,6 +228,10 @@ function renderCspCandidates(candidates) {
                     <span class="m-lbl">% OTM</span>
                 </div>
                 <div class="metric">
+                    <span class="m-val">${c.delta != null ? c.delta.toFixed(2) : '—'}</span>
+                    <span class="m-lbl">Delta</span>
+                </div>
+                <div class="metric">
                     <span class="m-val ${c.spread_pct > 10 ? 'text-red' : ''}">${c.spread_pct > 0 ? c.spread_pct.toFixed(1) + '%' : '—'}</span>
                     <span class="m-lbl">Spread %</span>
                 </div>

@@ -94,8 +94,8 @@ class WatchlistUpdate(BaseModel):
 class CspSettingsUpdate(BaseModel):
     min_dte: int
     max_dte: int
-    min_otm_pct: float
-    max_otm_pct: float
+    min_delta: float = 0.15
+    max_delta: float = 0.40
     min_roc: float
     max_spread_pct: float
     # Technical filter fields (optional so old clients don't break)
