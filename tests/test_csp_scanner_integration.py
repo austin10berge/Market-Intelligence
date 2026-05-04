@@ -50,6 +50,7 @@ from src.screener.csp_scanner import (
     apply_fundamental_filter,
     run_csp_scan,
     ScannerParams,
+    _fundamental_filter_from_store,
 )
 
 
@@ -279,3 +280,54 @@ def test_fetch_nasdaq_large_cap_tickers_returns_empty_on_api_failure():
         from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
         result = fetch_nasdaq_large_cap_tickers()
     assert result == []
+
+
+# ── Test: restrict_to_watchlist_universe parameter ───────────────────────────────
+
+def test_restrict_to_watchlist_universe_filters_correctly():
+    """When restrict_to_watchlist_universe=True, only sp500/nasdaq100 rows pass."""
+    store_lookup = {
+        "AAPL": {"symbol": "AAPL", "market_cap_b": 100.0, "price": 150.0, "beta": 1.0,
+                 "iv_pct": 30.0, "fcf": 10.0, "forward_pe": 20.0, "universes": "nasdaq100,sp500"},
+        "AMZN": {"symbol": "AMZN", "market_cap_b": 50.0, "price": 120.0, "beta": 1.1,
+                 "iv_pct": 35.0, "fcf": 8.0, "forward_pe": 25.0, "universes": "nasdaq_large"},
+        "NEWC": {"symbol": "NEWC", "market_cap_b": 5.0, "price": 40.0, "beta": 1.2,
+                 "iv_pct": 40.0, "fcf": 1.0, "forward_pe": 15.0, "universes": "nasdaq_large"},
+    }
+    params_restricted = ScannerParams(
+        min_market_cap_b=1.0, max_price=500.0, min_beta=0.5, max_beta=3.0,
+        min_fcf_b=None, max_debt_to_equity=None, min_revenue_growth=None,
+        restrict_to_watchlist_universe=True,
+    )
+    tickers, rows = _fundamental_filter_from_store(
+        list(store_lookup.keys()), params_restricted, store_lookup
+    )
+    assert "AAPL" in tickers
+    assert "AMZN" not in tickers
+    assert "NEWC" not in tickers
+
+
+def test_restrict_to_watchlist_universe_false_passes_all():
+    """When restrict_to_watchlist_universe=False (default), all passing tickers pass."""
+    store_lookup = {
+        "AAPL": {"symbol": "AAPL", "market_cap_b": 100.0, "price": 150.0, "beta": 1.0,
+                 "iv_pct": 30.0, "fcf": 10.0, "forward_pe": 20.0, "universes": "nasdaq100,sp500"},
+        "AMZN": {"symbol": "AMZN", "market_cap_b": 50.0, "price": 120.0, "beta": 1.1,
+                 "iv_pct": 35.0, "fcf": 8.0, "forward_pe": 25.0, "universes": "nasdaq_large"},
+    }
+    params_open = ScannerParams(
+        min_market_cap_b=1.0, max_price=500.0, min_beta=0.5, max_beta=3.0,
+        min_fcf_b=None, max_debt_to_equity=None, min_revenue_growth=None,
+        restrict_to_watchlist_universe=False,
+    )
+    tickers, rows = _fundamental_filter_from_store(
+        list(store_lookup.keys()), params_open, store_lookup
+    )
+    assert "AAPL" in tickers
+    assert "AMZN" in tickers
+
+
+def test_scanner_params_cache_key_differs_by_universe_flag():
+    p1 = ScannerParams(restrict_to_watchlist_universe=False)
+    p2 = ScannerParams(restrict_to_watchlist_universe=True)
+    assert p1.cache_key_suffix() != p2.cache_key_suffix()

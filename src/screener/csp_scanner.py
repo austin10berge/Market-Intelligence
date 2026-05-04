@@ -157,6 +157,7 @@ class ScannerParams:
     min_dividend_yield:  float | None = DEFAULT_MIN_DIVIDEND_YIELD
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
+    restrict_to_watchlist_universe: bool = False
 
     def cache_key_suffix(self) -> str:
         """Return a short deterministic hash of the params for cache keying."""
@@ -182,6 +183,7 @@ class ScannerParams:
         min_revenue_growth: float | None = DEFAULT_MIN_REVENUE_GROWTH,
         min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH,
         min_dividend_yield: float | None = DEFAULT_MIN_DIVIDEND_YIELD,
+        restrict_to_watchlist_universe: bool = False,
     ) -> "ScannerParams":
         """Build ScannerParams from API query parameters (all optional)."""
         parsed_conditions: list[str] = []
@@ -207,6 +209,7 @@ class ScannerParams:
             min_revenue_growth  = min_revenue_growth,
             min_earnings_growth = min_earnings_growth,
             min_dividend_yield  = min_dividend_yield,
+            restrict_to_watchlist_universe = restrict_to_watchlist_universe,
         )
 
 
@@ -389,6 +392,12 @@ def _fundamental_filter_from_store(
         row = store_lookup.get(symbol)
         if row is None:
             continue
+
+        # Universe membership gate
+        if params.restrict_to_watchlist_universe:
+            universes = row.get("universes") or ""
+            if "sp500" not in universes and "nasdaq100" not in universes:
+                continue
 
         market_cap_b = row.get("market_cap_b") or 0.0
         price = row.get("price") or 0.0
