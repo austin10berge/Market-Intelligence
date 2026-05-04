@@ -7,7 +7,7 @@ import sqlite3
 from contextlib import asynccontextmanager, closing
 from typing import Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
@@ -314,6 +314,11 @@ async def get_csp_scan_candidates(
     min_dte:    int   | None = None,
     max_dte:    int   | None = None,
     conditions: str   | None = None,
+    min_fcf_b:           float | None = Query(default=0.0),
+    max_debt_to_equity:  float | None = Query(default=2.0),
+    min_revenue_growth:  float | None = Query(default=-0.10),
+    min_earnings_growth: float | None = Query(default=None),
+    min_dividend_yield:  float | None = Query(default=None),
 ):
     """Run the broad-universe CSP scanner (S&P 500 + NASDAQ 100).
 
@@ -349,6 +354,11 @@ async def get_csp_scan_candidates(
         min_dte=min_dte,
         max_dte=max_dte,
         conditions=conditions,
+        min_fcf_b=min_fcf_b,
+        max_debt_to_equity=max_debt_to_equity,
+        min_revenue_growth=min_revenue_growth,
+        min_earnings_growth=min_earnings_growth,
+        min_dividend_yield=min_dividend_yield,
     )
     # Each unique param combination gets its own cache key
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
@@ -391,6 +401,11 @@ async def invalidate_csp_scan_cache(
     min_dte:    int   | None = None,
     max_dte:    int   | None = None,
     conditions: str   | None = None,
+    min_fcf_b:           float | None = Query(default=0.0),
+    max_debt_to_equity:  float | None = Query(default=2.0),
+    min_revenue_growth:  float | None = Query(default=-0.10),
+    min_earnings_growth: float | None = Query(default=None),
+    min_dividend_yield:  float | None = Query(default=None),
 ):
     """Bust the cache for a specific param combination (or the default set)."""
     params = ScannerParams.from_query(
@@ -400,6 +415,11 @@ async def invalidate_csp_scan_cache(
         min_adx=min_adx, max_adx=max_adx,
         min_dte=min_dte, max_dte=max_dte,
         conditions=conditions,
+        min_fcf_b=min_fcf_b,
+        max_debt_to_equity=max_debt_to_equity,
+        min_revenue_growth=min_revenue_growth,
+        min_earnings_growth=min_earnings_growth,
+        min_dividend_yield=min_dividend_yield,
     )
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
     await cache_delete(cache_key)
