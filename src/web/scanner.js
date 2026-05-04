@@ -9,6 +9,21 @@
 
 'use strict';
 
+function openTradingView(symbol) {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (!isIOS) {
+        window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`, '_blank');
+        return;
+    }
+    // On iOS: try the app URL scheme, fall back to web if app isn't installed
+    const appUrl = `tradingview://chart?symbol=${encodeURIComponent(symbol)}`;
+    const webUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`;
+    let fallbackTimer = setTimeout(() => window.open(webUrl, '_blank'), 600);
+    const cancelFallback = () => clearTimeout(fallbackTimer);
+    document.addEventListener('visibilitychange', cancelFallback, { once: true });
+    window.location.href = appUrl;
+}
+
 const API_BASE = (() => {
     if (window.MARKET_INTELLIGENCE_CONFIG && window.MARKET_INTELLIGENCE_CONFIG.apiBase) {
         return window.MARKET_INTELLIGENCE_CONFIG.apiBase.replace(/\/$/, '');
@@ -40,6 +55,7 @@ const _state = {
         min_revenue_growth: -0.10,
         min_earnings_growth: null,
         min_dividend_yield:  null,
+        restrict_to_watchlist_universe: false,
     },
     // Available conditions fetched from API
     availableConditions: [],
@@ -79,6 +95,7 @@ function _restoreParams() {
         if (typeof saved.min_earnings_growth === 'number' || saved.min_earnings_growth === null) p.min_earnings_growth = saved.min_earnings_growth;
         if (typeof saved.min_dividend_yield  === 'number' || saved.min_dividend_yield  === null) p.min_dividend_yield  = saved.min_dividend_yield;
         if (Array.isArray(saved.conditions)) p.conditions = saved.conditions;
+        if (typeof saved.restrict_to_watchlist_universe === 'boolean') p.restrict_to_watchlist_universe = saved.restrict_to_watchlist_universe;
     } catch { /* corrupt storage — use defaults */ }
 }
 
@@ -120,6 +137,8 @@ const PARAM_CONFIG = [
 document.addEventListener('DOMContentLoaded', () => {
     _restoreParams();
     renderParamBadges();
+    const univBtn = document.getElementById('btn-watchlist-universe');
+    if (univBtn) univBtn.classList.toggle('active', _state.params.restrict_to_watchlist_universe);
     loadAvailableConditions().then(() => renderConditionPicker());
     loadDataFreshness();
 });
@@ -182,6 +201,13 @@ function disableNullableBadge(key) {
     _state.params[key] = null;
     renderParamBadges();
     _persistParams();
+}
+
+function toggleWatchlistUniverse() {
+    _state.params.restrict_to_watchlist_universe = !_state.params.restrict_to_watchlist_universe;
+    _persistParams();
+    const btn = document.getElementById('btn-watchlist-universe');
+    if (btn) btn.classList.toggle('active', _state.params.restrict_to_watchlist_universe);
 }
 
 function openParamEdit(key) {
@@ -356,6 +382,7 @@ function _buildQueryString() {
     if (p.min_revenue_growth  !== null && p.min_revenue_growth  !== undefined) qs.set('min_revenue_growth',  p.min_revenue_growth);
     if (p.min_earnings_growth !== null && p.min_earnings_growth !== undefined) qs.set('min_earnings_growth', p.min_earnings_growth);
     if (p.min_dividend_yield  !== null && p.min_dividend_yield  !== undefined) qs.set('min_dividend_yield',  p.min_dividend_yield);
+    if (_state.params.restrict_to_watchlist_universe) qs.set('restrict_to_watchlist_universe', 'true');
     return qs.toString();
 }
 
@@ -365,7 +392,10 @@ async function startScan() {
     closeAllParamEdits();
     _disableButtons();
     _state.scanStart = Date.now();
-    setStatus('running', '<span class="spinner"></span> Scanning S&P 500 + NASDAQ 100 universe… This may take 3–6 minutes on a cold cache.');
+    const universeLabel = _state.params.restrict_to_watchlist_universe
+        ? 'S&P 500 + NASDAQ 100 universe'
+        : 'Full NASDAQ universe (>=\$2B)';
+    setStatus('running', `<span class="spinner"></span> Scanning ${universeLabel}… This may take 3–6 minutes on a cold cache.`);
 
     if (_state.scanPollId) { clearInterval(_state.scanPollId); _state.scanPollId = null; }
 
@@ -553,7 +583,7 @@ function renderStockCandidates(candidates) {
         const epsGrDisplay = c.eps_growth === 'N/A' ? 'N/A' : `${epsGrSign}${c.eps_growth}%`;
 
         return `
-            <div class="trade-item" onclick="window.open('https://www.tradingview.com/chart/?symbol=${_esc(c.symbol)}', '_blank')" title="Open ${_esc(c.symbol)} on TradingView">
+            <div class="trade-item" onclick="openTradingView('${_esc(c.symbol)}')" title="Open ${_esc(c.symbol)} on TradingView" style="cursor:pointer">
                 <div class="ticker-block">
                     <span class="symbol">${_esc(c.symbol)}</span>
                 </div>
@@ -619,7 +649,7 @@ function renderCspCandidates(candidates) {
     }
 
     list.innerHTML = candidates.map(c => `
-        <div class="trade-item">
+        <div class="trade-item" onclick="openTradingView('${_esc(c.symbol)}')" title="Open ${_esc(c.symbol)} on TradingView" style="cursor:pointer">
             <div class="ticker-block">
                 <span class="ticker">${_esc(c.symbol)}</span>
                 <span class="ticker-sub">Stock: ${c.current_price.toFixed(2)}</span>

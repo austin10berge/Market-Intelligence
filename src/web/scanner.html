@@ -292,6 +292,30 @@
             background: rgba(245,158,11,0.28);
         }
 
+        /* ── Universe toggle ──────────────────────────────────────────────── */
+        .btn-universe-toggle {
+            padding: 5px 12px;
+            border-radius: 14px;
+            border: 1px solid var(--border-color, #333);
+            background: transparent;
+            color: var(--text-muted, #888);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .btn-universe-toggle:hover {
+            border-color: var(--text-secondary, #aaa);
+            color: var(--text-primary, #fff);
+        }
+        .btn-universe-toggle.active {
+            background: var(--accent, #4f6ef7);
+            border-color: var(--accent, #4f6ef7);
+            color: #fff;
+        }
+        .universe-toggle-area {
+            margin: 8px 0 4px;
+        }
+
         /* ── Responsive ───────────────────────────────────────────────────── */
         @media (max-width: 600px) {
             .funnel-card { flex: 1 1 100px; }
@@ -351,6 +375,13 @@
                 <div id="condition-chips" class="condition-chips">
                     <span class="no-conditions">No conditions selected — all vol-passing tickers proceed to options screener</span>
                 </div>
+            </div>
+
+            <!-- Universe scope toggle -->
+            <div class="universe-toggle-area">
+                <button id="btn-watchlist-universe" class="btn-universe-toggle" onclick="toggleWatchlistUniverse()">
+                    S&amp;P 500 / NASDAQ 100 only
+                </button>
             </div>
 
             <!-- Scan buttons + status -->
