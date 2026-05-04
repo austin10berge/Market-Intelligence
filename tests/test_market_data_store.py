@@ -212,6 +212,52 @@ class TestStoreStatus:
         assert status["fundamentals_count"] >= 1
 
 
+# ── New fundamental columns ───────────────────────────────────────────────────
+
+class TestFundamentalsNewColumns:
+    def test_new_columns_upsert_and_read(self):
+        ensure_tables()
+        rows = [{
+            "symbol": "NEWCOL",
+            "market_cap_b": 50.0,
+            "price": 100.0,
+            "beta": 1.0,
+            "iv_pct": 25.0,
+            "fcf": 5.0,
+            "debt_to_equity": 0.8,
+            "revenue_growth": 0.12,
+            "earnings_growth": 0.08,
+            "dividend_yield": 0.015,
+        }]
+        count = bulk_upsert_fundamentals(rows)
+        assert count == 1
+
+        result = get_fundamentals_for_tickers(["NEWCOL"])
+        assert len(result) == 1
+        r = result[0]
+        assert r["fcf"] == pytest.approx(5.0)
+        assert r["debt_to_equity"] == pytest.approx(0.8)
+        assert r["revenue_growth"] == pytest.approx(0.12)
+        assert r["earnings_growth"] == pytest.approx(0.08)
+        assert r["dividend_yield"] == pytest.approx(0.015)
+
+    def test_new_columns_default_to_none_when_omitted(self):
+        ensure_tables()
+        rows = [{"symbol": "OLDSTYLE", "market_cap_b": 10.0, "price": 50.0, "beta": 1.0, "iv_pct": None}]
+        bulk_upsert_fundamentals(rows)
+
+        result = get_fundamentals_for_tickers(["OLDSTYLE"])
+        assert len(result) == 1
+        r = result[0]
+        assert r["fcf"] is None
+        assert r["debt_to_equity"] is None
+        assert r["revenue_growth"] is None
+
+    def test_ensure_tables_is_idempotent_with_migration(self):
+        ensure_tables()
+        ensure_tables()
+
+
 # ── Universe tickers ──────────────────────────────────────────────────────────
 
 class TestUniverseTickers:
