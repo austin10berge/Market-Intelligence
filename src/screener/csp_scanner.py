@@ -1,6 +1,6 @@
 """CSP Scanner — broad universe screener for Cash-Secured Put candidates.
 
-Fetches the S&P 500 + NASDAQ 100 constituent lists, applies fundamental,
+Fetches the S&P 500, NASDAQ 100, and NASDAQ large-cap (≥$2B) constituent lists, applies fundamental,
 volatility, and optional technical-condition pre-filters, then hands qualifying
 tickers to the existing screen_csp_candidates() options screening pipeline.
 
@@ -461,6 +461,12 @@ def _fundamental_filter_from_yfinance(
     params: ScannerParams,
 ) -> tuple[list[str], list[dict]]:
     """Fallback: fetch fundamentals live from yfinance (slow, per-ticker)."""
+    if params.restrict_to_watchlist_universe:
+        logger.warning(
+            "restrict_to_watchlist_universe=True has no effect in the yfinance fallback path "
+            "(no universe membership data available without a populated local store)"
+        )
+
     passing_tickers: list[str] = []
     fundamental_rows: list[dict] = []
 
