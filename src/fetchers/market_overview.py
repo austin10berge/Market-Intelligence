@@ -98,8 +98,41 @@ async def _fetch_sectors() -> dict:
     return result
 
 
-async def _fetch_vix() -> dict | None:
-    raise NotImplementedError
+async def _fetch_vix() -> dict:
+    raw = await asyncio.to_thread(
+        yf.download,
+        "^VIX ^VIX3M",
+        period="10d",
+        group_by="ticker",
+        progress=False,
+        auto_adjust=True,
+    )
+    vix_closes = raw["^VIX"]["Close"].dropna()
+    vix3m_closes = raw["^VIX3M"]["Close"].dropna()
+
+    spot = round(float(vix_closes.iloc[-1]), 2)
+    vix3m = round(float(vix3m_closes.iloc[-1]), 2)
+    spread = round(vix3m - spot, 2)
+
+    if spread > 0.5:
+        term_structure = "Contango"
+        stress_note = "normal, calm"
+    elif spread < -0.5:
+        term_structure = "Backwardation"
+        stress_note = "elevated stress"
+    else:
+        term_structure = "Flat"
+        stress_note = "transitioning"
+
+    return {
+        "spot": spot,
+        "pct_1d": _pct_change(vix_closes, 1),
+        "pct_1w": _pct_change(vix_closes, 5),
+        "vix3m": vix3m,
+        "term_structure": term_structure,
+        "spread": spread,
+        "stress_note": stress_note,
+    }
 
 
 async def _fetch_gex() -> dict:

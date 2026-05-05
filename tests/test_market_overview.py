@@ -251,3 +251,66 @@ class TestSectors:
         assert result["XLK"]["pct_1d"] is not None
         assert result["XLK"]["pct_1w"] is None
         assert result["XLK"]["pct_1m"] is None
+
+
+# ── VIX ───────────────────────────────────────────────────────────────────────
+
+class TestVix:
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_vix_spot_value(self, mock_dl):
+        # 5 days of VIX at 18.x, VIX3M at 18.x (same base/step)
+        vix_data = _make_yf_df(["^VIX", "^VIX3M"], n_days=5, base=18.0, step=0.1)
+        mock_dl.return_value = vix_data
+        result = await _fetch_vix()
+        # close[-1] = 18.0 + 4*0.1 = 18.4
+        assert result["spot"] == pytest.approx(18.4, abs=0.01)
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_vix_pct_1d(self, mock_dl):
+        vix_data = _make_yf_df(["^VIX", "^VIX3M"], n_days=5, base=18.0, step=0.1)
+        mock_dl.return_value = vix_data
+        result = await _fetch_vix()
+        # close[-1]=18.4, close[-2]=18.3 → (18.4-18.3)/18.3*100 ≈ 0.55%
+        assert result["pct_1d"] == pytest.approx(0.55, abs=0.01)
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_vix_term_structure_contango(self, mock_dl):
+        # VIX lower than VIX3M → spread > 0.5 → Contango
+        vix_df = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.0)
+        vix3m_df = _make_yf_df(["^VIX3M"], n_days=5, base=19.5, step=0.0)
+        combined = pd.concat([vix_df, vix3m_df], axis=1)
+        mock_dl.return_value = combined
+        result = await _fetch_vix()
+        assert result["term_structure"] == "Contango"
+        assert result["stress_note"] == "normal, calm"
+        assert result["spread"] == pytest.approx(1.5, abs=0.01)
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_vix_term_structure_backwardation(self, mock_dl):
+        # VIX higher than VIX3M → spread < -0.5 → Backwardation
+        vix_df = _make_yf_df(["^VIX"], n_days=5, base=25.0, step=0.0)
+        vix3m_df = _make_yf_df(["^VIX3M"], n_days=5, base=23.0, step=0.0)
+        combined = pd.concat([vix_df, vix3m_df], axis=1)
+        mock_dl.return_value = combined
+        result = await _fetch_vix()
+        assert result["term_structure"] == "Backwardation"
+        assert result["stress_note"] == "elevated stress"
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_vix_term_structure_flat(self, mock_dl):
+        # spread = 0.3 (between -0.5 and 0.5) → Flat
+        vix_df = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.0)
+        vix3m_df = _make_yf_df(["^VIX3M"], n_days=5, base=18.3, step=0.0)
+        combined = pd.concat([vix_df, vix3m_df], axis=1)
+        mock_dl.return_value = combined
+        result = await _fetch_vix()
+        assert result["term_structure"] == "Flat"
+        assert result["stress_note"] == "transitioning"
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_vix_pct_1w_none_with_few_rows(self, mock_dl):
+        vix_data = _make_yf_df(["^VIX", "^VIX3M"], n_days=3, base=18.0, step=0.1)
+        mock_dl.return_value = vix_data
+        result = await _fetch_vix()
+        # 3 rows → 1W needs 6 → None
+        assert result["pct_1w"] is None
