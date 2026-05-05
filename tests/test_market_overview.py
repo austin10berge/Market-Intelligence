@@ -206,3 +206,48 @@ async def test_fetch_gex_bucket_negative_live():
     result = await _fetch_gex()
     assert result["bucket"] == "negative"
     assert result["trend"] == "Flat"
+
+
+# ── Sectors ───────────────────────────────────────────────────────────────────
+
+class TestSectors:
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_sectors_returns_all_tickers(self, mock_dl):
+        mock_dl.return_value = _make_yf_df(["XLK", "XLF"], n_days=30)
+        etfs = {"XLK": "Technology", "XLF": "Financials"}
+        with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
+            result = await _fetch_sectors()
+        assert set(result.keys()) == {"XLK", "XLF"}
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_sectors_pct_values(self, mock_dl):
+        mock_dl.return_value = _make_yf_df(["XLK"], n_days=30, base=100.0, step=1.0)
+        etfs = {"XLK": "Technology"}
+        with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
+            result = await _fetch_sectors()
+        xlk = result["XLK"]
+        # close[-1] = 100 + 29 = 129, close[-2] = 128 → 1D = (129-128)/128*100 ≈ 0.78%
+        assert xlk["pct_1d"] == pytest.approx(0.78, abs=0.01)
+        # close[-1] = 129, close[-6] = 124 → 1W = (129-124)/124*100 ≈ 4.03%
+        assert xlk["pct_1w"] == pytest.approx(4.03, abs=0.01)
+        # close[-1] = 129, close[-22] = 108 → 1M = (129-108)/108*100 ≈ 19.44%
+        assert xlk["pct_1m"] == pytest.approx(19.44, abs=0.01)
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_sectors_name_field(self, mock_dl):
+        mock_dl.return_value = _make_yf_df(["XLK"], n_days=30)
+        etfs = {"XLK": "Technology"}
+        with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
+            result = await _fetch_sectors()
+        assert result["XLK"]["name"] == "Technology"
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_sectors_null_when_insufficient_data(self, mock_dl):
+        mock_dl.return_value = _make_yf_df(["XLK"], n_days=3)
+        etfs = {"XLK": "Technology"}
+        with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
+            result = await _fetch_sectors()
+        # 3 rows → 1D works, 1W/1M are None (need 6 and 22 rows respectively)
+        assert result["XLK"]["pct_1d"] is not None
+        assert result["XLK"]["pct_1w"] is None
+        assert result["XLK"]["pct_1m"] is None

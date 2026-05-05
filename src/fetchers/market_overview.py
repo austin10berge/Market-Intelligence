@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio  # noqa: F401
+import asyncio
 import csv
 import logging
 import sqlite3  # noqa: F401
@@ -10,7 +10,7 @@ from contextlib import closing  # noqa: F401
 from io import StringIO
 
 import httpx
-import yfinance as yf  # noqa: F401
+import yfinance as yf
 
 from ..config import settings  # noqa: F401
 
@@ -76,7 +76,30 @@ def _gex_trend(current_b: float, avg_b: float) -> str:
 
 
 async def _fetch_sectors() -> dict:
-    raise NotImplementedError
+    tickers = list(SECTOR_ETFS.keys())
+    raw = await asyncio.to_thread(
+        yf.download,
+        " ".join(tickers),
+        period="30d",
+        group_by="ticker",
+        progress=False,
+        auto_adjust=True,
+    )
+    result = {}
+    for ticker, name in SECTOR_ETFS.items():
+        try:
+            closes = raw[ticker]["Close"].dropna()
+        except (KeyError, TypeError):
+            continue
+        if closes.empty:
+            continue
+        result[ticker] = {
+            "name": name,
+            "pct_1d": _pct_change(closes, 1),
+            "pct_1w": _pct_change(closes, 5),
+            "pct_1m": _pct_change(closes, 21),
+        }
+    return result
 
 
 async def _fetch_vix() -> dict | None:
