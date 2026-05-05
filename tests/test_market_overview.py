@@ -98,6 +98,8 @@ def _setup_breadth_db(
             PRIMARY KEY (symbol, date)
         )
     """)
+    conn.execute("DELETE FROM universe_daily_ohlcv")
+    conn.commit()
     dates = pd.bdate_range(end="2024-01-31", periods=n_days)
     rows = []
     for sym in tickers_ascending:
@@ -321,3 +323,44 @@ class TestVix:
         mock_dl.return_value = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.1)
         with pytest.raises(ValueError, match="VIX data missing"):
             await _fetch_vix()
+
+
+# ── Breadth ───────────────────────────────────────────────────────────────────
+
+class TestBreadth:
+    def test_pct_above_200ma(self, _patch_db_path):
+        # 60 ascending tickers (close[-1] > 200d MA) + 40 descending
+        asc = [f"ASC{i:03d}" for i in range(60)]
+        desc = [f"DESC{i:03d}" for i in range(40)]
+        _setup_breadth_db(tickers_ascending=asc, tickers_descending=desc, n_days=210)
+        result = _fetch_breadth()
+        assert result is not None
+        # 60/100 = 60%
+        assert result["pct_above_200ma"] == pytest.approx(60.0, abs=0.1)
+
+    def test_returns_none_when_insufficient_tickers(self, _patch_db_path):
+        # Only 30 tickers with 210 days → fewer than 50 qualifying
+        asc = [f"SMA{i:03d}" for i in range(20)]
+        desc = [f"SMD{i:03d}" for i in range(10)]
+        _setup_breadth_db(tickers_ascending=asc, tickers_descending=desc, n_days=210)
+        result = _fetch_breadth()
+        assert result is None
+
+    def test_ad_ratio(self, _patch_db_path):
+        # 60 ascending, 40 descending → A/D = 60/40 = 1.5
+        asc = [f"ADA{i:03d}" for i in range(60)]
+        desc = [f"ADD{i:03d}" for i in range(40)]
+        _setup_breadth_db(tickers_ascending=asc, tickers_descending=desc, n_days=210)
+        result = _fetch_breadth()
+        assert result is not None
+        assert result["advancing"] == 60
+        assert result["declining"] == 40
+        assert result["ad_ratio"] == pytest.approx(1.5, abs=0.01)
+
+    def test_returns_none_when_fewer_than_50_qualifying(self, _patch_db_path):
+        # Only 10 tickers with 200+ rows
+        asc = [f"TNA{i:03d}" for i in range(5)]
+        desc = [f"TND{i:03d}" for i in range(5)]
+        _setup_breadth_db(tickers_ascending=asc, tickers_descending=desc, n_days=210)
+        result = _fetch_breadth()
+        assert result is None

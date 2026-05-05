@@ -10,6 +10,8 @@ from io import StringIO
 import httpx
 import yfinance as yf
 
+from ..config import settings
+
 logger = logging.getLogger(__name__)
 
 GEX_CSV_URL = "https://squeezemetrics.com/monitor/static/DIX.csv"
@@ -178,7 +180,75 @@ async def _fetch_gex() -> dict:
 
 
 def _fetch_breadth() -> dict | None:
-    raise NotImplementedError
+    import sqlite3
+
+    db_path = settings.db_path
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        tickers = [r[0] for r in conn.execute(
+            "SELECT DISTINCT symbol FROM universe_daily_ohlcv ORDER BY symbol"
+        ).fetchall()]
+
+        qualifying = 0
+        above = 0
+        for ticker in tickers:
+            rows = conn.execute(
+                "SELECT close FROM universe_daily_ohlcv WHERE symbol = ? ORDER BY date ASC",
+                (ticker,),
+            ).fetchall()
+            if len(rows) < 200:
+                continue
+            qualifying += 1
+            closes = [r[0] for r in rows]
+            ma200 = sum(closes[-200:]) / 200
+            if closes[-1] > ma200:
+                above += 1
+
+        if qualifying < 50:
+            logger.warning("Breadth: only %d tickers with 200d history, returning None", qualifying)
+            return None
+
+        pct_above = round(above / qualifying * 100, 1)
+
+        latest_date = conn.execute(
+            "SELECT MAX(date) FROM universe_daily_ohlcv"
+        ).fetchone()[0]
+        prev_rows = conn.execute(
+            "SELECT DISTINCT date FROM universe_daily_ohlcv"
+            " WHERE date < ? ORDER BY date DESC LIMIT 1",
+            (latest_date,),
+        ).fetchone()
+        if not prev_rows:
+            return {"pct_above_200ma": pct_above, "advancing": 0, "declining": 0, "ad_ratio": None}
+        prev_date = prev_rows[0]
+
+        today_prices = dict(conn.execute(
+            "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
+            (latest_date,),
+        ).fetchall())
+        yesterday_prices = dict(conn.execute(
+            "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
+            (prev_date,),
+        ).fetchall())
+
+        advancing = 0
+        declining = 0
+        for sym in today_prices:
+            if sym not in yesterday_prices:
+                continue
+            if today_prices[sym] > yesterday_prices[sym]:
+                advancing += 1
+            elif today_prices[sym] < yesterday_prices[sym]:
+                declining += 1
+
+        ad_ratio = round(advancing / declining, 2) if declining > 0 else None
+
+        return {
+            "pct_above_200ma": pct_above,
+            "advancing": advancing,
+            "declining": declining,
+            "ad_ratio": ad_ratio,
+        }
 
 
 async def fetch_market_overview() -> dict:
