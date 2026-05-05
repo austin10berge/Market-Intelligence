@@ -5,14 +5,10 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
-import sqlite3  # noqa: F401
-from contextlib import closing  # noqa: F401
 from io import StringIO
 
 import httpx
 import yfinance as yf
-
-from ..config import settings  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

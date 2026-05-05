@@ -63,7 +63,7 @@ _tmp_db_path = _tmp_db.name
 _tmp_db.close()
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def _patch_db_path():
     with patch("src.fetchers.market_overview.settings") as mock_settings:
         mock_settings.db_path = _tmp_db_path
