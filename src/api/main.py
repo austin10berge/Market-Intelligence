@@ -6,6 +6,7 @@ import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager, closing
+from datetime import datetime
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
@@ -132,10 +133,15 @@ class CspSettingsUpdate(BaseModel):
 
 # ── Cache metadata helper ─────────────────────────────────────────────────────
 
-def _cache_meta(envelope: dict | None) -> dict:
-    """Extract cache metadata from a Redis envelope for inclusion in API responses."""
+def _cache_meta(envelope: dict | None, cached_at: str | None = None) -> dict:
+    """Extract cache metadata from a Redis envelope for inclusion in API responses.
+
+    Args:
+        envelope: Redis cache envelope, or None for cache miss.
+        cached_at: ISO timestamp to use for cache miss (defaults to None).
+    """
     if envelope is None:
-        return {"cached": False, "cached_at": None, "market_status": market_status_label()}
+        return {"cached": False, "cached_at": cached_at, "market_status": market_status_label()}
     return {
         "cached": True,
         "cached_at": envelope.get("cached_at"),
@@ -283,7 +289,8 @@ async def get_market_posture():
         # key via invalidate_market_posture() after each successful run.
         await cache_set(KEY_MARKET_POSTURE, data, ttl=86400)
 
-        data.update(_cache_meta(None))
+        now_iso = datetime.now(datetime.UTC).isoformat()
+        data.update(_cache_meta(None, cached_at=now_iso))
         return data
 
     except HTTPException:
@@ -310,7 +317,8 @@ async def market_overview_endpoint():
         data = await fetch_market_overview()
         ttl = screener_ttl()
         await cache_set(KEY_MARKET_OVERVIEW, data, ttl=ttl)
-        data.update(_cache_meta(None))
+        now_iso = datetime.now(datetime.UTC).isoformat()
+        data.update(_cache_meta(None, cached_at=now_iso))
         return data
     except Exception as e:
         logger.exception("Market overview fetch failed")
@@ -330,7 +338,8 @@ async def get_csp_candidates():
         candidates = await asyncio.to_thread(screen_csp_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
-        return {"candidates": candidates, **_cache_meta(None)}
+        now_iso = datetime.now(datetime.UTC).isoformat()
+        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("CSP screener failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -427,7 +436,8 @@ async def get_csp_scan_candidates(
                 "Params: %s", params
             )
 
-        result.update(_cache_meta(None))
+        now_iso = datetime.now(datetime.UTC).isoformat()
+        result.update(_cache_meta(None, cached_at=now_iso))
         return result
     except Exception as e:
         logger.exception("CSP scan failed")
@@ -487,7 +497,8 @@ async def get_leaps_candidates():
         candidates = await asyncio.to_thread(screen_leaps_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
-        return {"candidates": candidates, **_cache_meta(None)}
+        now_iso = datetime.now(datetime.UTC).isoformat()
+        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("LEAPS screener failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -513,7 +524,8 @@ async def get_stock_candidates(tickers: str | None = None):
             candidates = await asyncio.to_thread(screen_stocks, ticker_list)
             ttl = screener_ttl()
             await cache_set(cache_key, candidates, ttl=ttl)
-            return {"candidates": candidates, **_cache_meta(None)}
+            now_iso = datetime.now(datetime.UTC).isoformat()
+            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
         except Exception as e:
             logger.exception("Stock screener (dynamic tickers) failed")
             raise HTTPException(status_code=500, detail=str(e))
@@ -526,7 +538,8 @@ async def get_stock_candidates(tickers: str | None = None):
         candidates = await asyncio.to_thread(screen_stocks)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
-        return {"candidates": candidates, **_cache_meta(None)}
+        now_iso = datetime.now(datetime.UTC).isoformat()
+        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("Stock screener failed")
         raise HTTPException(status_code=500, detail=str(e))
