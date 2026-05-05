@@ -13,13 +13,13 @@ import pytest
 import respx  # noqa: F401
 
 from src.fetchers.market_overview import (
-    _fetch_breadth,  # noqa: F401
+    _fetch_breadth,
     _fetch_gex,
     _fetch_sectors,
     _fetch_vix,
     _gex_bucket,
     _gex_trend,
-    fetch_market_overview,  # noqa: F401
+    fetch_market_overview,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -364,3 +364,72 @@ class TestBreadth:
         _setup_breadth_db(tickers_ascending=asc, tickers_descending=desc, n_days=210)
         result = _fetch_breadth()
         assert result is None
+
+
+# ── Coordinator ───────────────────────────────────────────────────────────────
+
+class TestCoordinator:
+    @patch("src.fetchers.market_overview._fetch_sectors")
+    @patch("src.fetchers.market_overview._fetch_vix")
+    @patch("src.fetchers.market_overview._fetch_gex")
+    @patch("src.fetchers.market_overview._fetch_breadth")
+    async def test_coordinator_returns_all_fields(
+        self, mock_breadth, mock_gex, mock_vix, mock_sectors
+    ):
+        mock_sectors.return_value = {
+            "XLK": {"name": "Technology", "pct_1d": 1.0, "pct_1w": 2.0, "pct_1m": 3.0}
+        }
+        mock_vix.return_value = {
+            "spot": 18.4, "pct_1d": -0.5, "pct_1w": 2.1, "vix3m": 19.1,
+            "term_structure": "Contango", "spread": 0.7, "stress_note": "normal, calm",
+        }
+        mock_gex.return_value = {
+            "value_b": 7.4, "rolling_20d_avg_b": 5.1, "trend": "Rising",
+            "label": "High Positive — Strong pinning", "bucket": "high",
+        }
+        mock_breadth.return_value = {
+            "pct_above_200ma": 61.2, "advancing": 312, "declining": 188, "ad_ratio": 1.66,
+        }
+        result = await fetch_market_overview()
+        assert result["sectors"] is not None
+        assert result["vix"] is not None
+        assert result["gex"] is not None
+        assert result["breadth"] is not None
+
+    @patch("src.fetchers.market_overview._fetch_sectors")
+    @patch("src.fetchers.market_overview._fetch_vix")
+    @patch("src.fetchers.market_overview._fetch_gex")
+    @patch("src.fetchers.market_overview._fetch_breadth")
+    async def test_coordinator_handles_sector_failure(
+        self, mock_breadth, mock_gex, mock_vix, mock_sectors
+    ):
+        mock_sectors.side_effect = Exception("yfinance down")
+        mock_vix.return_value = {
+            "spot": 18.4, "pct_1d": -0.5, "pct_1w": 2.1, "vix3m": 19.1,
+            "term_structure": "Contango", "spread": 0.7, "stress_note": "normal, calm",
+        }
+        mock_gex.return_value = {
+            "value_b": 7.4, "rolling_20d_avg_b": 5.1, "trend": "Rising",
+            "label": "High Positive — Strong pinning", "bucket": "high",
+        }
+        mock_breadth.return_value = {
+            "pct_above_200ma": 61.2, "advancing": 312, "declining": 188, "ad_ratio": 1.66,
+        }
+        result = await fetch_market_overview()
+        assert result["sectors"] is None
+        assert result["vix"] is not None
+
+    @patch("src.fetchers.market_overview._fetch_sectors")
+    @patch("src.fetchers.market_overview._fetch_vix")
+    @patch("src.fetchers.market_overview._fetch_gex")
+    @patch("src.fetchers.market_overview._fetch_breadth")
+    async def test_coordinator_handles_all_failures(
+        self, mock_breadth, mock_gex, mock_vix, mock_sectors
+    ):
+        for m in [mock_sectors, mock_vix, mock_gex, mock_breadth]:
+            m.side_effect = Exception("all down")
+        result = await fetch_market_overview()
+        assert result["sectors"] is None
+        assert result["vix"] is None
+        assert result["gex"] is None
+        assert result["breadth"] is None

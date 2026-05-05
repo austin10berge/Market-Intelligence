@@ -1,43 +1,61 @@
 """FastAPI backend — market-hours-aware Redis cache for all screener endpoints."""
 
+import asyncio
 import json
 import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager, closing
-from typing import Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Query
+import httpx
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import asyncio
-import httpx
 
+from ..backtester.data_provider import get_historical_data
+from ..backtester.engine import run_backtest
+from ..backtester.models import BacktestRequest, WalkForwardRequest
+from ..backtester.walk_forward import run_walk_forward
+from ..cache import (
+    KEY_MARKET_OVERVIEW,
+    KEY_MARKET_POSTURE,
+    KEY_SCREENER_CSP,
+    KEY_SCREENER_CSP_SCAN,
+    KEY_SCREENER_LEAPS,
+    KEY_SCREENER_STOCKS,
+    cache_delete,
+    cache_get,
+    cache_set,
+    invalidate_market_posture,
+    invalidate_screener_cache,
+    market_is_open,
+    market_status_label,
+    scanner_ttl,
+    screener_ttl,
+)
 from ..config import settings
 from ..db import (
-    get_watchlist, update_watchlist,
-    get_csp_settings, update_csp_settings,
-    get_stock_watchlist, update_stock_watchlist,
-    get_insider_cache, get_congressional_cache, get_signal_history,
-    save_strategy, get_strategies, get_strategy, delete_strategy,
+    delete_strategy,
+    get_congressional_cache,
+    get_csp_settings,
+    get_insider_cache,
+    get_signal_history,
+    get_stock_watchlist,
+    get_strategies,
+    get_watchlist,
+    save_strategy,
+    update_csp_settings,
+    update_stock_watchlist,
+    update_watchlist,
 )
-from ..backtester.models import BacktestRequest, WalkForwardRequest, StrategyDefinition
-from ..backtester.engine import run_backtest
-from ..backtester.walk_forward import run_walk_forward
-from ..backtester.data_provider import get_historical_data
-from ..cache import (
-    cache_get, cache_set, cache_delete, screener_ttl, scanner_ttl,
-    invalidate_screener_cache, invalidate_market_posture,
-    market_status_label, market_is_open,
-    KEY_SCREENER_CSP, KEY_SCREENER_LEAPS, KEY_SCREENER_STOCKS,
-    KEY_SCREENER_CSP_SCAN, KEY_MARKET_POSTURE,
-)
+from ..fetchers.market_overview import fetch_market_overview
+from ..main import run_pipeline
+from ..market_data.refresh import refresh_universe
+from ..market_data.store import ensure_tables as ensure_market_data_tables
+from ..market_data.store import get_store_status
+from ..screener.csp_scanner import AVAILABLE_CONDITIONS, ScannerParams, run_csp_scan
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
-from ..screener.csp_scanner import run_csp_scan, ScannerParams, AVAILABLE_CONDITIONS
-from ..market_data.store import get_store_status, ensure_tables as ensure_market_data_tables
-from ..market_data.refresh import refresh_universe
-from ..main import run_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +289,31 @@ async def get_market_posture():
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Market Overview ───────────────────────────────────────────────────────────
+
+@app.get("/api/market-overview")
+async def market_overview_endpoint():
+    """Return live market overview: sectors, VIX, GEX, and breadth.
+
+    Cached in Redis with a market-hours-aware TTL (same as screener endpoints).
+    """
+    envelope = await cache_get(KEY_MARKET_OVERVIEW)
+    if envelope is not None:
+        payload = envelope["data"]
+        payload.update(_cache_meta(envelope))
+        return payload
+
+    try:
+        data = await fetch_market_overview()
+        ttl = screener_ttl()
+        await cache_set(KEY_MARKET_OVERVIEW, data, ttl=ttl)
+        data.update(_cache_meta(None))
+        return data
+    except Exception as e:
+        logger.exception("Market overview fetch failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -575,7 +618,7 @@ async def cache_status():
 
     Useful for debugging cache behavior from the command line or in dev tools.
     """
-    from ..cache import get_redis, market_is_open, seconds_until_next_open
+    from ..cache import get_redis, seconds_until_next_open
     client = get_redis()
     keys = [KEY_SCREENER_CSP, KEY_SCREENER_LEAPS, KEY_SCREENER_STOCKS, KEY_MARKET_POSTURE]
     result = {
@@ -612,7 +655,7 @@ async def api_run_backtest(req: BacktestRequest):
         )
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No data found for {req.ticker}")
-            
+
         result = await asyncio.to_thread(run_backtest, req, df)
         return result.model_dump()
     except HTTPException:
@@ -634,7 +677,7 @@ async def api_run_walk_forward(req: WalkForwardRequest):
         )
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No data found for {req.ticker}")
-            
+
         result = await asyncio.to_thread(run_walk_forward, req, df)
         return result.model_dump()
     except HTTPException:

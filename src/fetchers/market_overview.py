@@ -267,4 +267,28 @@ def _fetch_breadth() -> dict | None:
 
 
 async def fetch_market_overview() -> dict:
-    raise NotImplementedError
+    sectors_res, vix_res, gex_res, breadth_res = await asyncio.gather(
+        _fetch_sectors(),
+        _fetch_vix(),
+        _fetch_gex(),
+        asyncio.to_thread(_fetch_breadth),
+        return_exceptions=True,
+    )
+
+    def _unwrap(res, name: str):
+        if isinstance(res, Exception):
+            logger.warning("market_overview: %s fetch failed: %s", name, res)
+            return None
+        return res
+
+    sectors = _unwrap(sectors_res, "sectors")
+    vix = _unwrap(vix_res, "vix")
+    gex = _unwrap(gex_res, "gex")
+    breadth = _unwrap(breadth_res, "breadth")
+
+    return {
+        "sectors": sectors,
+        "vix": vix,
+        "gex": gex,
+        "breadth": breadth,
+    }
