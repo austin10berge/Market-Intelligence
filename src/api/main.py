@@ -6,7 +6,7 @@ import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager, closing
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
@@ -289,7 +289,7 @@ async def get_market_posture():
         # key via invalidate_market_posture() after each successful run.
         await cache_set(KEY_MARKET_POSTURE, data, ttl=86400)
 
-        now_iso = datetime.now(datetime.UTC).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         data.update(_cache_meta(None, cached_at=now_iso))
         return data
 
@@ -317,7 +317,7 @@ async def market_overview_endpoint():
         data = await fetch_market_overview()
         ttl = screener_ttl()
         await cache_set(KEY_MARKET_OVERVIEW, data, ttl=ttl)
-        now_iso = datetime.now(datetime.UTC).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         data.update(_cache_meta(None, cached_at=now_iso))
         return data
     except Exception as e:
@@ -338,7 +338,7 @@ async def get_csp_candidates():
         candidates = await asyncio.to_thread(screen_csp_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
-        now_iso = datetime.now(datetime.UTC).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("CSP screener failed")
@@ -436,7 +436,7 @@ async def get_csp_scan_candidates(
                 "Params: %s", params
             )
 
-        now_iso = datetime.now(datetime.UTC).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         result.update(_cache_meta(None, cached_at=now_iso))
         return result
     except Exception as e:
@@ -497,7 +497,7 @@ async def get_leaps_candidates():
         candidates = await asyncio.to_thread(screen_leaps_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
-        now_iso = datetime.now(datetime.UTC).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("LEAPS screener failed")
@@ -524,7 +524,7 @@ async def get_stock_candidates(tickers: str | None = None):
             candidates = await asyncio.to_thread(screen_stocks, ticker_list)
             ttl = screener_ttl()
             await cache_set(cache_key, candidates, ttl=ttl)
-            now_iso = datetime.now(datetime.UTC).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
             return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
         except Exception as e:
             logger.exception("Stock screener (dynamic tickers) failed")
@@ -538,7 +538,7 @@ async def get_stock_candidates(tickers: str | None = None):
         candidates = await asyncio.to_thread(screen_stocks)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
-        now_iso = datetime.now(datetime.UTC).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("Stock screener failed")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx  # noqa: F401
 import pandas as pd
@@ -369,9 +369,9 @@ class TestBreadth:
 # ── Coordinator ───────────────────────────────────────────────────────────────
 
 class TestCoordinator:
-    @patch("src.fetchers.market_overview._fetch_sectors")
-    @patch("src.fetchers.market_overview._fetch_vix")
-    @patch("src.fetchers.market_overview._fetch_gex")
+    @patch("src.fetchers.market_overview._fetch_sectors", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview._fetch_vix", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview._fetch_gex", new_callable=AsyncMock)
     @patch("src.fetchers.market_overview._fetch_breadth")
     async def test_coordinator_returns_all_fields(
         self, mock_breadth, mock_gex, mock_vix, mock_sectors
@@ -396,9 +396,9 @@ class TestCoordinator:
         assert result["gex"] is not None
         assert result["breadth"] is not None
 
-    @patch("src.fetchers.market_overview._fetch_sectors")
-    @patch("src.fetchers.market_overview._fetch_vix")
-    @patch("src.fetchers.market_overview._fetch_gex")
+    @patch("src.fetchers.market_overview._fetch_sectors", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview._fetch_vix", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview._fetch_gex", new_callable=AsyncMock)
     @patch("src.fetchers.market_overview._fetch_breadth")
     async def test_coordinator_handles_sector_failure(
         self, mock_breadth, mock_gex, mock_vix, mock_sectors
@@ -419,9 +419,9 @@ class TestCoordinator:
         assert result["sectors"] is None
         assert result["vix"] is not None
 
-    @patch("src.fetchers.market_overview._fetch_sectors")
-    @patch("src.fetchers.market_overview._fetch_vix")
-    @patch("src.fetchers.market_overview._fetch_gex")
+    @patch("src.fetchers.market_overview._fetch_sectors", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview._fetch_vix", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview._fetch_gex", new_callable=AsyncMock)
     @patch("src.fetchers.market_overview._fetch_breadth")
     async def test_coordinator_handles_all_failures(
         self, mock_breadth, mock_gex, mock_vix, mock_sectors
