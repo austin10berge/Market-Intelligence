@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio  # noqa: F401
-import csv  # noqa: F401
+import csv
 import logging
 import sqlite3  # noqa: F401
 from contextlib import closing  # noqa: F401
-from io import StringIO  # noqa: F401
+from io import StringIO
 
-import httpx  # noqa: F401
+import httpx
 import yfinance as yf  # noqa: F401
 
 from ..config import settings  # noqa: F401
@@ -87,8 +87,9 @@ async def _fetch_gex() -> dict:
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(GEX_CSV_URL)
         resp.raise_for_status()
+        csv_text = resp.text
 
-    rows = list(csv.reader(StringIO(resp.text)))
+    rows = list(csv.reader(StringIO(csv_text)))
     data_rows = rows[1:]  # skip header
     if not data_rows:
         raise ValueError("GEX CSV is empty")
