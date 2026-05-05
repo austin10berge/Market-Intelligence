@@ -405,6 +405,7 @@ def _fetch_option_bars(
                 "start": start_date.isoformat(),
                 "end": end_date.isoformat(),
                 "limit": 10000,
+                "feed": "indicative",
             }
             if next_page_token:
                 params["page_token"] = next_page_token

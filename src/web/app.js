@@ -1,3 +1,16 @@
+function openTradingView(symbol) {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (!isIOS) {
+        window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`, '_blank');
+        return;
+    }
+    const appUrl = `tradingview://chart?symbol=${encodeURIComponent(symbol)}`;
+    const webUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`;
+    let fallbackTimer = setTimeout(() => window.open(webUrl, '_blank'), 600);
+    document.addEventListener('visibilitychange', () => clearTimeout(fallbackTimer), { once: true });
+    window.location.href = appUrl;
+}
+
 const API_BASE = (window.MARKET_INTELLIGENCE_CONFIG?.apiBase) || (() => {
     console.error(
         "[Market Intelligence] FATAL: window.MARKET_INTELLIGENCE_CONFIG is not defined.\n" +
@@ -202,7 +215,7 @@ function renderCspCandidates(candidates) {
     }
 
     list.innerHTML = candidates.map(c => `
-            <div class="trade-item">
+            <div class="trade-item" onclick="openTradingView('${c.symbol}')" title="Open ${c.symbol} on TradingView" style="cursor:pointer">
                 <div class="ticker-block">
                     <span class="ticker">${c.symbol}</span>
                     <span class="ticker-sub">Stock: ${c.current_price.toFixed(2)}</span>
@@ -316,7 +329,7 @@ function renderLeapsCandidates(candidates) {
     }
 
     list.innerHTML = candidates.map(c => `
-            <div class="trade-item">
+            <div class="trade-item" onclick="openTradingView('${c.symbol}')" title="Open ${c.symbol} on TradingView" style="cursor:pointer">
                 <div class="ticker-block">
                     <span class="ticker">${c.symbol}</span>
                     <span class="ticker-sub">Stock: ${c.current_price.toFixed(2)}</span>
@@ -374,7 +387,7 @@ function renderStockCandidates(candidates) {
             : 'Higher values mean options are pricing more movement than the stock has recently realized';
 
         return `
-            <div class="trade-item">
+            <div class="trade-item" onclick="openTradingView('${c.symbol}')" title="Open ${c.symbol} on TradingView" style="cursor:pointer">
                 <div class="ticker-block">
                     <span class="symbol">${c.symbol}</span>
                 </div>

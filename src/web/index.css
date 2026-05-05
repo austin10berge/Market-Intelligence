@@ -619,6 +619,12 @@ header {
         margin-bottom: 0.15rem;
     }
 
+    /* Reset desktop min-width so the card fits the viewport */
+    #stocks-section .table-headers,
+    #stocks-list {
+        min-width: 0;
+    }
+
     /* Card needs relative positioning for the sparkline */
     #stocks-list .trade-item {
         position: relative;
