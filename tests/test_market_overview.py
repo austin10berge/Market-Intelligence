@@ -14,11 +14,11 @@ import respx  # noqa: F401
 
 from src.fetchers.market_overview import (
     _fetch_breadth,  # noqa: F401
-    _fetch_gex,  # noqa: F401
-    _fetch_sectors,  # noqa: F401
-    _fetch_vix,  # noqa: F401
-    _gex_bucket,  # noqa: F401
-    _gex_trend,  # noqa: F401
+    _fetch_gex,
+    _fetch_sectors,
+    _fetch_vix,
+    _gex_bucket,
+    _gex_trend,
     fetch_market_overview,  # noqa: F401
 )
 
@@ -314,3 +314,10 @@ class TestVix:
         result = await _fetch_vix()
         # 3 rows → 1W needs 6 → None
         assert result["pct_1w"] is None
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_vix_raises_on_missing_vix3m(self, mock_dl):
+        # Only VIX data, no VIX3M key
+        mock_dl.return_value = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.1)
+        with pytest.raises(ValueError, match="VIX data missing"):
+            await _fetch_vix()

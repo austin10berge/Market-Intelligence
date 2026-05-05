@@ -107,12 +107,17 @@ async def _fetch_vix() -> dict:
         progress=False,
         auto_adjust=True,
     )
-    vix_closes = raw["^VIX"]["Close"].dropna()
-    vix3m_closes = raw["^VIX3M"]["Close"].dropna()
+    try:
+        vix_closes = raw["^VIX"]["Close"].dropna()
+        vix3m_closes = raw["^VIX3M"]["Close"].dropna()
+    except KeyError as exc:
+        raise ValueError(f"VIX data missing from download: {exc}") from exc
+    if vix_closes.empty or vix3m_closes.empty:
+        raise ValueError("VIX or VIX3M returned no data")
 
     spot = round(float(vix_closes.iloc[-1]), 2)
-    vix3m = round(float(vix3m_closes.iloc[-1]), 2)
-    spread = round(vix3m - spot, 2)
+    vix3m_val = round(float(vix3m_closes.iloc[-1]), 2)
+    spread = round(float(vix3m_closes.iloc[-1]) - float(vix_closes.iloc[-1]), 2)
 
     if spread > 0.5:
         term_structure = "Contango"
@@ -128,7 +133,7 @@ async def _fetch_vix() -> dict:
         "spot": spot,
         "pct_1d": _pct_change(vix_closes, 1),
         "pct_1w": _pct_change(vix_closes, 5),
-        "vix3m": vix3m,
+        "vix3m": vix3m_val,
         "term_structure": term_structure,
         "spread": spread,
         "stress_note": stress_note,
