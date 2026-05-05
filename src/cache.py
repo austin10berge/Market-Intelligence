@@ -137,6 +137,7 @@ KEY_SCREENER_LEAPS    = "screener:leaps"
 KEY_SCREENER_STOCKS   = "screener:stocks"
 KEY_SCREENER_CSP_SCAN = "screener:csp-scan"
 KEY_MARKET_POSTURE    = "market:posture"
+KEY_MARKET_OVERVIEW   = "market:overview"
 
 
 # ── Core get/set helpers ──────────────────────────────────────────────────────
