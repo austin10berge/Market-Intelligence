@@ -183,72 +183,87 @@ def _fetch_breadth() -> dict | None:
     import sqlite3
 
     db_path = settings.db_path
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        tickers = [r[0] for r in conn.execute(
-            "SELECT DISTINCT symbol FROM universe_daily_ohlcv ORDER BY symbol"
-        ).fetchall()]
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            rows = conn.execute("""
+                WITH ranked AS (
+                    SELECT symbol,
+                           close,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn,
+                           COUNT(*) OVER (PARTITION BY symbol) AS total_rows
+                    FROM universe_daily_ohlcv
+                ),
+                ma AS (
+                    SELECT symbol,
+                           AVG(close) FILTER (WHERE rn <= 200) AS ma200,
+                           MAX(close) FILTER (WHERE rn = 1)    AS latest_close,
+                           MAX(total_rows)                      AS total_rows
+                    FROM ranked
+                    GROUP BY symbol
+                )
+                SELECT symbol,
+                       CASE WHEN latest_close > ma200 THEN 1 ELSE 0 END AS above
+                FROM ma
+                WHERE total_rows >= 200
+            """).fetchall()
 
-        qualifying = 0
-        above = 0
-        for ticker in tickers:
-            rows = conn.execute(
-                "SELECT close FROM universe_daily_ohlcv WHERE symbol = ? ORDER BY date ASC",
-                (ticker,),
-            ).fetchall()
-            if len(rows) < 200:
-                continue
-            qualifying += 1
-            closes = [r[0] for r in rows]
-            ma200 = sum(closes[-200:]) / 200
-            if closes[-1] > ma200:
-                above += 1
+            qualifying = len(rows)
+            if qualifying < 50:
+                logger.warning(
+                    "Breadth: only %d tickers with 200d history, returning None", qualifying
+                )
+                return None
 
-        if qualifying < 50:
-            logger.warning("Breadth: only %d tickers with 200d history, returning None", qualifying)
-            return None
+            above = sum(r[1] for r in rows)
+            pct_above = round(above / qualifying * 100, 1)
 
-        pct_above = round(above / qualifying * 100, 1)
+            latest_date = conn.execute(
+                "SELECT MAX(date) FROM universe_daily_ohlcv"
+            ).fetchone()[0]
+            prev_rows = conn.execute(
+                "SELECT DISTINCT date FROM universe_daily_ohlcv"
+                " WHERE date < ? ORDER BY date DESC LIMIT 1",
+                (latest_date,),
+            ).fetchone()
+            if not prev_rows:
+                return {
+                    "pct_above_200ma": pct_above,
+                    "advancing": 0,
+                    "declining": 0,
+                    "ad_ratio": None,
+                }
+            prev_date = prev_rows[0]
 
-        latest_date = conn.execute(
-            "SELECT MAX(date) FROM universe_daily_ohlcv"
-        ).fetchone()[0]
-        prev_rows = conn.execute(
-            "SELECT DISTINCT date FROM universe_daily_ohlcv"
-            " WHERE date < ? ORDER BY date DESC LIMIT 1",
-            (latest_date,),
-        ).fetchone()
-        if not prev_rows:
-            return {"pct_above_200ma": pct_above, "advancing": 0, "declining": 0, "ad_ratio": None}
-        prev_date = prev_rows[0]
+            today_prices = dict(conn.execute(
+                "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
+                (latest_date,),
+            ).fetchall())
+            yesterday_prices = dict(conn.execute(
+                "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
+                (prev_date,),
+            ).fetchall())
 
-        today_prices = dict(conn.execute(
-            "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
-            (latest_date,),
-        ).fetchall())
-        yesterday_prices = dict(conn.execute(
-            "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
-            (prev_date,),
-        ).fetchall())
+            advancing = 0
+            declining = 0
+            for sym in today_prices:
+                if sym not in yesterday_prices:
+                    continue
+                if today_prices[sym] > yesterday_prices[sym]:
+                    advancing += 1
+                elif today_prices[sym] < yesterday_prices[sym]:
+                    declining += 1
 
-        advancing = 0
-        declining = 0
-        for sym in today_prices:
-            if sym not in yesterday_prices:
-                continue
-            if today_prices[sym] > yesterday_prices[sym]:
-                advancing += 1
-            elif today_prices[sym] < yesterday_prices[sym]:
-                declining += 1
+            ad_ratio = round(advancing / declining, 2) if declining > 0 else None
 
-        ad_ratio = round(advancing / declining, 2) if declining > 0 else None
-
-        return {
-            "pct_above_200ma": pct_above,
-            "advancing": advancing,
-            "declining": declining,
-            "ad_ratio": ad_ratio,
-        }
+            return {
+                "pct_above_200ma": pct_above,
+                "advancing": advancing,
+                "declining": declining,
+                "ad_ratio": ad_ratio,
+            }
+    except Exception as exc:
+        logger.warning("Breadth fetch failed: %s", exc)
+        return None
 
 
 async def fetch_market_overview() -> dict:
