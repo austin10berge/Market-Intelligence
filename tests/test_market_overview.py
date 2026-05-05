@@ -115,3 +115,94 @@ def _setup_breadth_db(
     )
     conn.commit()
     conn.close()
+
+
+# ── GEX pure helpers ──────────────────────────────────────────────────────────
+
+def test_gex_bucket_negative():
+    label, bucket = _gex_bucket(-1.0)
+    assert bucket == "negative"
+    assert "volatility" in label.lower()
+
+
+def test_gex_bucket_low():
+    label, bucket = _gex_bucket(1.5)
+    assert bucket == "low"
+
+
+def test_gex_bucket_moderate():
+    label, bucket = _gex_bucket(5.0)
+    assert bucket == "moderate"
+
+
+def test_gex_bucket_high():
+    label, bucket = _gex_bucket(9.0)
+    assert bucket == "high"
+
+
+def test_gex_bucket_extreme():
+    label, bucket = _gex_bucket(15.0)
+    assert bucket == "extreme"
+
+
+def test_gex_bucket_boundaries():
+    _, b0 = _gex_bucket(0.0)
+    assert b0 == "low"        # exactly 0 = low (not negative)
+    _, b3 = _gex_bucket(3.0)
+    assert b3 == "moderate"   # exactly 3 = moderate
+    _, b7 = _gex_bucket(7.0)
+    assert b7 == "high"       # exactly 7 = high
+    _, b12 = _gex_bucket(12.0)
+    assert b12 == "extreme"   # exactly 12 = extreme
+
+
+def test_gex_trend_rising():
+    assert _gex_trend(6.0, 5.0) == "Rising"   # diff_pct = 0.2 > 0.1
+
+
+def test_gex_trend_falling():
+    assert _gex_trend(4.0, 5.0) == "Falling"  # diff_pct = -0.2 < -0.1
+
+
+def test_gex_trend_flat():
+    assert _gex_trend(5.0, 5.0) == "Flat"
+
+
+def test_gex_trend_zero_avg():
+    assert _gex_trend(5.0, 0.0) == "Flat"
+
+
+def test_gex_trend_negative_regime():
+    assert _gex_trend(-2.0, -5.0) == "Rising"   # less negative = improving
+    assert _gex_trend(-8.0, -5.0) == "Falling"  # more negative = worsening
+
+
+# ── GEX integration ───────────────────────────────────────────────────────────
+
+@respx.mock
+async def test_fetch_gex_values_and_trend():
+    # 24 rows at 5B, then 1 row at 7B — last 20 = [5B x19, 7B] → avg = 5.1B
+    gex_vals = [5_000_000_000] * 24 + [7_000_000_000]
+    respx.get(
+        "https://squeezemetrics.com/monitor/static/DIX.csv"
+    ).mock(return_value=httpx.Response(200, text=_make_gex_csv(gex_vals)))
+
+    result = await _fetch_gex()
+
+    assert result["value_b"] == 7.0
+    assert result["rolling_20d_avg_b"] == pytest.approx(5.1, abs=0.01)
+    assert result["trend"] == "Rising"
+    assert result["bucket"] == "high"
+    assert "Strong pinning" in result["label"]
+
+
+@respx.mock
+async def test_fetch_gex_bucket_negative_live():
+    gex_vals = [-2_000_000_000] * 25
+    respx.get(
+        "https://squeezemetrics.com/monitor/static/DIX.csv"
+    ).mock(return_value=httpx.Response(200, text=_make_gex_csv(gex_vals)))
+
+    result = await _fetch_gex()
+    assert result["bucket"] == "negative"
+    assert result["trend"] == "Flat"

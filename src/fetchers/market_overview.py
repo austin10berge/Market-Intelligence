@@ -84,7 +84,39 @@ async def _fetch_vix() -> dict | None:
 
 
 async def _fetch_gex() -> dict:
-    raise NotImplementedError
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(GEX_CSV_URL)
+        resp.raise_for_status()
+
+    rows = list(csv.reader(StringIO(resp.text)))
+    data_rows = rows[1:]  # skip header
+    if not data_rows:
+        raise ValueError("GEX CSV is empty")
+
+    gex_values: list[float] = []
+    for row in data_rows:
+        try:
+            gex_values.append(float(row[3]))
+        except (ValueError, IndexError):
+            continue
+
+    if not gex_values:
+        raise ValueError("No GEX values parsed from CSV")
+
+    current_b = round(gex_values[-1] / 1e9, 2)
+    last_20 = gex_values[-20:]
+    rolling_b = round((sum(last_20) / len(last_20)) / 1e9, 2)
+
+    label, bucket = _gex_bucket(current_b)
+    trend = _gex_trend(current_b, rolling_b)
+
+    return {
+        "value_b": current_b,
+        "rolling_20d_avg_b": rolling_b,
+        "trend": trend,
+        "label": label,
+        "bucket": bucket,
+    }
 
 
 def _fetch_breadth() -> dict | None:
