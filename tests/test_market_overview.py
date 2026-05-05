@@ -7,25 +7,29 @@ import sqlite3
 import tempfile
 from unittest.mock import patch
 
-import httpx
+import httpx  # noqa: F401
 import pandas as pd
 import pytest
-import respx
+import respx  # noqa: F401
 
 from src.fetchers.market_overview import (
-    _gex_bucket,
-    _gex_trend,
-    _fetch_sectors,
-    _fetch_vix,
-    _fetch_gex,
-    _fetch_breadth,
-    fetch_market_overview,
+    _fetch_breadth,  # noqa: F401
+    _fetch_gex,  # noqa: F401
+    _fetch_sectors,  # noqa: F401
+    _fetch_vix,  # noqa: F401
+    _gex_bucket,  # noqa: F401
+    _gex_trend,  # noqa: F401
+    fetch_market_overview,  # noqa: F401
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _make_yf_df(tickers: list[str], n_days: int, base: float = 100.0, step: float = 1.0) -> pd.DataFrame:
+def _make_yf_df(
+    tickers: list[str],
+    n_days: int,
+    base: float = 100.0,
+    step: float = 1.0,
+) -> pd.DataFrame:
     """Build a fake yf.download multi-ticker DataFrame.
 
     close[i] = base + i * step for i in 0..n_days-1.
@@ -75,7 +79,11 @@ def _cleanup_db():
         pass
 
 
-def _setup_breadth_db(tickers_ascending: list[str], tickers_descending: list[str], n_days: int = 210):
+def _setup_breadth_db(
+    tickers_ascending: list[str],
+    tickers_descending: list[str],
+    n_days: int = 210,
+):
     """Populate the temp DB with OHLCV data for breadth tests."""
     conn = sqlite3.connect(_tmp_db_path)
     conn.execute("""
@@ -101,7 +109,8 @@ def _setup_breadth_db(tickers_ascending: list[str], tickers_descending: list[str
             close = 400.0 - i
             rows.append((sym, str(d.date()), close, close, close, close, 1_000_000))
     conn.executemany(
-        "INSERT OR REPLACE INTO universe_daily_ohlcv (symbol, date, open, high, low, close, volume) VALUES (?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO universe_daily_ohlcv "
+        "(symbol, date, open, high, low, close, volume) VALUES (?,?,?,?,?,?,?)",
         rows,
     )
     conn.commit()

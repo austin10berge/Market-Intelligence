@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
-import csv
+import asyncio  # noqa: F401
+import csv  # noqa: F401
 import logging
-import sqlite3
-from contextlib import closing
-from io import StringIO
+import sqlite3  # noqa: F401
+from contextlib import closing  # noqa: F401
+from io import StringIO  # noqa: F401
 
-import httpx
-import yfinance as yf
+import httpx  # noqa: F401
+import yfinance as yf  # noqa: F401
 
-from ..config import settings
+from ..config import settings  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,10 @@ CYCLICAL  = {"XLK", "XLY", "XLF", "XLI", "XLE", "XLB", "XLC"}
 
 
 def _pct_change(series, lookback: int) -> float | None:
-    """Percentage change from `lookback` bars ago to the last bar. Returns None if insufficient data."""
+    """Percentage change from `lookback` bars ago to the last bar.
+
+    Returns None if insufficient data.
+    """
     if len(series) < lookback + 1:
         return None
     prev = float(series.iloc[-(lookback + 1)])
@@ -64,10 +67,10 @@ def _gex_trend(current_b: float, avg_b: float) -> str:
     """Return Rising / Falling / Flat based on current vs 20d average."""
     if avg_b == 0:
         return "Flat"
-    ratio = current_b / avg_b
-    if ratio > 1.1:
+    diff_pct = (current_b - avg_b) / abs(avg_b)
+    if diff_pct > 0.1:
         return "Rising"
-    if ratio < 0.9:
+    if diff_pct < -0.1:
         return "Falling"
     return "Flat"
 
