@@ -85,6 +85,7 @@ async function initDashboard() {
     // Fire off all requests concurrently
     Promise.allSettled([
         fetchMarketPosture(),
+        fetchMarketOverview(),
         fetchCspCandidates(),
         fetchLeapsCandidates(),
         fetchStockScreener()
@@ -98,7 +99,6 @@ async function fetchMarketPosture() {
         const data = await response.json();
 
         renderPosture(data);
-        renderSignals(data);
     } catch (err) {
         console.error(err);
         document.getElementById("posture-widget").innerText = "Error Loading Data";
@@ -176,33 +176,130 @@ function renderPosture(data) {
     compositeEl.innerText = `Composite Signal: ${sign}${compositeScore}`;
 }
 
-function renderSignals(data) {
-    const signalsList = document.getElementById("signals-list");
-    signalsList.classList.remove("loading");
-    signalsList.innerHTML = "";
+async function fetchMarketOverview() {
+    try {
+        const res = await fetch(`${API_BASE}/api/market-overview`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        renderSectors(data.sectors);
+        renderVix(data.vix);
+        renderGex(data.gex);
+        renderBreadth(data.breadth);
+    } catch (err) {
+        console.error('fetchMarketOverview failed:', err);
+        ['sector-bars', 'vix-content', 'gex-content', 'breadth-content'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '<div class="loading-placeholder">Unavailable</div>';
+        });
+    }
+}
 
-    if (data.signals && data.signals.length > 0) {
-        signalsList.innerHTML = data.signals.map(s => {
-            let className = "neutral";
-            if (s.scored_value > 0) className = "bullish";
-            if (s.scored_value < 0) className = "bearish";
-            const sourceName = s.source.replace("_", " ").toUpperCase();
-            return `
-                <div class="signal-item ${className}">
-                    <div class="signal-title">${sourceName}</div>
-                    <div class="signal-val">${s.summary}</div>
-                </div>
-            `;
-        }).join("");
+function renderSectors(sectors) {
+    const el = document.getElementById('sector-bars');
+    if (!el) return;
+    if (!sectors) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
+
+    // Sort by 1D % descending (nulls last)
+    const sorted = Object.entries(sectors).sort(([, a], [, b]) => {
+        const av = a.pct_1d ?? -Infinity;
+        const bv = b.pct_1d ?? -Infinity;
+        return bv - av;
+    });
+
+    const MAX_PCT = 5; // ±5% maps to 50% bar width
+
+    function barWidth(pct) {
+        if (pct == null) return 0;
+        return Math.min(Math.abs(pct) / MAX_PCT * 50, 50);
     }
 
-    // Render LLM summary
-    const llmBox = document.getElementById("llm-summary");
-    if (data.llm_summary) {
-        llmBox.innerText = data.llm_summary;
-    } else {
-        llmBox.innerText = "No AI analysis available for today.";
+    function pctClass(pct) {
+        if (pct == null) return 'neutral';
+        return pct >= 0 ? 'positive' : 'negative';
     }
+
+    function fmtPct(pct) {
+        if (pct == null) return '—';
+        return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+    }
+
+    el.innerHTML = sorted.map(([ticker, s]) => `
+    <div class="sector-bar-row">
+      <span class="sector-label" title="${ticker}">${s.name}</span>
+      <div class="sector-bar-cell">
+        <div class="sector-bar ${pctClass(s.pct_1d)}"
+             style="width:${barWidth(s.pct_1d)}%"></div>
+      </div>
+      <div class="sector-bar-cell">
+        <div class="sector-bar ${pctClass(s.pct_1w)} opacity-1w"
+             style="width:${barWidth(s.pct_1w)}%"></div>
+      </div>
+      <div class="sector-bar-cell">
+        <div class="sector-bar ${pctClass(s.pct_1m)} opacity-1m"
+             style="width:${barWidth(s.pct_1m)}%"></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderVix(vix) {
+    const el = document.getElementById('vix-content');
+    if (!el) return;
+    if (!vix) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
+
+    const d1Arrow = vix.pct_1d >= 0 ? '↑' : '↓';
+    const w1Arrow = vix.pct_1w >= 0 ? '↑' : '↓';
+    const tsClass = vix.term_structure.toLowerCase().replace(' ', '-');
+
+    el.innerHTML = `
+    <div class="vix-spot">${vix.spot.toFixed(2)}</div>
+    <div class="vix-changes">
+      1D: ${d1Arrow} ${Math.abs(vix.pct_1d).toFixed(1)}%
+      &nbsp;&nbsp;1W: ${w1Arrow} ${Math.abs(vix.pct_1w ?? 0).toFixed(1)}%
+    </div>
+    <div class="vix-term ${tsClass}">
+      ${vix.term_structure} — ${vix.stress_note}
+      <span style="opacity:0.7">(spread ${vix.spread >= 0 ? '+' : ''}${vix.spread.toFixed(2)})</span>
+    </div>
+  `;
+}
+
+function renderGex(gex) {
+    const el = document.getElementById('gex-content');
+    if (!el) return;
+    if (!gex) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
+
+    const trendArrow = gex.trend === 'Rising' ? '↑' : gex.trend === 'Falling' ? '↓' : '→';
+
+    el.innerHTML = `
+    <div class="gex-value">$${gex.value_b.toFixed(1)}B</div>
+    <div class="gex-label">${gex.label}</div>
+    <div class="gex-avg">20d avg: $${gex.rolling_20d_avg_b.toFixed(1)}B &nbsp; ${trendArrow} ${gex.trend}</div>
+  `;
+}
+
+function renderBreadth(breadth) {
+    const el = document.getElementById('breadth-content');
+    if (!el) return;
+    if (!breadth) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
+
+    const pct = breadth.pct_above_200ma;
+    const maColor = pct >= 60 ? 'green' : pct >= 40 ? 'yellow' : 'red';
+    const adColor = (breadth.ad_ratio ?? 0) >= 1.2 ? 'green' : (breadth.ad_ratio ?? 0) >= 0.8 ? 'yellow' : 'red';
+
+    el.innerHTML = `
+    <div class="breadth-row">
+      <span class="breadth-label">200d MA</span>
+      <div class="breadth-bar-track">
+        <div class="breadth-bar-fill ${maColor}" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+      <span class="breadth-value ${maColor}">${pct.toFixed(0)}%</span>
+    </div>
+    <div class="breadth-ad">
+      A/D &nbsp; ${breadth.advancing} ↑ / ${breadth.declining} ↓
+      &nbsp; ratio ${breadth.ad_ratio != null ? breadth.ad_ratio.toFixed(2) : '—'}
+    </div>
+  `;
 }
 
 function renderCspCandidates(candidates) {
