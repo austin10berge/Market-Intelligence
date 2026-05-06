@@ -218,7 +218,7 @@ class TestSectors:
         mock_dl.return_value = _make_yf_df(["XLK", "XLF"], n_days=30)
         etfs = {"XLK": "Technology", "XLF": "Financials"}
         with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
-            result = await _fetch_sectors()
+            result, rotation = await _fetch_sectors()
         assert set(result.keys()) == {"XLK", "XLF"}
 
     @patch("src.fetchers.market_overview.yf.download")
@@ -226,7 +226,7 @@ class TestSectors:
         mock_dl.return_value = _make_yf_df(["XLK"], n_days=30, base=100.0, step=1.0)
         etfs = {"XLK": "Technology"}
         with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
-            result = await _fetch_sectors()
+            result, rotation = await _fetch_sectors()
         xlk = result["XLK"]
         # close[-1] = 100 + 29 = 129, close[-2] = 128 → 1D = (129-128)/128*100 ≈ 0.78%
         assert xlk["pct_1d"] == pytest.approx(0.78, abs=0.01)
@@ -240,7 +240,7 @@ class TestSectors:
         mock_dl.return_value = _make_yf_df(["XLK"], n_days=30)
         etfs = {"XLK": "Technology"}
         with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
-            result = await _fetch_sectors()
+            result, rotation = await _fetch_sectors()
         assert result["XLK"]["name"] == "Technology"
 
     @patch("src.fetchers.market_overview.yf.download")
@@ -248,11 +248,21 @@ class TestSectors:
         mock_dl.return_value = _make_yf_df(["XLK"], n_days=3)
         etfs = {"XLK": "Technology"}
         with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
-            result = await _fetch_sectors()
+            result, rotation = await _fetch_sectors()
         # 3 rows → 1D works, 1W/1M are None (need 6 and 22 rows respectively)
         assert result["XLK"]["pct_1d"] is not None
         assert result["XLK"]["pct_1w"] is None
         assert result["XLK"]["pct_1m"] is None
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_sectors_rotation_risk_on(self, mock_dl):
+        # Make cyclicals outperform defensives by >0.1%
+        mock_dl.return_value = _make_yf_df(["XLK", "XLU"], n_days=30, base=100.0, step=1.0)
+        etfs = {"XLK": "Technology", "XLU": "Utilities"}
+        with patch.dict("src.fetchers.market_overview.SECTOR_ETFS", etfs, clear=True):
+            _, rotation = await _fetch_sectors()
+        # XLK is CYCLICAL, XLU is DEFENSIVE — same pct_1d, so Neutral
+        assert rotation == "Neutral (no clear rotation)"
 
 
 # ── VIX ───────────────────────────────────────────────────────────────────────
@@ -392,6 +402,7 @@ class TestCoordinator:
         }
         result = await fetch_market_overview()
         assert result["sectors"] is not None
+        assert "rotation" in result
         assert result["vix"] is not None
         assert result["gex"] is not None
         assert result["breadth"] is not None

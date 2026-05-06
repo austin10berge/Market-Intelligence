@@ -73,7 +73,7 @@ def _gex_trend(current_b: float, avg_b: float) -> str:
     return "Flat"
 
 
-async def _fetch_sectors() -> dict:
+async def _fetch_sectors() -> tuple[dict, str | None]:
     tickers = list(SECTOR_ETFS.keys())
     raw = await asyncio.to_thread(
         yf.download,
@@ -97,7 +97,30 @@ async def _fetch_sectors() -> dict:
             "pct_1w": _pct_change(closes, 5),
             "pct_1m": _pct_change(closes, 21),
         }
-    return result
+
+    # Compute rotation label
+    defensive_1d = [
+        v["pct_1d"] for k, v in result.items()
+        if k in DEFENSIVE and v["pct_1d"] is not None
+    ]
+    cyclical_1d = [
+        v["pct_1d"] for k, v in result.items()
+        if k in CYCLICAL and v["pct_1d"] is not None
+    ]
+
+    if defensive_1d and cyclical_1d:
+        def_avg = sum(defensive_1d) / len(defensive_1d)
+        cyc_avg = sum(cyclical_1d) / len(cyclical_1d)
+        if cyc_avg > def_avg + 0.1:
+            rotation = "Risk-on (cyclical leading)"
+        elif def_avg > cyc_avg + 0.1:
+            rotation = "Risk-off (defensive leading)"
+        else:
+            rotation = "Neutral (no clear rotation)"
+    else:
+        rotation = None
+
+    return result, rotation
 
 
 async def _fetch_vix() -> dict:
@@ -281,13 +304,21 @@ async def fetch_market_overview() -> dict:
             return None
         return res
 
-    sectors = _unwrap(sectors_res, "sectors")
+    sectors_raw = _unwrap(sectors_res, "sectors")
+    if isinstance(sectors_raw, tuple):
+        sectors, rotation = sectors_raw
+    elif sectors_raw is None:
+        sectors, rotation = None, None
+    else:
+        sectors, rotation = sectors_raw, None
+
     vix = _unwrap(vix_res, "vix")
     gex = _unwrap(gex_res, "gex")
     breadth = _unwrap(breadth_res, "breadth")
 
     return {
         "sectors": sectors,
+        "rotation": rotation,
         "vix": vix,
         "gex": gex,
         "breadth": breadth,

@@ -235,17 +235,17 @@ function renderSectors(sectors) {
     <div class="sector-bar-row">
       <span class="sector-label" title="${escHtml(ticker)}">${escHtml(s.name)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1d)}"
-             style="width:${barWidth(s.pct_1d)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1d)}" style="width:${barWidth(s.pct_1d)}%"></div>
       </div>
+      <span class="sector-pct ${pctClass(s.pct_1d)}">${fmtPct(s.pct_1d)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1w)} opacity-1w"
-             style="width:${barWidth(s.pct_1w)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1w)} opacity-1w" style="width:${barWidth(s.pct_1w)}%"></div>
       </div>
+      <span class="sector-pct ${pctClass(s.pct_1w)}">${fmtPct(s.pct_1w)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1m)} opacity-1m"
-             style="width:${barWidth(s.pct_1m)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1m)} opacity-1m" style="width:${barWidth(s.pct_1m)}%"></div>
       </div>
+      <span class="sector-pct ${pctClass(s.pct_1m)}">${fmtPct(s.pct_1m)}</span>
     </div>
   `).join('');
 }
@@ -260,16 +260,20 @@ function renderVix(vix) {
       return;
     }
 
-    const d1Arrow = (vix.pct_1d ?? 0) >= 0 ? '↑' : '↓';
-    const w1Arrow = (vix.pct_1w ?? 0) >= 0 ? '↑' : '↓';
+    function fmtVixPct(pct) {
+        if (pct == null) return '—';
+        const arrow = pct >= 0 ? '↑' : '↓';
+        return `${arrow} ${Math.abs(pct).toFixed(1)}%`;
+    }
+
     const tsMap = { 'Contango': 'contango', 'Backwardation': 'backwardation', 'Flat': 'flat' };
     const tsClass = tsMap[vix.term_structure] ?? 'flat';
 
     el.innerHTML = `
     <div class="vix-spot">${vix.spot.toFixed(2)}</div>
     <div class="vix-changes">
-      1D: ${d1Arrow} ${Math.abs(vix.pct_1d ?? 0).toFixed(1)}%
-      &nbsp;&nbsp;1W: ${w1Arrow} ${Math.abs(vix.pct_1w ?? 0).toFixed(1)}%
+      1D: ${fmtVixPct(vix.pct_1d)}
+      &nbsp;&nbsp;1W: ${fmtVixPct(vix.pct_1w)}
     </div>
     <div class="vix-term ${tsClass}">
       ${escHtml(vix.term_structure)} — ${escHtml(vix.stress_note)}
