@@ -231,7 +231,15 @@ function renderSectors(sectors) {
         return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
     }
 
-    el.innerHTML = sorted.map(([ticker, s]) => `
+    const header = `
+    <div class="sector-bar-row sector-bar-header">
+      <span></span>
+      <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1D</span>
+      <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1W</span>
+      <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1M</span>
+    </div>`;
+
+    el.innerHTML = header + sorted.map(([ticker, s]) => `
     <div class="sector-bar-row">
       <span class="sector-label" title="${escHtml(ticker)}">${escHtml(s.name)}</span>
       <div class="sector-bar-cell">
@@ -261,9 +269,10 @@ function renderVix(vix) {
     }
 
     function fmtVixPct(pct) {
-        if (pct == null) return '—';
+        if (pct == null) return '<span style="color:var(--text-muted,#888)">—</span>';
         const arrow = pct >= 0 ? '↑' : '↓';
-        return `${arrow} ${Math.abs(pct).toFixed(1)}%`;
+        const color = pct >= 0 ? 'var(--accent-green,#4caf50)' : 'var(--accent-red,#f44336)';
+        return `<span style="color:${color}">${arrow} ${Math.abs(pct).toFixed(1)}%</span>`;
     }
 
     const tsMap = { 'Contango': 'contango', 'Backwardation': 'backwardation', 'Flat': 'flat' };

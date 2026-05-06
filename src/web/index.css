@@ -1042,6 +1042,14 @@ header {
     font-size: 0.78rem;
 }
 
+.sector-timeframe-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #888);
+}
+
 .sector-label {
     color: var(--text-muted, #888);
     white-space: nowrap;
