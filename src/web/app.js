@@ -178,7 +178,7 @@ function renderPosture(data) {
 
 async function fetchMarketOverview() {
     try {
-        const res = await fetch(`${API_BASE}/api/market-overview`);
+        const res = await fetch(`${API_BASE}/market-overview`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         renderSectors(data.sectors);
@@ -247,14 +247,14 @@ function renderVix(vix) {
     if (!el) return;
     if (!vix) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
 
-    const d1Arrow = vix.pct_1d >= 0 ? '↑' : '↓';
+    const d1Arrow = (vix.pct_1d ?? 0) >= 0 ? '↑' : '↓';
     const w1Arrow = vix.pct_1w >= 0 ? '↑' : '↓';
     const tsClass = vix.term_structure.toLowerCase().replace(' ', '-');
 
     el.innerHTML = `
     <div class="vix-spot">${vix.spot.toFixed(2)}</div>
     <div class="vix-changes">
-      1D: ${d1Arrow} ${Math.abs(vix.pct_1d).toFixed(1)}%
+      1D: ${d1Arrow} ${Math.abs(vix.pct_1d ?? 0).toFixed(1)}%
       &nbsp;&nbsp;1W: ${w1Arrow} ${Math.abs(vix.pct_1w ?? 0).toFixed(1)}%
     </div>
     <div class="vix-term ${tsClass}">
