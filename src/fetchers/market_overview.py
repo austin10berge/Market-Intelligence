@@ -24,8 +24,8 @@ SECTOR_ETFS = {
     "XLI": "Industrials",
     "XLB": "Materials",
     "XLU": "Utilities",
-    "XLP": "Consumer Staples",
-    "XLY": "Consumer Discretionary",
+    "XLP": "Cons. Staples",
+    "XLY": "Cons. Discret.",
     "XLRE": "Real Estate",
     "XLC": "Communication Services",
 }

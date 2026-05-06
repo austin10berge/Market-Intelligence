@@ -214,11 +214,9 @@ function renderSectors(sectors) {
         return bv - av;
     });
 
-    const MAX_PCT = 5; // ±5% maps to 50% bar width
-
-    function barWidth(pct) {
+    function barWidth(pct, maxPct) {
         if (pct == null) return 0;
-        return Math.min(Math.abs(pct) / MAX_PCT * 50, 50);
+        return Math.min(Math.abs(pct) / maxPct * 50, 50);
     }
 
     function pctClass(pct) {
@@ -243,15 +241,15 @@ function renderSectors(sectors) {
     <div class="sector-bar-row">
       <span class="sector-label" title="${escHtml(ticker)}">${escHtml(s.name)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1d)}" style="width:${barWidth(s.pct_1d)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1d)}" style="width:${barWidth(s.pct_1d, 3)}%"></div>
       </div>
       <span class="sector-pct ${pctClass(s.pct_1d)}">${fmtPct(s.pct_1d)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1w)} opacity-1w" style="width:${barWidth(s.pct_1w)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1w)} opacity-1w" style="width:${barWidth(s.pct_1w, 5)}%"></div>
       </div>
       <span class="sector-pct ${pctClass(s.pct_1w)}">${fmtPct(s.pct_1w)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1m)} opacity-1m" style="width:${barWidth(s.pct_1m)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1m)}" style="width:${barWidth(s.pct_1m, 15)}%"></div>
       </div>
       <span class="sector-pct ${pctClass(s.pct_1m)}">${fmtPct(s.pct_1m)}</span>
     </div>
