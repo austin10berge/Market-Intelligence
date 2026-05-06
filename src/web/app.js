@@ -194,6 +194,14 @@ async function fetchMarketOverview() {
     }
 }
 
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function renderSectors(sectors) {
     const el = document.getElementById('sector-bars');
     if (!el) return;
@@ -225,7 +233,7 @@ function renderSectors(sectors) {
 
     el.innerHTML = sorted.map(([ticker, s]) => `
     <div class="sector-bar-row">
-      <span class="sector-label" title="${ticker}">${s.name}</span>
+      <span class="sector-label" title="${escHtml(ticker)}">${escHtml(s.name)}</span>
       <div class="sector-bar-cell">
         <div class="sector-bar ${pctClass(s.pct_1d)}"
              style="width:${barWidth(s.pct_1d)}%"></div>
@@ -247,9 +255,15 @@ function renderVix(vix) {
     if (!el) return;
     if (!vix) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
 
+    if (vix.spot == null || vix.spread == null) {
+      el.innerHTML = '<div class="loading-placeholder">Unavailable</div>';
+      return;
+    }
+
     const d1Arrow = (vix.pct_1d ?? 0) >= 0 ? '↑' : '↓';
-    const w1Arrow = vix.pct_1w >= 0 ? '↑' : '↓';
-    const tsClass = vix.term_structure.toLowerCase().replace(' ', '-');
+    const w1Arrow = (vix.pct_1w ?? 0) >= 0 ? '↑' : '↓';
+    const tsMap = { 'Contango': 'contango', 'Backwardation': 'backwardation', 'Flat': 'flat' };
+    const tsClass = tsMap[vix.term_structure] ?? 'flat';
 
     el.innerHTML = `
     <div class="vix-spot">${vix.spot.toFixed(2)}</div>
@@ -258,7 +272,7 @@ function renderVix(vix) {
       &nbsp;&nbsp;1W: ${w1Arrow} ${Math.abs(vix.pct_1w ?? 0).toFixed(1)}%
     </div>
     <div class="vix-term ${tsClass}">
-      ${vix.term_structure} — ${vix.stress_note}
+      ${escHtml(vix.term_structure)} — ${escHtml(vix.stress_note)}
       <span style="opacity:0.7">(spread ${vix.spread >= 0 ? '+' : ''}${vix.spread.toFixed(2)})</span>
     </div>
   `;
@@ -268,6 +282,11 @@ function renderGex(gex) {
     const el = document.getElementById('gex-content');
     if (!el) return;
     if (!gex) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
+
+    if (gex.value_b == null || gex.rolling_20d_avg_b == null) {
+      el.innerHTML = '<div class="loading-placeholder">Unavailable</div>';
+      return;
+    }
 
     const trendArrow = gex.trend === 'Rising' ? '↑' : gex.trend === 'Falling' ? '↓' : '→';
 
@@ -283,7 +302,7 @@ function renderBreadth(breadth) {
     if (!el) return;
     if (!breadth) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
 
-    const pct = breadth.pct_above_200ma;
+    const pct = breadth.pct_above_200ma ?? 0;
     const maColor = pct >= 60 ? 'green' : pct >= 40 ? 'yellow' : 'red';
     const adColor = (breadth.ad_ratio ?? 0) >= 1.2 ? 'green' : (breadth.ad_ratio ?? 0) >= 0.8 ? 'yellow' : 'red';
 
