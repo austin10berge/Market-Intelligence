@@ -214,9 +214,16 @@ function renderSectors(sectors) {
         return bv - av;
     });
 
-    function barWidth(pct, maxPct) {
-        if (pct == null) return 0;
-        return Math.min(Math.abs(pct) / maxPct * 50, 50);
+    const vals1d = sorted.map(([, s]) => s.pct_1d).filter(v => v != null);
+    const vals1w = sorted.map(([, s]) => s.pct_1w).filter(v => v != null);
+    const vals1m = sorted.map(([, s]) => s.pct_1m).filter(v => v != null);
+    const max1d = vals1d.length ? Math.max(...vals1d.map(Math.abs)) : 1;
+    const max1w = vals1w.length ? Math.max(...vals1w.map(Math.abs)) : 1;
+    const max1m = vals1m.length ? Math.max(...vals1m.map(Math.abs)) : 1;
+
+    function barWidth(pct, maxAbs) {
+        if (pct == null || maxAbs === 0) return 0;
+        return Math.abs(pct) / maxAbs * 50;
     }
 
     function pctClass(pct) {
@@ -241,15 +248,15 @@ function renderSectors(sectors) {
     <div class="sector-bar-row">
       <span class="sector-label" title="${escHtml(ticker)}">${escHtml(s.name)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1d)}" style="width:${barWidth(s.pct_1d, 3)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1d)}" style="width:${barWidth(s.pct_1d, max1d)}%"></div>
       </div>
       <span class="sector-pct ${pctClass(s.pct_1d)}">${fmtPct(s.pct_1d)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1w)} opacity-1w" style="width:${barWidth(s.pct_1w, 5)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1w)} opacity-1w" style="width:${barWidth(s.pct_1w, max1w)}%"></div>
       </div>
       <span class="sector-pct ${pctClass(s.pct_1w)}">${fmtPct(s.pct_1w)}</span>
       <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1m)}" style="width:${barWidth(s.pct_1m, 15)}%"></div>
+        <div class="sector-bar ${pctClass(s.pct_1m)}" style="width:${barWidth(s.pct_1m, max1m)}%"></div>
       </div>
       <span class="sector-pct ${pctClass(s.pct_1m)}">${fmtPct(s.pct_1m)}</span>
     </div>
