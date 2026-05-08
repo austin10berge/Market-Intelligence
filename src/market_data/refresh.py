@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 _FUNDAMENTAL_BATCH_SIZE = 50
 _FUNDAMENTAL_BATCH_SLEEP_S = 1.0
+_FUNDAMENTAL_TICKER_SLEEP_S = 0.3  # between individual .info calls to avoid rate limits
 
 # yf.download batch size — avoids URL-length limits on huge ticker lists
 _OHLCV_DOWNLOAD_BATCH_SIZE = 100
@@ -96,6 +97,8 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
             })
         except Exception as exc:
             logger.warning("Fundamental fetch failed for %s: %s", symbol, exc)
+        finally:
+            time.sleep(_FUNDAMENTAL_TICKER_SLEEP_S)
     return rows
 
 
