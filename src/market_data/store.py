@@ -455,3 +455,26 @@ def get_universe_tickers() -> list[str]:
         return [r["symbol"] for r in rows]
     finally:
         conn.close()
+
+
+def prune_stale_fundamentals(current_universe: list[str]) -> int:
+    """Delete fundamentals rows for tickers no longer in the current universe.
+
+    Without this, removed tickers accumulate as zombie rows whose stale
+    updated_at timestamps cause MIN(updated_at) to always appear old.
+
+    Returns the number of rows deleted.
+    """
+    if not current_universe:
+        return 0
+    conn = _get_connection()
+    try:
+        placeholders = ",".join("?" * len(current_universe))
+        cursor = conn.execute(
+            f"DELETE FROM universe_fundamentals WHERE symbol NOT IN ({placeholders})",
+            current_universe,
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()

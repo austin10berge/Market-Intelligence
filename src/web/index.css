@@ -1060,7 +1060,7 @@ header {
 .sector-bar-cell {
     position: relative;
     height: 1rem;
-    background: var(--bar-track, rgba(255,255,255,0.06));
+    background: var(--bar-track, rgba(255, 255, 255, 0.06));
     border-radius: 2px;
     overflow: hidden;
 }
@@ -1084,7 +1084,7 @@ header {
 }
 
 .sector-bar.opacity-1w {
-    opacity: 0.55;
+    opacity: 1;
 }
 
 .sector-bar.opacity-1m {
@@ -1097,9 +1097,17 @@ header {
     min-width: 3rem;
 }
 
-.sector-pct.positive { color: var(--accent-green, #4caf50); }
-.sector-pct.negative { color: var(--accent-red, #f44336); }
-.sector-pct.neutral  { color: var(--text-muted, #888); }
+.sector-pct.positive {
+    color: var(--accent-green, #4caf50);
+}
+
+.sector-pct.negative {
+    color: var(--accent-red, #f44336);
+}
+
+.sector-pct.neutral {
+    color: var(--text-muted, #888);
+}
 
 /* VIX panel */
 .vix-spot {
@@ -1121,9 +1129,20 @@ header {
     display: inline-block;
 }
 
-.vix-term.contango      { background: rgba(76, 175, 80, 0.15); color: var(--accent-green, #4caf50); }
-.vix-term.backwardation { background: rgba(244, 67, 54, 0.15); color: var(--accent-red, #f44336); }
-.vix-term.flat          { background: rgba(255, 193, 7, 0.15); color: var(--accent-yellow, #ffc107); }
+.vix-term.contango {
+    background: rgba(76, 175, 80, 0.15);
+    color: var(--accent-green, #4caf50);
+}
+
+.vix-term.backwardation {
+    background: rgba(244, 67, 54, 0.15);
+    color: var(--accent-red, #f44336);
+}
+
+.vix-term.flat {
+    background: rgba(255, 193, 7, 0.15);
+    color: var(--accent-yellow, #ffc107);
+}
 
 /* GEX panel */
 .gex-value {
@@ -1161,7 +1180,7 @@ header {
 .breadth-bar-track {
     flex: 1;
     height: 0.6rem;
-    background: var(--bar-track, rgba(255,255,255,0.06));
+    background: var(--bar-track, rgba(255, 255, 255, 0.06));
     border-radius: 3px;
     overflow: hidden;
 }
@@ -1172,9 +1191,17 @@ header {
     transition: width 0.3s ease;
 }
 
-.breadth-bar-fill.green  { background: var(--accent-green, #4caf50); }
-.breadth-bar-fill.yellow { background: var(--accent-yellow, #ffc107); }
-.breadth-bar-fill.red    { background: var(--accent-red, #f44336); }
+.breadth-bar-fill.green {
+    background: var(--accent-green, #4caf50);
+}
+
+.breadth-bar-fill.yellow {
+    background: var(--accent-yellow, #ffc107);
+}
+
+.breadth-bar-fill.red {
+    background: var(--accent-red, #f44336);
+}
 
 .breadth-value {
     min-width: 3rem;
@@ -1182,9 +1209,17 @@ header {
     font-weight: 600;
 }
 
-.breadth-value.green  { color: var(--accent-green, #4caf50); }
-.breadth-value.yellow { color: var(--accent-yellow, #ffc107); }
-.breadth-value.red    { color: var(--accent-red, #f44336); }
+.breadth-value.green {
+    color: var(--accent-green, #4caf50);
+}
+
+.breadth-value.yellow {
+    color: var(--accent-yellow, #ffc107);
+}
+
+.breadth-value.red {
+    color: var(--accent-red, #f44336);
+}
 
 .breadth-ad {
     font-size: 0.78rem;

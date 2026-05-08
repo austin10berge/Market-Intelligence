@@ -27,6 +27,7 @@ from .store import (
     bulk_upsert_fundamentals,
     get_store_status,
     get_universe_tickers,
+    prune_stale_fundamentals,
 )
 
 logging.basicConfig(
@@ -245,14 +246,22 @@ def refresh_universe(full: bool = False) -> dict:
             time.sleep(_FUNDAMENTAL_BATCH_SLEEP_S)
 
     fund_elapsed = round(time.time() - t1, 1)
+
+    # 4. Prune zombie rows — tickers removed from universe keep stale updated_at
+    #    timestamps that cause MIN(updated_at) to always appear old.
+    pruned = prune_stale_fundamentals(universe)
+    if pruned > 0:
+        logger.info("Pruned %d fundamentals rows for tickers removed from universe", pruned)
+
     total_elapsed = round(time.time() - t0, 1)
 
-    # 4. Summary
+    # 5. Summary
     status = get_store_status()
     summary = {
         "universe_size": len(universe),
         "ohlcv_rows_upserted": total_ohlcv_rows,
         "fundamentals_upserted": total_fund_rows,
+        "fundamentals_pruned": pruned,
         "ohlcv_elapsed_s": ohlcv_elapsed,
         "fundamentals_elapsed_s": fund_elapsed,
         "total_elapsed_s": total_elapsed,
