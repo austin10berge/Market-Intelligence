@@ -127,25 +127,23 @@ def _download_ohlcv_batch(
             logger.warning("yf.download returned empty for %d symbols", len(symbols))
             return result
 
-        if len(symbols) == 1:
-            # Single ticker: no MultiIndex, just a regular DataFrame
-            sym = symbols[0]
-            if not raw.empty:
-                result[sym] = raw
-        else:
-            # Multiple tickers: MultiIndex columns (Price, Ticker)
-            # Restructure into per-ticker DataFrames
+        if isinstance(raw.columns, pd.MultiIndex):
+            # yfinance 1.x always returns MultiIndex (Price, Ticker) — even for
+            # a single ticker. Use .xs() to flatten to per-ticker DataFrames.
             for sym in symbols:
                 try:
                     ticker_df = raw.xs(sym, level="Ticker", axis=1)
                     if not ticker_df.empty:
-                        # Drop rows where all OHLCV values are NaN
                         ticker_df = ticker_df.dropna(how="all")
                         if not ticker_df.empty:
                             result[sym] = ticker_df
                 except (KeyError, ValueError):
-                    # Ticker not in the downloaded data
                     continue
+        else:
+            # yfinance 0.2.x with a single ticker returns flat columns
+            sym = symbols[0]
+            if not raw.empty:
+                result[sym] = raw.dropna(how="all")
 
     except Exception as exc:
         logger.error("yf.download failed for batch of %d: %s", len(symbols), exc)

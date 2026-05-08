@@ -169,7 +169,7 @@ def bulk_upsert_ohlcv_multi(data: dict[str, pd.DataFrame]) -> int:
                         float(row["Close"]),
                         int(row["Volume"]),
                     ))
-                except (ValueError, KeyError):
+                except (ValueError, KeyError, TypeError):
                     continue
 
         conn.executemany(
