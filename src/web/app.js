@@ -174,6 +174,20 @@ function renderPosture(data) {
     const compositeScore = parseFloat(data.composite_score).toFixed(3);
     const sign = compositeScore > 0 ? "+" : "";
     compositeEl.innerText = `Composite Signal: ${sign}${compositeScore}`;
+
+    // AI Summary
+    const llmEl = document.getElementById("llm-summary");
+    if (llmEl && data.llm_summary) {
+        const sections = ["POSTURE", "THETA PLAY", "WATCHLIST"];
+        let html = data.llm_summary;
+        sections.forEach(label => {
+            html = html.replace(
+                new RegExp(`(${label}:)`, 'g'),
+                `<strong>$1</strong>`
+            );
+        });
+        llmEl.innerHTML = html.replace(/\n/g, '<br>');
+    }
 }
 
 async function fetchMarketOverview() {
