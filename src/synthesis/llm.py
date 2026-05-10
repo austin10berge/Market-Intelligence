@@ -32,7 +32,7 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
         client = genai.Client(api_key=settings.gemini_api_key)
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=user_prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_prompt,
@@ -49,8 +49,8 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
         logger.warning("LLM: Gemini returned empty response")
         return None
 
-    except Exception:
-        logger.exception("LLM: Gemini call failed")
+    except Exception as e:
+        logger.exception("LLM: Gemini call failed: %s", e)
         return None
 
 
