@@ -36,7 +36,6 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
             contents=user_prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_prompt,
-                max_output_tokens=8192,
                 temperature=0.7,
             ),
         )
