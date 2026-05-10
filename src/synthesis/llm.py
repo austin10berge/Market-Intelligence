@@ -32,11 +32,11 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
         client = genai.Client(api_key=settings.gemini_api_key)
 
         response = client.models.generate_content(
-            model="gemini-flash-latest",
+            model="gemini-2.0-flash",
             contents=user_prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_prompt,
-                max_output_tokens=300,
+                max_output_tokens=1024,
                 temperature=0.7,
             ),
         )
