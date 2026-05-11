@@ -10,7 +10,6 @@
     <link rel="stylesheet" href="index.css">
     <!-- config.js is generated at container startup by entrypoint.sh -->
     <!-- It sets window.MARKET_INTELLIGENCE_CONFIG.apiBase to the real API URL -->
-    <script src="/config.js"></script>
 </head>
 
 <body>
@@ -90,6 +89,7 @@
                         <div class="th-sortable" onclick="sortCsp('roc_percent')">ROC % ↕</div>
                         <div class="th-sortable" onclick="sortCsp('annualized_roc')">Ann. Yield ↕</div>
                         <div class="th-sortable" onclick="sortCsp('otm_percent')">% OTM ↕</div>
+                        <div class="th-sortable" onclick="sortCsp('delta')">Delta ↕</div>
                         <div class="th-sortable" onclick="sortCsp('spread_pct')">Spread % ↕</div>
                         <div class="th-sortable" onclick="sortCsp('impliedVolatility')">IV % ↕</div>
                         <div class="th-sortable" onclick="sortCsp('volume')">Volume ↕</div>
@@ -136,13 +136,48 @@
                 </section>
             </div>
 
-            <!-- Underlying Signals -->
-            <section class="glass card full-width">
-                <h2>Latest Market Signals</h2>
-                <div id="signals-list" class="signals-grid loading">Aggregating sources...</div>
+            <!-- Market Overview -->
+            <section id="market-overview-section" class="glass card full-width">
+                <h2 class="section-title">Market Overview</h2>
+                <div class="market-overview-grid">
+                    <!-- Sector Performance Panel -->
+                    <div class="overview-panel" id="sector-panel">
+                        <h3 class="panel-title">Sector Performance</h3>
+                        <div id="sector-bars">
+                            <div class="loading-placeholder">Loading…</div>
+                        </div>
+                    </div>
 
-                <div class="llm-box">
-                    <h3>🤖 AI Synthesis</h3>
+                    <!-- VIX Panel -->
+                    <div class="overview-panel" id="vix-panel">
+                        <h3 class="panel-title">VIX</h3>
+                        <div id="vix-content">
+                            <div class="loading-placeholder">Loading…</div>
+                        </div>
+                    </div>
+
+                    <!-- GEX Panel -->
+                    <div class="overview-panel" id="gex-panel">
+                        <h3 class="panel-title">GEX</h3>
+                        <div id="gex-content">
+                            <div class="loading-placeholder">Loading…</div>
+                        </div>
+                    </div>
+
+                    <!-- Breadth Panel -->
+                    <div class="overview-panel" id="breadth-panel">
+                        <h3 class="panel-title">Market Breadth</h3>
+                        <div id="breadth-content">
+                            <div class="loading-placeholder">Loading…</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- AI Synthesis -->
+            <section id="llm-section" class="glass card full-width">
+                <div class="llm-box" id="llm-box">
+                    <h2>🤖 AI Synthesis</h2>
                     <p id="llm-summary">Waiting for LLM analysis...</p>
                 </div>
             </section>

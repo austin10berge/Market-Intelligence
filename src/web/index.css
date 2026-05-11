@@ -10,6 +10,7 @@
     --accent-green-glow: rgba(16, 185, 129, 0.3);
     --accent-red: #ef4444;
     --accent-red-glow: rgba(239, 68, 68, 0.3);
+    --accent-yellow: #ffc107;
     --font-main: 'Inter', sans-serif;
 }
 
@@ -332,7 +333,7 @@ header {
 
 #csp-list .trade-item,
 #csp-section .table-headers {
-    grid-template-columns: 2fr 1fr 1fr 1.25fr 1.25fr 1.25fr 1fr 1fr 1fr 0.75fr;
+    grid-template-columns: 2fr 1fr 1fr 1.25fr 1.25fr 1fr 0.9fr 1fr 1fr 1fr 0.75fr;
 }
 
 #leaps-list .trade-item,
@@ -340,9 +341,27 @@ header {
     grid-template-columns: 2fr 1fr 1fr 1.25fr 1fr 1.25fr 1.25fr;
 }
 
+.stocks-scroll-wrapper {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 500px;
+}
+
+#stocks-section .table-headers,
+#stocks-list {
+    min-width: 1580px;
+}
+
+#stocks-section .table-headers {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: rgb(26 37 54);
+}
+
 #stocks-list .trade-item,
 #stocks-section .table-headers {
-    grid-template-columns: 1fr 2fr 0.8fr 1fr 1.5fr 1fr 1fr 1fr 1fr 1fr 1.1fr 1.25fr;
+    grid-template-columns: 80px 140px 70px 80px 110px 65px 65px 65px 70px 80px 70px 85px 80px 80px 70px 90px 85px 70px 85px;
 }
 
 .th-sortable {
@@ -442,7 +461,7 @@ header {
     margin-top: 1rem;
 }
 
-.llm-box h3 {
+.llm-box h2 {
     font-size: 0.95rem;
     color: #a78bfa;
     margin-bottom: 0.5rem;
@@ -601,6 +620,12 @@ header {
         margin-bottom: 0.15rem;
     }
 
+    /* Reset desktop min-width so the card fits the viewport */
+    #stocks-section .table-headers,
+    #stocks-list {
+        min-width: 0;
+    }
+
     /* Card needs relative positioning for the sparkline */
     #stocks-list .trade-item {
         position: relative;
@@ -713,7 +738,8 @@ header {
     border-radius: 99px;
     letter-spacing: 0.02em;
     white-space: nowrap;
-    margin-left: auto;  /* push to right side of card-header */
+    margin-left: auto;
+    /* push to right side of card-header */
     opacity: 0.85;
     transition: opacity 0.2s;
 }
@@ -816,9 +842,19 @@ header {
     transition: opacity 0.2s, transform 0.1s;
 }
 
-.btn-scan:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
-.btn-scan:active:not(:disabled) { transform: translateY(0); }
-.btn-scan:disabled { opacity: 0.42; cursor: not-allowed; }
+.btn-scan:hover:not(:disabled) {
+    opacity: 0.88;
+    transform: translateY(-1px);
+}
+
+.btn-scan:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.btn-scan:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+}
 
 #btn-universe-refresh {
     margin-top: 0.75rem;
@@ -916,8 +952,15 @@ header {
 }
 
 @keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.35; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.35;
+    }
 }
 
 @media (max-width: 768px) {
@@ -934,4 +977,258 @@ header {
     .ta-chart-shell {
         height: 420px;
     }
+}
+
+/* ── Param badge variants (scanner page) ────────────────────────────────────── */
+.param-badge--disabled {
+    opacity: 0.45;
+    border-style: dashed;
+    cursor: pointer;
+}
+
+.badge-clear {
+    margin-left: 4px;
+    color: var(--text-muted, #888);
+    font-size: 0.85em;
+    cursor: pointer;
+}
+
+.badge-clear:hover {
+    color: var(--text-primary);
+}
+
+/* ── Market Overview Grid ────────────────────────────────────────────────────── */
+.section-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+.market-overview-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1rem;
+}
+
+@media (max-width: 768px) {
+    .market-overview-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.overview-panel {
+    background: var(--glass-bg, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+.panel-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted, #888);
+    margin: 0 0 0.75rem 0;
+}
+
+/* Sector bar chart */
+.sector-bar-row {
+    display: grid;
+    grid-template-columns: 5rem 1fr auto 1fr auto 1fr auto;
+    align-items: center;
+    gap: 0.25rem;
+    margin-bottom: 0.35rem;
+    font-size: 0.78rem;
+}
+
+.sector-timeframe-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #888);
+}
+
+.sector-label {
+    color: var(--text-muted, #888);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sector-bar-cell {
+    position: relative;
+    height: 1rem;
+    background: var(--bar-track, rgba(255, 255, 255, 0.06));
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.sector-bar {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 2px;
+}
+
+/* Center-anchored bars: positive bars grow right from center, negative grow left */
+.sector-bar.positive {
+    left: 50%;
+    background: var(--accent-green, #4caf50);
+}
+
+.sector-bar.negative {
+    right: 50%;
+    background: var(--accent-red, #f44336);
+}
+
+.sector-bar.opacity-1w {
+    opacity: 1;
+}
+
+.sector-bar.opacity-1m {
+    opacity: 0.3;
+}
+
+.sector-pct {
+    font-size: 0.72rem;
+    text-align: right;
+    min-width: 3rem;
+}
+
+.sector-pct.positive {
+    color: var(--accent-green, #4caf50);
+}
+
+.sector-pct.negative {
+    color: var(--accent-red, #f44336);
+}
+
+.sector-pct.neutral {
+    color: var(--text-muted, #888);
+}
+
+/* VIX panel */
+.vix-spot {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.vix-changes {
+    font-size: 0.82rem;
+    color: var(--text-muted, #888);
+    margin-bottom: 0.5rem;
+}
+
+.vix-term {
+    font-size: 0.82rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.vix-term.contango {
+    background: rgba(76, 175, 80, 0.15);
+    color: var(--accent-green, #4caf50);
+}
+
+.vix-term.backwardation {
+    background: rgba(244, 67, 54, 0.15);
+    color: var(--accent-red, #f44336);
+}
+
+.vix-term.flat {
+    background: rgba(255, 193, 7, 0.15);
+    color: var(--accent-yellow, #ffc107);
+}
+
+/* GEX panel */
+.gex-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.gex-label {
+    font-size: 0.82rem;
+    color: var(--text-muted, #888);
+    margin-bottom: 0.5rem;
+}
+
+.gex-avg {
+    font-size: 0.78rem;
+    color: var(--text-muted, #888);
+}
+
+/* Breadth panel */
+.breadth-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.82rem;
+}
+
+.breadth-label {
+    min-width: 5rem;
+    color: var(--text-muted, #888);
+    font-size: 0.78rem;
+}
+
+.breadth-bar-track {
+    flex: 1;
+    height: 0.6rem;
+    background: var(--bar-track, rgba(255, 255, 255, 0.06));
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.breadth-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.breadth-bar-fill.green {
+    background: var(--accent-green, #4caf50);
+}
+
+.breadth-bar-fill.yellow {
+    background: var(--accent-yellow, #ffc107);
+}
+
+.breadth-bar-fill.red {
+    background: var(--accent-red, #f44336);
+}
+
+.breadth-value {
+    min-width: 3rem;
+    text-align: right;
+    font-weight: 600;
+}
+
+.breadth-value.green {
+    color: var(--accent-green, #4caf50);
+}
+
+.breadth-value.yellow {
+    color: var(--accent-yellow, #ffc107);
+}
+
+.breadth-value.red {
+    color: var(--accent-red, #f44336);
+}
+
+.breadth-ad {
+    font-size: 0.78rem;
+    color: var(--text-muted, #888);
+}
+
+.loading-placeholder {
+    color: var(--text-muted, #888);
+    font-size: 0.82rem;
+    padding: 1rem 0;
+    text-align: center;
 }

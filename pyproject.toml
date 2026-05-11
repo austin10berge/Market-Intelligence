@@ -34,6 +34,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["UP017"]  # timezone.utc is preferred over datetime.UTC when timezone is already imported
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

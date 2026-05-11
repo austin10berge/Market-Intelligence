@@ -50,6 +50,7 @@ from src.screener.csp_scanner import (
     apply_fundamental_filter,
     run_csp_scan,
     ScannerParams,
+    _fundamental_filter_from_store,
 )
 
 
@@ -188,8 +189,7 @@ class TestRunCspScanDataSource:
         params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
-            patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
-            patch("src.screener.csp_scanner.fetch_nasdaq100_tickers", return_value=_TEST_TICKERS[30:60]),
+            patch("src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS),
             patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
         ):
             result = run_csp_scan(params)
@@ -201,8 +201,7 @@ class TestRunCspScanDataSource:
         params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
-            patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
-            patch("src.screener.csp_scanner.fetch_nasdaq100_tickers", return_value=_TEST_TICKERS[30:60]),
+            patch("src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS),
             patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
         ):
             result = run_csp_scan(params)
@@ -217,8 +216,7 @@ class TestRunCspScanDataSource:
         params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
-            patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
-            patch("src.screener.csp_scanner.fetch_nasdaq100_tickers", return_value=_TEST_TICKERS[30:60]),
+            patch("src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS),
             patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
         ):
             result = run_csp_scan(params)
@@ -226,7 +224,7 @@ class TestRunCspScanDataSource:
         assert result["data_source"] == "local_store"
         summary = result["filter_summary"]
         expected_keys = {
-            "sp500_count", "nasdaq100_count", "combined_unique",
+            "combined_unique",
             "fundamental_passed", "vol_passed", "technical_passed",
             "options_screener_returned",
         }
@@ -237,8 +235,7 @@ class TestRunCspScanDataSource:
         params = ScannerParams(min_adx=0.0, max_adx=100.0)
 
         with (
-            patch("src.screener.csp_scanner.fetch_sp500_tickers", return_value=_TEST_TICKERS[:30]),
-            patch("src.screener.csp_scanner.fetch_nasdaq100_tickers", return_value=_TEST_TICKERS[30:60]),
+            patch("src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS),
             patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
             patch("src.screener.csp_scanner.yf") as mock_yf,
         ):
@@ -246,3 +243,93 @@ class TestRunCspScanDataSource:
 
         # The fundamental filter should have used the store; yf never called
         mock_yf.Ticker.assert_not_called()
+
+
+# ── Test: fetch_nasdaq_large_cap_tickers ─────────────────────────────────────
+
+MOCK_NASDAQ_SCREENER_RESPONSE = {
+    "data": {
+        "table": {
+            "rows": [
+                {"symbol": "AAPL", "marketCap": "2,700,000,000,000"},
+                {"symbol": "MSFT", "marketCap": "3,000,000,000,000"},
+                {"symbol": "SMLC", "marketCap": "500,000,000"},     # < $2B — filtered out
+                {"symbol": "SMLL", "marketCap": "1,999,999,999"},   # < $2B — filtered out
+                {"symbol": "MIDC", "marketCap": "2,000,000,001"},   # just over $2B — kept
+            ]
+        }
+    }
+}
+
+
+def test_fetch_nasdaq_large_cap_tickers_filters_by_market_cap():
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = MOCK_NASDAQ_SCREENER_RESPONSE
+    mock_resp.raise_for_status = MagicMock()
+    with patch("requests.get", return_value=mock_resp):
+        from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
+        tickers = fetch_nasdaq_large_cap_tickers()
+    assert "AAPL" in tickers
+    assert "MSFT" in tickers
+    assert "MIDC" in tickers
+    assert "SMLC" not in tickers
+    assert "SMLL" not in tickers
+    assert tickers == sorted(tickers)  # must be sorted
+
+
+def test_fetch_nasdaq_large_cap_tickers_returns_empty_on_api_failure():
+    with patch("requests.get", side_effect=Exception("connection error")):
+        from src.screener.csp_scanner import fetch_nasdaq_large_cap_tickers
+        result = fetch_nasdaq_large_cap_tickers()
+    assert result == []
+
+
+# ── Test: restrict_to_watchlist_universe parameter ───────────────────────────────
+
+def test_restrict_to_watchlist_universe_filters_correctly():
+    """When restrict_to_watchlist_universe=True, only sp500/nasdaq100 rows pass."""
+    store_lookup = {
+        "AAPL": {"symbol": "AAPL", "market_cap_b": 100.0, "price": 150.0, "beta": 1.0,
+                 "iv_pct": 30.0, "fcf": 10.0, "forward_pe": 20.0, "universes": "nasdaq100,sp500"},
+        "AMZN": {"symbol": "AMZN", "market_cap_b": 50.0, "price": 120.0, "beta": 1.1,
+                 "iv_pct": 35.0, "fcf": 8.0, "forward_pe": 25.0, "universes": "nasdaq_large"},
+        "NEWC": {"symbol": "NEWC", "market_cap_b": 5.0, "price": 40.0, "beta": 1.2,
+                 "iv_pct": 40.0, "fcf": 1.0, "forward_pe": 15.0, "universes": "nasdaq_large"},
+    }
+    params_restricted = ScannerParams(
+        min_market_cap_b=1.0, max_price=500.0, min_beta=0.5, max_beta=3.0,
+        min_fcf_b=None, max_debt_to_equity=None, min_revenue_growth=None,
+        restrict_to_watchlist_universe=True,
+    )
+    tickers, rows = _fundamental_filter_from_store(
+        list(store_lookup.keys()), params_restricted, store_lookup
+    )
+    assert "AAPL" in tickers
+    assert "AMZN" not in tickers
+    assert "NEWC" not in tickers
+
+
+def test_restrict_to_watchlist_universe_false_passes_all():
+    """When restrict_to_watchlist_universe=False (default), all passing tickers pass."""
+    store_lookup = {
+        "AAPL": {"symbol": "AAPL", "market_cap_b": 100.0, "price": 150.0, "beta": 1.0,
+                 "iv_pct": 30.0, "fcf": 10.0, "forward_pe": 20.0, "universes": "nasdaq100,sp500"},
+        "AMZN": {"symbol": "AMZN", "market_cap_b": 50.0, "price": 120.0, "beta": 1.1,
+                 "iv_pct": 35.0, "fcf": 8.0, "forward_pe": 25.0, "universes": "nasdaq_large"},
+    }
+    params_open = ScannerParams(
+        min_market_cap_b=1.0, max_price=500.0, min_beta=0.5, max_beta=3.0,
+        min_fcf_b=None, max_debt_to_equity=None, min_revenue_growth=None,
+        restrict_to_watchlist_universe=False,
+    )
+    tickers, rows = _fundamental_filter_from_store(
+        list(store_lookup.keys()), params_open, store_lookup
+    )
+    assert "AAPL" in tickers
+    assert "AMZN" in tickers
+
+
+def test_scanner_params_cache_key_differs_by_universe_flag():
+    p1 = ScannerParams(restrict_to_watchlist_universe=False)
+    p2 = ScannerParams(restrict_to_watchlist_universe=True)
+    assert p1.cache_key_suffix() != p2.cache_key_suffix()

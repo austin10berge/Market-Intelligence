@@ -139,12 +139,12 @@
                         <input type="number" id="max_dte" class="settings-input" />
                     </div>
                     <div>
-                        <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Min OTM %</label>
-                        <input type="number" id="min_otm_pct" step="0.1" class="settings-input" />
+                        <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Delta Min</label>
+                        <input type="number" id="min_delta" step="0.01" min="0" max="1" class="settings-input" />
                     </div>
                     <div>
-                        <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Max OTM %</label>
-                        <input type="number" id="max_otm_pct" step="0.1" class="settings-input" />
+                        <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Delta Max</label>
+                        <input type="number" id="max_delta" step="0.01" min="0" max="1" class="settings-input" />
                     </div>
                     <div>
                         <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Min Capital ROC %</label>
@@ -304,8 +304,8 @@
             // Contract filters
             document.getElementById('min_dte').value = s.min_dte ?? 30;
             document.getElementById('max_dte').value = s.max_dte ?? 45;
-            document.getElementById('min_otm_pct').value = s.min_otm_pct ?? 5.0;
-            document.getElementById('max_otm_pct').value = s.max_otm_pct ?? 20.0;
+            document.getElementById('min_delta').value = s.min_delta ?? 0.15;
+            document.getElementById('max_delta').value = s.max_delta ?? 0.40;
             document.getElementById('min_roc').value = s.min_roc ?? 1.0;
             document.getElementById('max_spread_pct').value = s.max_spread_pct ?? 25.0;
             // Technical filters
@@ -401,8 +401,8 @@
                     // Contract filters
                     min_dte:         parseInt(document.getElementById('min_dte').value),
                     max_dte:         parseInt(document.getElementById('max_dte').value),
-                    min_otm_pct:     parseFloat(document.getElementById('min_otm_pct').value),
-                    max_otm_pct:     parseFloat(document.getElementById('max_otm_pct').value),
+                    min_delta:       parseFloat(document.getElementById('min_delta').value),
+                    max_delta:       parseFloat(document.getElementById('max_delta').value),
                     min_roc:         parseFloat(document.getElementById('min_roc').value),
                     max_spread_pct:  parseFloat(document.getElementById('max_spread_pct').value),
                     // Technical filters

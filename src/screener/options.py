@@ -1,6 +1,7 @@
 """Options screener for CSPs and LEAPS using yfinance and Alpaca."""
 
 import logging
+import math
 from datetime import date, datetime
 
 import httpx
@@ -13,6 +14,25 @@ from ..config import settings as app_settings
 from ..db import get_watchlist, get_csp_settings
 
 logger = logging.getLogger(__name__)
+
+_RISK_FREE_RATE = 0.045  # approximate 3-month T-bill yield
+
+
+def _bs_put_delta(S: float, K: float, T: float, sigma: float) -> float | None:
+    """Black-Scholes put delta (absolute value, 0–1).
+
+    Used as a fallback when Alpaca greeks are unavailable.
+    sigma must be in decimal form (e.g. 0.30 for 30% IV).
+    """
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return None
+    try:
+        d1 = (math.log(S / K) + (_RISK_FREE_RATE + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+        # N(d1) via math.erf; put delta = N(d1) - 1, abs = 1 - N(d1)
+        n_d1 = (1.0 + math.erf(d1 / math.sqrt(2.0))) / 2.0
+        return round(1.0 - n_d1, 4)
+    except (ValueError, ZeroDivisionError):
+        return None
 
 
 def _get_valid_expirations(expirations: tuple[str, ...], min_days: int, max_days: int) -> list[str]:
@@ -159,6 +179,10 @@ def screen_csp_candidates(
     tickers: list[str] | None = None,
     min_dte: int | None = None,
     max_dte: int | None = None,
+    min_rsi: float | None = None,
+    max_rsi: float | None = None,
+    min_adx: float | None = None,
+    max_adx: float | None = None,
 ) -> list[dict]:
     """Find CSP candidates with live Alpaca pricing, technical quality filters
     (RSI, ADX via pandas-ta), and a composite score modelled on mLabs methodology.
@@ -181,6 +205,14 @@ def screen_csp_candidates(
         settings["min_dte"] = min_dte
     if max_dte is not None:
         settings["max_dte"] = max_dte
+    if min_rsi is not None:
+        settings["min_rsi"] = min_rsi
+    if max_rsi is not None:
+        settings["max_rsi"] = max_rsi
+    if min_adx is not None:
+        settings["min_adx"] = min_adx
+    if max_adx is not None:
+        settings["max_adx"] = max_adx
     logger.info(
         "Screening CSP candidates across %d tickers with settings: %s",
         len(tickers), settings,
@@ -258,8 +290,9 @@ def screen_csp_candidates(
             if not valid_exps:
                 continue
 
-            max_strike = current_price * (1 - (settings["min_otm_pct"] / 100))
-            min_strike = current_price * (1 - (settings["max_otm_pct"] / 100))
+            # Wide internal pre-filter — delta filtering happens post-Alpaca snapshot
+            max_strike = current_price          # ATM (0% OTM)
+            min_strike = current_price * 0.70   # 30% OTM
 
             for exp_str in valid_exps:
                 try:
@@ -352,6 +385,7 @@ def screen_csp_candidates(
         "low_roc": 0,
         "wide_spread": 0,
         "low_iv": 0,
+        "delta_filter": 0,
     }
 
     for c in potential_contracts:
@@ -378,6 +412,27 @@ def screen_csp_candidates(
         # Alpaca sometimes returns IV as a decimal (0.35) and sometimes as a
         # percentage (35.0) — normalise to percentage.
         iv = float(iv_raw) * 100 if iv_raw and float(iv_raw) <= 3.0 else float(iv_raw or 0)
+
+        # Delta — put delta is negative; compare as absolute value
+        greeks = snapshot.get("greeks") or {}
+        delta_raw = greeks.get("delta")
+        if delta_raw is not None:
+            delta = abs(float(delta_raw))
+        else:
+            # Alpaca didn't return greeks — fall back to Black-Scholes
+            sigma = iv / 100.0 if iv > 0 else None
+            T = c["dte"] / 365.0
+            delta = _bs_put_delta(c["current_price"], c["strike"], T, sigma) if sigma else None
+
+        min_delta = settings.get("min_delta", 0.15)
+        max_delta = settings.get("max_delta", 0.40)
+        if delta is not None and not (min_delta <= delta <= max_delta):
+            rejected["delta_filter"] += 1
+            logger.debug(
+                "Delta filter: %s %s %.0fP — delta=%.3f (allowed %.2f-%.2f)",
+                c["symbol"], c["expiration"], c["strike"], delta, min_delta, max_delta,
+            )
+            continue
 
         # IV floor
         min_iv = settings.get("min_iv", 25.0)
@@ -447,6 +502,7 @@ def screen_csp_candidates(
             "roc_percent": round(roc, 2),
             "annualized_roc": round(annualized_roc, 2),
             "otm_percent": round(c["otm_pct"], 2),
+            "delta": round(delta, 3) if delta is not None else None,
             "bid": round(bid, 2),
             "ask": round(ask, 2),
             "spread_pct": round(spread_pct, 2),
@@ -469,10 +525,11 @@ def screen_csp_candidates(
     results = sorted(best_by_strike.values(), key=lambda x: x["composite_score"], reverse=True)
     logger.info(
         "CSP screen complete: %d contracts evaluated, %d candidates returned. "
-        "Rejected — no_snapshot=%d, low_premium=%d, low_roc=%d, wide_spread=%d, low_iv=%d",
+        "Rejected — no_snapshot=%d, delta=%d, low_premium=%d, low_roc=%d, wide_spread=%d, low_iv=%d",
         len(potential_contracts),
         len(results),
         rejected["no_alpaca_snapshot"],
+        rejected["delta_filter"],
         rejected["low_premium"],
         rejected["low_roc"],
         rejected["wide_spread"],

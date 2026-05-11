@@ -25,10 +25,18 @@ from .notify.home_assistant import send_ha_notification
 from .notify.ntfy import send_ntfy
 from .processing.preprocessor import compute_composite_score, determine_posture
 from .processing.scorer import score_signal, check_convergence
+from .screener.options import screen_csp_candidates
 from .screener.stocks import screen_stocks
 from .synthesis.llm import synthesize
 from .synthesis.prompts import build_synthesis_prompt
-from .cache import invalidate_market_posture
+from .cache import (
+    KEY_SCREENER_CSP,
+    KEY_SCREENER_STOCKS,
+    cache_get,
+    cache_set,
+    invalidate_market_posture,
+    screener_ttl,
+)
 from . import db
 
 import argparse
@@ -106,12 +114,36 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
                 summary=ss.signal.summary,
             )
 
-        # Persist one ATM IV snapshot per stock each daily run so IV Rank can build over time.
-        logger.info("Capturing stock IV history snapshots...")
+        # Watchlist stock data for the LLM — check Redis first so /scan reuses the
+        # dashboard's already-fetched data instead of making redundant yfinance calls.
+        logger.info("Loading watchlist stock data...")
+        watchlist_stocks: list[dict] = []
         try:
-            screen_stocks(persist_history=True)
+            stocks_envelope = await cache_get(KEY_SCREENER_STOCKS)
+            if stocks_envelope and stocks_envelope.get("data"):
+                watchlist_stocks = stocks_envelope["data"]
+                logger.info("Watchlist stocks loaded from cache (%d tickers)", len(watchlist_stocks))
+            else:
+                watchlist_stocks = await asyncio.to_thread(screen_stocks, None, True)
+                if watchlist_stocks:
+                    await cache_set(KEY_SCREENER_STOCKS, watchlist_stocks, screener_ttl())
         except Exception as exc:
-            logger.warning("Stock IV snapshot capture failed: %s", exc)
+            logger.warning("Watchlist stock data fetch failed: %s", exc)
+
+        # CSP candidates for the LLM — same cache-first approach.
+        logger.info("Loading CSP candidates...")
+        csp_candidates: list[dict] = []
+        try:
+            csp_envelope = await cache_get(KEY_SCREENER_CSP)
+            if csp_envelope and csp_envelope.get("data"):
+                csp_candidates = csp_envelope["data"]
+                logger.info("CSP candidates loaded from cache (%d results)", len(csp_candidates))
+            else:
+                csp_candidates = await asyncio.to_thread(screen_csp_candidates)
+                if csp_candidates:
+                    await cache_set(KEY_SCREENER_CSP, csp_candidates, screener_ttl())
+        except Exception as exc:
+            logger.warning("CSP candidate fetch for LLM failed: %s", exc)
 
         # ── Step 3: Synthesize via LLM ───────────────────────────
         logger.info("Step 3/4: Synthesizing digest...")
@@ -129,6 +161,8 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
             posture=posture.value,
             extreme_count=extreme_count,
             convergence_alerts=convergence_alerts,
+            watchlist_stocks=watchlist_stocks,
+            csp_candidates=csp_candidates,
         )
 
         digest_text = await synthesize(system_prompt, user_prompt)

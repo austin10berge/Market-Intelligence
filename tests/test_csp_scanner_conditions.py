@@ -527,3 +527,42 @@ class TestAdxGate:
             rows = [{"symbol": "TEST"}]
             tickers, _ = apply_technical_conditions(rows, conditions=[], min_adx=15.0, max_adx=50.0)
         assert "TEST" not in tickers
+
+
+class TestScannerParamsNewFields:
+    def test_defaults_are_set(self):
+        p = ScannerParams()
+        assert p.min_fcf_b == 0.0
+        assert p.max_debt_to_equity == 2.0
+        assert p.min_revenue_growth == pytest.approx(-0.10)
+        assert p.min_earnings_growth is None
+        assert p.min_dividend_yield is None
+
+    def test_from_query_maps_new_params(self):
+        p = ScannerParams.from_query(
+            min_fcf_b=5.0,
+            max_debt_to_equity=1.5,
+            min_revenue_growth=0.05,
+            min_earnings_growth=-0.10,
+            min_dividend_yield=0.02,
+        )
+        assert p.min_fcf_b == 5.0
+        assert p.max_debt_to_equity == 1.5
+        assert p.min_revenue_growth == 0.05
+        assert p.min_earnings_growth == pytest.approx(-0.10)
+        assert p.min_dividend_yield == 0.02
+
+    def test_from_query_null_disables_gate(self):
+        p = ScannerParams.from_query(
+            min_fcf_b=None,
+            max_debt_to_equity=None,
+            min_revenue_growth=None,
+        )
+        assert p.min_fcf_b is None
+        assert p.max_debt_to_equity is None
+        assert p.min_revenue_growth is None
+
+    def test_cache_key_differs_with_new_params(self):
+        p1 = ScannerParams()
+        p2 = ScannerParams(min_fcf_b=10.0)
+        assert p1.cache_key_suffix() != p2.cache_key_suffix()

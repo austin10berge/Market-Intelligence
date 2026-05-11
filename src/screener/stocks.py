@@ -405,6 +405,7 @@ def _fetch_option_bars(
                 "start": start_date.isoformat(),
                 "end": end_date.isoformat(),
                 "limit": 10000,
+                "feed": "indicative",
             }
             if next_page_token:
                 params["page_token"] = next_page_token
@@ -658,13 +659,26 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                     pct_1m = _safe_pct(current_price, month_ago)
 
                 pe_val = info.get("trailingPE")
+                forward_pe_val = info.get("forwardPE")
                 beta_val = info.get("beta")
+                fcf_raw = _to_float(info.get("freeCashflow"))
+                fcf_val = round(fcf_raw / 1e9, 2) if fcf_raw is not None else None
+                debt_to_equity_val = _to_float(info.get("debtToEquity"))
+                revenue_raw = _to_float(info.get("totalRevenue"))
+                revenue_val = round(revenue_raw / 1e9, 2) if revenue_raw is not None else None
+                revenue_growth_val = _to_float(info.get("revenueGrowth"))
+                eps_val = _to_float(info.get("trailingEps"))
+                eps_growth_val = _to_float(info.get("earningsGrowth"))
                 rv20_val = _calculate_rv20(hist)
                 atm_iv_val = _fetch_alpaca_atm_iv_percent(alpaca_client, symbol, float(current_price))
                 if atm_iv_val is not None and persist_history:
                     store_stock_iv_snapshot(snapshot_date=snapshot_date, symbol=symbol, atm_iv=atm_iv_val)
 
                 iv_history = get_stock_iv_history(symbol, lookback_days=IV_RANK_LOOKBACK_DAYS)
+                if atm_iv_val is not None and len(iv_history) < MIN_IV_RANK_POINTS:
+                    logger.info("Auto-backfilling IV history for %s (%d points)", symbol, len(iv_history))
+                    backfill_stock_iv_history([symbol])
+                    iv_history = get_stock_iv_history(symbol, lookback_days=IV_RANK_LOOKBACK_DAYS)
                 iv_percentile_val = (
                     _calculate_iv_percentile(atm_iv_val, iv_history)
                     if atm_iv_val is not None
@@ -693,7 +707,14 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                         "pct_1m": round(pct_1m, 2),
                         "price_history_1m": price_history_1m,
                         "pe": round(float(pe_val), 2) if pd.notna(pe_val) else "N/A",
+                        "forward_pe": round(float(forward_pe_val), 2) if pd.notna(forward_pe_val) else "N/A",
                         "beta": round(float(beta_val), 2) if pd.notna(beta_val) else "N/A",
+                        "fcf": fcf_val,
+                        "debt_to_equity": round(debt_to_equity_val, 2) if debt_to_equity_val is not None else "N/A",
+                        "revenue": revenue_val,
+                        "revenue_growth": round(revenue_growth_val * 100, 1) if revenue_growth_val is not None else "N/A",
+                        "eps": round(eps_val, 2) if eps_val is not None else "N/A",
+                        "eps_growth": round(eps_growth_val * 100, 1) if eps_growth_val is not None else "N/A",
                         "atm_iv": round(atm_iv_val, 2) if atm_iv_val is not None else "N/A",
                         "rv20": round(rv20_val, 2) if rv20_val is not None else "N/A",
                         "atm_iv_rv20": round(atm_iv_rv20_val, 2)

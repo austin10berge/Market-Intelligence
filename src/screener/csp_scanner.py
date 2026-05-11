@@ -1,6 +1,6 @@
 """CSP Scanner — broad universe screener for Cash-Secured Put candidates.
 
-Fetches the S&P 500 + NASDAQ 100 constituent lists, applies fundamental,
+Fetches the S&P 500, NASDAQ 100, and NASDAQ large-cap (≥$2B) constituent lists, applies fundamental,
 volatility, and optional technical-condition pre-filters, then hands qualifying
 tickers to the existing screen_csp_candidates() options screening pipeline.
 
@@ -54,13 +54,21 @@ DEFAULT_MAX_DTE          = 46
 DEFAULT_MIN_ADX          = 15.0
 DEFAULT_MAX_ADX          = 50.0
 
+DEFAULT_MIN_FCF_B:           float | None = 0.0
+DEFAULT_MAX_DEBT_TO_EQUITY:  float | None = 2.0
+DEFAULT_MIN_REVENUE_GROWTH:  float | None = -0.10
+DEFAULT_MIN_EARNINGS_GROWTH: float | None = None
+DEFAULT_MIN_DIVIDEND_YIELD:  float | None = None
+
 # yfinance informal rate-limit
 _INFO_BATCH_SIZE    = 50
 _INFO_BATCH_SLEEP_S = 1.0
 
 # Source URLs
-_SP500_WIKI_URL    = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-_NASDAQ100_API_URL = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+_SP500_WIKI_URL        = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+_NASDAQ100_API_URL     = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+_NASDAQ_SCREENER_URL   = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&exchange=nasdaq"
+_NASDAQ_LARGE_CAP_MIN_B = 2.0
 
 _WIKI_USER_AGENT = "Mozilla/5.0 (compatible; MarketIntelligenceBot/1.0; +https://github.com/)"
 _NASDAQ_HEADERS  = {
@@ -142,8 +150,14 @@ class ScannerParams:
     max_dte:          int   = DEFAULT_MAX_DTE
     min_adx:          float = DEFAULT_MIN_ADX
     max_adx:          float = DEFAULT_MAX_ADX
+    min_fcf_b:           float | None = DEFAULT_MIN_FCF_B
+    max_debt_to_equity:  float | None = DEFAULT_MAX_DEBT_TO_EQUITY
+    min_revenue_growth:  float | None = DEFAULT_MIN_REVENUE_GROWTH
+    min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH
+    min_dividend_yield:  float | None = DEFAULT_MIN_DIVIDEND_YIELD
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
+    restrict_to_watchlist_universe: bool = False
 
     def cache_key_suffix(self) -> str:
         """Return a short deterministic hash of the params for cache keying."""
@@ -164,6 +178,12 @@ class ScannerParams:
         min_adx: float | None = None,
         max_adx: float | None = None,
         conditions: str | None = None,
+        min_fcf_b: float | None = DEFAULT_MIN_FCF_B,
+        max_debt_to_equity: float | None = DEFAULT_MAX_DEBT_TO_EQUITY,
+        min_revenue_growth: float | None = DEFAULT_MIN_REVENUE_GROWTH,
+        min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH,
+        min_dividend_yield: float | None = DEFAULT_MIN_DIVIDEND_YIELD,
+        restrict_to_watchlist_universe: bool = False,
     ) -> "ScannerParams":
         """Build ScannerParams from API query parameters (all optional)."""
         parsed_conditions: list[str] = []
@@ -184,14 +204,18 @@ class ScannerParams:
             min_adx          = min_adx   if min_adx   is not None else DEFAULT_MIN_ADX,
             max_adx          = max_adx   if max_adx   is not None else DEFAULT_MAX_ADX,
             conditions       = sorted(parsed_conditions),
+            min_fcf_b           = min_fcf_b,
+            max_debt_to_equity  = max_debt_to_equity,
+            min_revenue_growth  = min_revenue_growth,
+            min_earnings_growth = min_earnings_growth,
+            min_dividend_yield  = min_dividend_yield,
+            restrict_to_watchlist_universe = restrict_to_watchlist_universe,
         )
 
 
 # ── Type helpers ──────────────────────────────────────────────────────────────
 
 class FilterSummary(TypedDict):
-    sp500_count: int
-    nasdaq100_count: int
     combined_unique: int
     fundamental_passed: int
     vol_passed: int
@@ -255,12 +279,52 @@ def fetch_nasdaq100_tickers() -> list[str]:
         return []
 
 
+def fetch_nasdaq_large_cap_tickers() -> list[str]:
+    """Fetch all NASDAQ-listed stocks with market cap ≥ $2B from the NASDAQ screener API."""
+    try:
+        import requests as _requests
+        resp = _requests.get(_NASDAQ_SCREENER_URL, headers=_NASDAQ_HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data.get("data", {}).get("table", {}).get("rows", [])
+        if not rows:
+            logger.error("NASDAQ screener API returned no rows. Keys: %s", list(data.get("data", {}).keys()))
+            return []
+
+        tickers: list[str] = []
+        min_cap = _NASDAQ_LARGE_CAP_MIN_B * 1e9
+        for r in rows:
+            sym = str(r.get("symbol", "")).upper().strip().replace(".", "-")
+            if not sym:
+                continue
+            try:
+                cap = float(str(r.get("marketCap") or "0").replace(",", ""))
+            except (TypeError, ValueError):
+                continue
+            if cap >= min_cap:
+                tickers.append(sym)
+
+        tickers = sorted(set(tickers))
+        logger.info(
+            "Fetched %d NASDAQ large-cap tickers (>=$%.0fB) from NASDAQ screener",
+            len(tickers), _NASDAQ_LARGE_CAP_MIN_B,
+        )
+        return tickers
+    except Exception as exc:
+        logger.error("Failed to fetch NASDAQ large-cap tickers: %s", exc, exc_info=True)
+        return []
+
+
 def fetch_universe() -> list[str]:
-    """Return the deduplicated union of S&P 500 and NASDAQ 100 tickers."""
-    sp500  = fetch_sp500_tickers()
-    nasdaq = fetch_nasdaq100_tickers()
-    combined = sorted(set(sp500) | set(nasdaq))
-    logger.info("Universe: %d S&P500 + %d NDX100 = %d unique", len(sp500), len(nasdaq), len(combined))
+    """Return the deduplicated union of S&P 500, NASDAQ 100, and NASDAQ large-cap tickers."""
+    sp500        = fetch_sp500_tickers()
+    nasdaq100    = fetch_nasdaq100_tickers()
+    nasdaq_large = fetch_nasdaq_large_cap_tickers()
+    combined = sorted(set(sp500) | set(nasdaq100) | set(nasdaq_large))
+    logger.info(
+        "Universe: %d S&P500 + %d NDX100 + %d NASDAQ≥$2B = %d unique",
+        len(sp500), len(nasdaq100), len(nasdaq_large), len(combined),
+    )
     return combined
 
 
@@ -329,6 +393,12 @@ def _fundamental_filter_from_store(
         if row is None:
             continue
 
+        # Universe membership gate
+        if params.restrict_to_watchlist_universe:
+            universes = row.get("universes") or ""
+            if "sp500" not in universes and "nasdaq100" not in universes:
+                continue
+
         market_cap_b = row.get("market_cap_b") or 0.0
         price = row.get("price") or 0.0
         beta = row.get("beta")
@@ -341,6 +411,36 @@ def _fundamental_filter_from_store(
         if beta is None or not (params.min_beta <= beta <= params.max_beta):
             continue
 
+        # FCF gate (stored in billions)
+        fcf = row.get("fcf")
+        if params.min_fcf_b is not None and fcf is not None:
+            if fcf < params.min_fcf_b:
+                continue
+
+        # Debt-to-equity gate
+        debt_to_equity = row.get("debt_to_equity")
+        if params.max_debt_to_equity is not None and debt_to_equity is not None:
+            if debt_to_equity > params.max_debt_to_equity:
+                continue
+
+        # Revenue growth gate
+        revenue_growth = row.get("revenue_growth")
+        if params.min_revenue_growth is not None and revenue_growth is not None:
+            if revenue_growth < params.min_revenue_growth:
+                continue
+
+        # Earnings growth gate
+        earnings_growth = row.get("earnings_growth")
+        if params.min_earnings_growth is not None and earnings_growth is not None:
+            if earnings_growth < params.min_earnings_growth:
+                continue
+
+        # Dividend yield gate
+        dividend_yield = row.get("dividend_yield")
+        if params.min_dividend_yield is not None and dividend_yield is not None:
+            if dividend_yield < params.min_dividend_yield:
+                continue
+
         passing_tickers.append(symbol)
         fundamental_rows.append({
             "symbol":       symbol,
@@ -348,6 +448,8 @@ def _fundamental_filter_from_store(
             "price":        round(price, 2),
             "beta":         round(beta, 2),
             "iv":           iv_pct,
+            "fcf":          row.get("fcf"),
+            "forward_pe":   row.get("forward_pe"),
         })
 
     logger.info("Fundamental filter (store): %d/%d tickers passed", len(passing_tickers), len(tickers))
@@ -359,11 +461,18 @@ def _fundamental_filter_from_yfinance(
     params: ScannerParams,
 ) -> tuple[list[str], list[dict]]:
     """Fallback: fetch fundamentals live from yfinance (slow, per-ticker)."""
+    if params.restrict_to_watchlist_universe:
+        logger.warning(
+            "restrict_to_watchlist_universe=True has no effect in the yfinance fallback path "
+            "(no universe membership data available without a populated local store)"
+        )
+
     passing_tickers: list[str] = []
     fundamental_rows: list[dict] = []
 
     total_batches = math.ceil(len(tickers) / _INFO_BATCH_SIZE)
     logger.info("Fundamental filter (yfinance fallback): %d tickers, %d batches", len(tickers), total_batches)
+    logger.warning("Balance-sheet gates (FCF, D/E, growth, yield) are not applied in the yfinance fallback path")
 
     for batch_idx, batch_start in enumerate(range(0, len(tickers), _INFO_BATCH_SIZE)):
         batch = tickers[batch_start : batch_start + _INFO_BATCH_SIZE]
@@ -688,14 +797,10 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         logger.warning("Local store is stale (%.1fh old)", store_status.get("stale_hours", 0))
 
     # 1. Universe
-    sp500_tickers  = fetch_sp500_tickers()
-    nasdaq_tickers = fetch_nasdaq100_tickers()
-    universe       = sorted(set(sp500_tickers) | set(nasdaq_tickers))
+    universe = fetch_universe()
     logger.info("CSP scan started — universe: %d tickers, params: %s", len(universe), asdict(params))
 
     empty_summary = {
-        "sp500_count":               len(sp500_tickers),
-        "nasdaq100_count":           len(nasdaq_tickers),
         "combined_unique":           len(universe),
         "fundamental_passed":        0,
         "vol_passed":                0,
@@ -747,11 +852,24 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
 
     # 5. Options screener
     logger.info("Passing %d tickers to CSP options screener", len(tech_passing))
-    candidates = screen_csp_candidates(tickers=tech_passing, min_dte=params.min_dte, max_dte=params.max_dte)
+    candidates = screen_csp_candidates(
+        tickers=tech_passing,
+        min_dte=params.min_dte,
+        max_dte=params.max_dte,
+        min_rsi=0.0,
+        max_rsi=params.max_rsi,
+        min_adx=params.min_adx,
+        max_adx=params.max_adx,
+    )
+
+    # Merge fundamental fields (fcf, forward_pe) into each candidate
+    fundamentals_by_symbol = {r["symbol"]: r for r in tech_rows}
+    for c in candidates:
+        fund = fundamentals_by_symbol.get(c["symbol"], {})
+        c["fcf"] = fund.get("fcf")
+        c["pe"]  = fund.get("forward_pe")
 
     filter_summary: FilterSummary = {
-        "sp500_count":               len(sp500_tickers),
-        "nasdaq100_count":           len(nasdaq_tickers),
         "combined_unique":           len(universe),
         "fundamental_passed":        len(fundamental_passing),
         "vol_passed":                len(vol_passing),

@@ -292,6 +292,30 @@
             background: rgba(245,158,11,0.28);
         }
 
+        /* ── Universe toggle ──────────────────────────────────────────────── */
+        .btn-universe-toggle {
+            padding: 5px 12px;
+            border-radius: 14px;
+            border: 1px solid var(--glass-border);
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .btn-universe-toggle:hover {
+            border-color: var(--text-secondary);
+            color: var(--text-primary, #fff);
+        }
+        .btn-universe-toggle.active {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: #fff;
+        }
+        .universe-toggle-area {
+            margin: 8px 0 4px;
+        }
+
         /* ── Responsive ───────────────────────────────────────────────────── */
         @media (max-width: 600px) {
             .funnel-card { flex: 1 1 100px; }
@@ -353,6 +377,13 @@
                 </div>
             </div>
 
+            <!-- Universe scope toggle -->
+            <div class="universe-toggle-area">
+                <button id="btn-watchlist-universe" class="btn-universe-toggle" onclick="toggleWatchlistUniverse()">
+                    S&amp;P 500 / NASDAQ 100 only
+                </button>
+            </div>
+
             <!-- Scan buttons + status -->
             <div class="scan-controls">
                 <button id="btn-scan" class="btn-scan" onclick="startScan()">Run Scan</button>
@@ -405,22 +436,31 @@
                 <div class="badge blue">Dynamic Watchlist</div>
             </div>
 
-            <div class="table-headers">
-                <div class="th-sortable" onclick="sortStocks('symbol')">Symbol ↕</div>
-                <div class="th-sortable" onclick="sortStocks('name')">Name ↕</div>
-                <div class="th-label">1M</div>
-                <div class="th-sortable" onclick="sortStocks('price')">Price ↕</div>
-                <div class="th-sortable" onclick="sortStocks('sector')">Sector ↕</div>
-                <div class="th-sortable" onclick="sortStocks('pct_1d')">1D % ↕</div>
-                <div class="th-sortable" onclick="sortStocks('pct_1w')">1W % ↕</div>
-                <div class="th-sortable" onclick="sortStocks('pct_1m')">1M % ↕</div>
-                <div class="th-sortable" onclick="sortStocks('pe')">P/E ↕</div>
-                <div class="th-sortable" onclick="sortStocks('beta')">Beta ↕</div>
-                <div class="th-sortable" onclick="sortStocks('atm_iv_rv20')">IV/RV20 ↕</div>
-                <div class="th-sortable" onclick="sortStocks('iv_percentile')">IV Pct ↕</div>
-            </div>
+            <div class="stocks-scroll-wrapper">
+                <div class="table-headers">
+                    <div class="th-sortable" onclick="sortStocks('symbol')">Symbol ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('name')">Name ↕</div>
+                    <div class="th-label">1M</div>
+                    <div class="th-sortable" onclick="sortStocks('price')">Price ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('sector')">Sector ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1d')">1D % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1w')">1W % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pct_1m')">1M % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('pe')">P/E ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('forward_pe')">Fwd P/E ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('beta')">Beta ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('atm_iv_rv20')">IV/RV20 ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('iv_percentile')">IV Pct ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('fcf')">FCF ($B) ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('debt_to_equity')">D/E ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('revenue')">Rev ($B) ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('revenue_growth')">Rev Gr % ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('eps')">EPS ↕</div>
+                    <div class="th-sortable" onclick="sortStocks('eps_growth')">EPS Gr % ↕</div>
+                </div>
 
-            <div id="stocks-list" class="data-list loading">Loading stock data...</div>
+                <div id="stocks-list" class="data-list loading">Loading stock data...</div>
+            </div>
         </section>
 
         <!-- ── CSP Candidates ── -->
@@ -441,6 +481,7 @@
                 <div class="th-sortable" onclick="sortCsp('roc_percent')">ROC % ↕</div>
                 <div class="th-sortable" onclick="sortCsp('annualized_roc')">Ann. Yield ↕</div>
                 <div class="th-sortable" onclick="sortCsp('otm_percent')">% OTM ↕</div>
+                <div class="th-sortable" onclick="sortCsp('delta')">Delta ↕</div>
                 <div class="th-sortable" onclick="sortCsp('spread_pct')">Spread % ↕</div>
                 <div class="th-sortable" onclick="sortCsp('impliedVolatility')">IV % ↕</div>
                 <div class="th-sortable" onclick="sortCsp('volume')">Volume ↕</div>

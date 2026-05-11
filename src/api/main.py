@@ -1,43 +1,62 @@
 """FastAPI backend — market-hours-aware Redis cache for all screener endpoints."""
 
+import asyncio
 import json
 import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager, closing
-from typing import Dict, Any
+from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+import httpx
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import asyncio
-import httpx
 
+from ..backtester.data_provider import get_historical_data
+from ..backtester.engine import run_backtest
+from ..backtester.models import BacktestRequest, WalkForwardRequest
+from ..backtester.walk_forward import run_walk_forward
+from ..cache import (
+    KEY_MARKET_OVERVIEW,
+    KEY_MARKET_POSTURE,
+    KEY_SCREENER_CSP,
+    KEY_SCREENER_CSP_SCAN,
+    KEY_SCREENER_LEAPS,
+    KEY_SCREENER_STOCKS,
+    cache_delete,
+    cache_get,
+    cache_set,
+    invalidate_market_posture,
+    invalidate_screener_cache,
+    market_is_open,
+    market_status_label,
+    scanner_ttl,
+    screener_ttl,
+)
 from ..config import settings
 from ..db import (
-    get_watchlist, update_watchlist,
-    get_csp_settings, update_csp_settings,
-    get_stock_watchlist, update_stock_watchlist,
-    get_insider_cache, get_congressional_cache, get_signal_history,
-    save_strategy, get_strategies, get_strategy, delete_strategy,
+    delete_strategy,
+    get_congressional_cache,
+    get_csp_settings,
+    get_insider_cache,
+    get_signal_history,
+    get_stock_watchlist,
+    get_strategies,
+    get_watchlist,
+    save_strategy,
+    update_csp_settings,
+    update_stock_watchlist,
+    update_watchlist,
 )
-from ..backtester.models import BacktestRequest, WalkForwardRequest, StrategyDefinition
-from ..backtester.engine import run_backtest
-from ..backtester.walk_forward import run_walk_forward
-from ..backtester.data_provider import get_historical_data
-from ..cache import (
-    cache_get, cache_set, cache_delete, screener_ttl, scanner_ttl,
-    invalidate_screener_cache, invalidate_market_posture,
-    market_status_label, market_is_open,
-    KEY_SCREENER_CSP, KEY_SCREENER_LEAPS, KEY_SCREENER_STOCKS,
-    KEY_SCREENER_CSP_SCAN, KEY_MARKET_POSTURE,
-)
+from ..fetchers.market_overview import fetch_market_overview
+from ..main import run_pipeline
+from ..market_data.refresh import refresh_universe
+from ..market_data.store import ensure_tables as ensure_market_data_tables
+from ..market_data.store import get_store_status
+from ..screener.csp_scanner import AVAILABLE_CONDITIONS, ScannerParams, run_csp_scan
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
-from ..screener.csp_scanner import run_csp_scan, ScannerParams, AVAILABLE_CONDITIONS
-from ..market_data.store import get_store_status, ensure_tables as ensure_market_data_tables
-from ..market_data.refresh import refresh_universe
-from ..main import run_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +113,8 @@ class WatchlistUpdate(BaseModel):
 class CspSettingsUpdate(BaseModel):
     min_dte: int
     max_dte: int
-    min_otm_pct: float
-    max_otm_pct: float
+    min_delta: float = 0.15
+    max_delta: float = 0.40
     min_roc: float
     max_spread_pct: float
     # Technical filter fields (optional so old clients don't break)
@@ -114,10 +133,15 @@ class CspSettingsUpdate(BaseModel):
 
 # ── Cache metadata helper ─────────────────────────────────────────────────────
 
-def _cache_meta(envelope: dict | None) -> dict:
-    """Extract cache metadata from a Redis envelope for inclusion in API responses."""
+def _cache_meta(envelope: dict | None, cached_at: str | None = None) -> dict:
+    """Extract cache metadata from a Redis envelope for inclusion in API responses.
+
+    Args:
+        envelope: Redis cache envelope, or None for cache miss.
+        cached_at: ISO timestamp to use for cache miss (defaults to None).
+    """
     if envelope is None:
-        return {"cached": False, "cached_at": None, "market_status": market_status_label()}
+        return {"cached": False, "cached_at": cached_at, "market_status": market_status_label()}
     return {
         "cached": True,
         "cached_at": envelope.get("cached_at"),
@@ -265,12 +289,39 @@ async def get_market_posture():
         # key via invalidate_market_posture() after each successful run.
         await cache_set(KEY_MARKET_POSTURE, data, ttl=86400)
 
-        data.update(_cache_meta(None))
+        now_iso = datetime.now(timezone.utc).isoformat()
+        data.update(_cache_meta(None, cached_at=now_iso))
         return data
 
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Market Overview ───────────────────────────────────────────────────────────
+
+@app.get("/api/market-overview")
+async def market_overview_endpoint():
+    """Return live market overview: sectors, VIX, GEX, and breadth.
+
+    Cached in Redis with a market-hours-aware TTL (same as screener endpoints).
+    """
+    envelope = await cache_get(KEY_MARKET_OVERVIEW)
+    if envelope is not None:
+        payload = envelope["data"]
+        payload.update(_cache_meta(envelope))
+        return payload
+
+    try:
+        data = await fetch_market_overview()
+        ttl = screener_ttl()
+        await cache_set(KEY_MARKET_OVERVIEW, data, ttl=ttl)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        data.update(_cache_meta(None, cached_at=now_iso))
+        return data
+    except Exception as e:
+        logger.exception("Market overview fetch failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -287,7 +338,8 @@ async def get_csp_candidates():
         candidates = await asyncio.to_thread(screen_csp_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
-        return {"candidates": candidates, **_cache_meta(None)}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("CSP screener failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -314,8 +366,14 @@ async def get_csp_scan_candidates(
     min_dte:    int   | None = None,
     max_dte:    int   | None = None,
     conditions: str   | None = None,
+    min_fcf_b:           float | None = Query(default=0.0),
+    max_debt_to_equity:  float | None = Query(default=2.0),
+    min_revenue_growth:  float | None = Query(default=-0.10),
+    min_earnings_growth: float | None = Query(default=None),
+    min_dividend_yield:  float | None = Query(default=None),
+    restrict_to_watchlist_universe: bool = False,
 ):
-    """Run the broad-universe CSP scanner (S&P 500 + NASDAQ 100).
+    """Run the broad-universe CSP scanner (S&P 500, NASDAQ 100, and NASDAQ large-cap ≥$2B).
 
     All parameters are optional and default to the scanner defaults when omitted.
     Different parameter combinations produce independent cache entries so prior
@@ -332,6 +390,7 @@ async def get_csp_scan_candidates(
     min_adx    : minimum ADX(14) threshold (default 15)
     max_adx    : maximum ADX(14) threshold (default 50)
     conditions : comma-separated list of technical condition IDs to apply
+    restrict_to_watchlist_universe : if true, limit to S&P 500 + NASDAQ 100 tickers only (default false)
 
     Cache TTL: 23 hours regardless of market status (EOD snapshot design).
     Zero-universe results are never cached.
@@ -349,6 +408,12 @@ async def get_csp_scan_candidates(
         min_dte=min_dte,
         max_dte=max_dte,
         conditions=conditions,
+        min_fcf_b=min_fcf_b,
+        max_debt_to_equity=max_debt_to_equity,
+        min_revenue_growth=min_revenue_growth,
+        min_earnings_growth=min_earnings_growth,
+        min_dividend_yield=min_dividend_yield,
+        restrict_to_watchlist_universe=restrict_to_watchlist_universe,
     )
     # Each unique param combination gets its own cache key
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
@@ -371,7 +436,8 @@ async def get_csp_scan_candidates(
                 "Params: %s", params
             )
 
-        result.update(_cache_meta(None))
+        now_iso = datetime.now(timezone.utc).isoformat()
+        result.update(_cache_meta(None, cached_at=now_iso))
         return result
     except Exception as e:
         logger.exception("CSP scan failed")
@@ -391,6 +457,12 @@ async def invalidate_csp_scan_cache(
     min_dte:    int   | None = None,
     max_dte:    int   | None = None,
     conditions: str   | None = None,
+    min_fcf_b:           float | None = Query(default=0.0),
+    max_debt_to_equity:  float | None = Query(default=2.0),
+    min_revenue_growth:  float | None = Query(default=-0.10),
+    min_earnings_growth: float | None = Query(default=None),
+    min_dividend_yield:  float | None = Query(default=None),
+    restrict_to_watchlist_universe: bool = False,
 ):
     """Bust the cache for a specific param combination (or the default set)."""
     params = ScannerParams.from_query(
@@ -400,6 +472,12 @@ async def invalidate_csp_scan_cache(
         min_adx=min_adx, max_adx=max_adx,
         min_dte=min_dte, max_dte=max_dte,
         conditions=conditions,
+        min_fcf_b=min_fcf_b,
+        max_debt_to_equity=max_debt_to_equity,
+        min_revenue_growth=min_revenue_growth,
+        min_earnings_growth=min_earnings_growth,
+        min_dividend_yield=min_dividend_yield,
+        restrict_to_watchlist_universe=restrict_to_watchlist_universe,
     )
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
     await cache_delete(cache_key)
@@ -419,7 +497,8 @@ async def get_leaps_candidates():
         candidates = await asyncio.to_thread(screen_leaps_candidates)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
-        return {"candidates": candidates, **_cache_meta(None)}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("LEAPS screener failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -445,7 +524,8 @@ async def get_stock_candidates(tickers: str | None = None):
             candidates = await asyncio.to_thread(screen_stocks, ticker_list)
             ttl = screener_ttl()
             await cache_set(cache_key, candidates, ttl=ttl)
-            return {"candidates": candidates, **_cache_meta(None)}
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
         except Exception as e:
             logger.exception("Stock screener (dynamic tickers) failed")
             raise HTTPException(status_code=500, detail=str(e))
@@ -458,7 +538,8 @@ async def get_stock_candidates(tickers: str | None = None):
         candidates = await asyncio.to_thread(screen_stocks)
         ttl = screener_ttl()
         await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
-        return {"candidates": candidates, **_cache_meta(None)}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
     except Exception as e:
         logger.exception("Stock screener failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -550,7 +631,7 @@ async def cache_status():
 
     Useful for debugging cache behavior from the command line or in dev tools.
     """
-    from ..cache import get_redis, market_is_open, seconds_until_next_open
+    from ..cache import get_redis, seconds_until_next_open
     client = get_redis()
     keys = [KEY_SCREENER_CSP, KEY_SCREENER_LEAPS, KEY_SCREENER_STOCKS, KEY_MARKET_POSTURE]
     result = {
@@ -587,7 +668,7 @@ async def api_run_backtest(req: BacktestRequest):
         )
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No data found for {req.ticker}")
-            
+
         result = await asyncio.to_thread(run_backtest, req, df)
         return result.model_dump()
     except HTTPException:
@@ -609,7 +690,7 @@ async def api_run_walk_forward(req: WalkForwardRequest):
         )
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No data found for {req.ticker}")
-            
+
         result = await asyncio.to_thread(run_walk_forward, req, df)
         return result.model_dump()
     except HTTPException:

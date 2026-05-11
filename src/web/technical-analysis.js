@@ -289,7 +289,7 @@ async function renderCandidates(source) {
                 ${metricCell("IV/RV20", formatMetric(stockMetrics.atm_iv_rv20))}
                 ${metricCell("IV PCT", formatPercent(stockMetrics.iv_percentile))}
                 ${metricCell("P/E", formatMetric(stockMetrics.pe))}
-                ${metricCell("P/FCF", formatMetric(candidate.p_free_cash_flow))}
+                ${metricCell("FCF", formatFcf(candidate.fcf))}
             </div>
             <div class="ta-summary-grid">
                 ${metricCell("Stock", formatMoney(candidate.current_price))}
@@ -405,6 +405,11 @@ function formatInteger(value) {
 
 function formatPlain(value) {
     return Number.isFinite(value) ? String(value) : "—";
+}
+
+function formatFcf(value) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+    return value >= 0 ? `$${value.toFixed(1)}B` : `-$${Math.abs(value).toFixed(1)}B`;
 }
 
 function formatMetric(value) {

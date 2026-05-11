@@ -7,6 +7,7 @@ module reads settings.db_path, so we patch it to a temp file).
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 from datetime import datetime
 from unittest.mock import patch
@@ -212,6 +213,52 @@ class TestStoreStatus:
         assert status["fundamentals_count"] >= 1
 
 
+# ── New fundamental columns ───────────────────────────────────────────────────
+
+class TestFundamentalsNewColumns:
+    def test_new_columns_upsert_and_read(self):
+        ensure_tables()
+        rows = [{
+            "symbol": "NEWCOL",
+            "market_cap_b": 50.0,
+            "price": 100.0,
+            "beta": 1.0,
+            "iv_pct": 25.0,
+            "fcf": 5.0,
+            "debt_to_equity": 0.8,
+            "revenue_growth": 0.12,
+            "earnings_growth": 0.08,
+            "dividend_yield": 0.015,
+        }]
+        count = bulk_upsert_fundamentals(rows)
+        assert count == 1
+
+        result = get_fundamentals_for_tickers(["NEWCOL"])
+        assert len(result) == 1
+        r = result[0]
+        assert r["fcf"] == pytest.approx(5.0)
+        assert r["debt_to_equity"] == pytest.approx(0.8)
+        assert r["revenue_growth"] == pytest.approx(0.12)
+        assert r["earnings_growth"] == pytest.approx(0.08)
+        assert r["dividend_yield"] == pytest.approx(0.015)
+
+    def test_new_columns_default_to_none_when_omitted(self):
+        ensure_tables()
+        rows = [{"symbol": "OLDSTYLE", "market_cap_b": 10.0, "price": 50.0, "beta": 1.0, "iv_pct": None}]
+        bulk_upsert_fundamentals(rows)
+
+        result = get_fundamentals_for_tickers(["OLDSTYLE"])
+        assert len(result) == 1
+        r = result[0]
+        assert r["fcf"] is None
+        assert r["debt_to_equity"] is None
+        assert r["revenue_growth"] is None
+
+    def test_ensure_tables_is_idempotent_with_migration(self):
+        ensure_tables()
+        ensure_tables()
+
+
 # ── Universe tickers ──────────────────────────────────────────────────────────
 
 class TestUniverseTickers:
@@ -226,3 +273,37 @@ class TestUniverseTickers:
         aaa_idx = tickers.index("AAA_TICKER")
         zzz_idx = tickers.index("ZZZ_TICKER")
         assert aaa_idx < zzz_idx
+
+
+# ── Universes column ──────────────────────────────────────────────────────────
+
+class TestUniversesColumn:
+    def test_universes_column_exists(self):
+        """ensure_tables() must add the universes column to universe_fundamentals."""
+        ensure_tables()
+        conn = sqlite3.connect(_tmp_db_path)
+        try:
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(universe_fundamentals)").fetchall()]
+            assert "universes" in cols
+        finally:
+            conn.close()
+
+    def test_bulk_upsert_fundamentals_stores_universes(self):
+        ensure_tables()
+        rows = [{"symbol": "ZVZZT", "market_cap_b": 5.0, "price": 50.0, "beta": 1.0,
+                 "iv_pct": None, "universes": "sp500,nasdaq_large"}]
+        n = bulk_upsert_fundamentals(rows)
+        assert n == 1
+        result = get_all_fundamentals()
+        match = next((r for r in result if r["symbol"] == "ZVZZT"), None)
+        assert match is not None
+        assert match["universes"] == "sp500,nasdaq_large"
+
+    def test_bulk_upsert_fundamentals_defaults_empty_universes(self):
+        ensure_tables()
+        rows = [{"symbol": "ZVZZT2", "market_cap_b": 3.0, "price": 30.0, "beta": 0.9, "iv_pct": None}]
+        bulk_upsert_fundamentals(rows)
+        result = get_all_fundamentals()
+        match = next((r for r in result if r["symbol"] == "ZVZZT2"), None)
+        assert match is not None
+        assert match["universes"] == ""

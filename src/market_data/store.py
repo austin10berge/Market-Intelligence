@@ -3,7 +3,9 @@
 Tables
 ------
   universe_daily_ohlcv   — (symbol, date, open, high, low, close, volume)
-  universe_fundamentals  — (symbol, market_cap_b, price, beta, iv_pct, updated_at)
+  universe_fundamentals  — (symbol, market_cap_b, price, beta, iv_pct,
+                            fcf, debt_to_equity, revenue_growth, earnings_growth,
+                            dividend_yield, forward_pe, universes, updated_at)
 
 All writes use INSERT … ON CONFLICT … DO UPDATE so they are safe to call
 repeatedly without creating duplicates.
@@ -41,12 +43,19 @@ CREATE INDEX IF NOT EXISTS idx_ohlcv_symbol ON universe_daily_ohlcv(symbol);
 CREATE INDEX IF NOT EXISTS idx_ohlcv_date   ON universe_daily_ohlcv(date);
 
 CREATE TABLE IF NOT EXISTS universe_fundamentals (
-    symbol       TEXT PRIMARY KEY,
-    market_cap_b REAL,
-    price        REAL,
-    beta         REAL,
-    iv_pct       REAL,
-    updated_at   TEXT NOT NULL
+    symbol          TEXT PRIMARY KEY,
+    market_cap_b    REAL,
+    price           REAL,
+    beta            REAL,
+    iv_pct          REAL,
+    fcf             REAL,
+    debt_to_equity  REAL,
+    revenue_growth  REAL,
+    earnings_growth REAL,
+    dividend_yield  REAL,
+    forward_pe      REAL,
+    universes       TEXT NOT NULL DEFAULT '',
+    updated_at      TEXT NOT NULL
 );
 """
 
@@ -60,11 +69,28 @@ def _get_connection() -> sqlite3.Connection:
     return conn
 
 
+_NEW_FUNDAMENTAL_COLUMNS = [
+    "fcf REAL",
+    "debt_to_equity REAL",
+    "revenue_growth REAL",
+    "earnings_growth REAL",
+    "dividend_yield REAL",
+    "forward_pe REAL",
+    "universes TEXT NOT NULL DEFAULT ''",
+]
+
+
 def ensure_tables() -> None:
     """Create the OHLCV and fundamentals tables if they don't exist."""
     conn = _get_connection()
     try:
         conn.executescript(_DDL)
+        for col_def in _NEW_FUNDAMENTAL_COLUMNS:
+            try:
+                conn.execute(f"ALTER TABLE universe_fundamentals ADD COLUMN {col_def}")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.commit()
         logger.info("Market data tables ensured")
     finally:
@@ -143,7 +169,7 @@ def bulk_upsert_ohlcv_multi(data: dict[str, pd.DataFrame]) -> int:
                         float(row["Close"]),
                         int(row["Volume"]),
                     ))
-                except (ValueError, KeyError):
+                except (ValueError, KeyError, TypeError):
                     continue
 
         conn.executemany(
@@ -267,7 +293,8 @@ def get_ohlcv_batch(symbols: list[str], lookback_days: int = 504) -> dict[str, p
 def bulk_upsert_fundamentals(rows: list[dict]) -> int:
     """Upsert fundamental data rows.
 
-    Each row dict should have: symbol, market_cap_b, price, beta, iv_pct.
+    Each row dict should have: symbol, market_cap_b, price, beta, iv_pct,
+    and optionally: fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield, forward_pe, universes.
     Returns the number of rows upserted.
     """
     if not rows:
@@ -283,20 +310,37 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
                 r.get("price"),
                 r.get("beta"),
                 r.get("iv_pct"),
+                r.get("fcf"),
+                r.get("debt_to_equity"),
+                r.get("revenue_growth"),
+                r.get("earnings_growth"),
+                r.get("dividend_yield"),
+                r.get("forward_pe"),
+                r.get("universes", ""),
                 now,
             )
             for r in rows
         ]
         conn.executemany(
             """
-            INSERT INTO universe_fundamentals (symbol, market_cap_b, price, beta, iv_pct, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO universe_fundamentals
+                (symbol, market_cap_b, price, beta, iv_pct,
+                 fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
+                 forward_pe, universes, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol) DO UPDATE SET
-                market_cap_b = excluded.market_cap_b,
-                price        = excluded.price,
-                beta         = excluded.beta,
-                iv_pct       = excluded.iv_pct,
-                updated_at   = excluded.updated_at
+                market_cap_b    = excluded.market_cap_b,
+                price           = excluded.price,
+                beta            = excluded.beta,
+                iv_pct          = excluded.iv_pct,
+                fcf             = excluded.fcf,
+                debt_to_equity  = excluded.debt_to_equity,
+                revenue_growth  = excluded.revenue_growth,
+                earnings_growth = excluded.earnings_growth,
+                dividend_yield  = excluded.dividend_yield,
+                forward_pe      = excluded.forward_pe,
+                universes       = excluded.universes,
+                updated_at      = excluded.updated_at
             """,
             params,
         )
@@ -313,7 +357,10 @@ def get_all_fundamentals() -> list[dict]:
     conn = _get_connection()
     try:
         rows = conn.execute(
-            "SELECT symbol, market_cap_b, price, beta, iv_pct, updated_at FROM universe_fundamentals"
+            """SELECT symbol, market_cap_b, price, beta, iv_pct,
+                      fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
+                      forward_pe, universes, updated_at
+               FROM universe_fundamentals"""
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -328,8 +375,10 @@ def get_fundamentals_for_tickers(tickers: list[str]) -> list[dict]:
     try:
         placeholders = ",".join("?" for _ in tickers)
         rows = conn.execute(
-            f"SELECT symbol, market_cap_b, price, beta, iv_pct, updated_at "
-            f"FROM universe_fundamentals WHERE symbol IN ({placeholders})",
+            f"""SELECT symbol, market_cap_b, price, beta, iv_pct,
+                       fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
+                       forward_pe, universes, updated_at
+                FROM universe_fundamentals WHERE symbol IN ({placeholders})""",
             tickers,
         ).fetchall()
         return [dict(r) for r in rows]
@@ -404,5 +453,28 @@ def get_universe_tickers() -> list[str]:
             "SELECT DISTINCT symbol FROM universe_daily_ohlcv ORDER BY symbol"
         ).fetchall()
         return [r["symbol"] for r in rows]
+    finally:
+        conn.close()
+
+
+def prune_stale_fundamentals(current_universe: list[str]) -> int:
+    """Delete fundamentals rows for tickers no longer in the current universe.
+
+    Without this, removed tickers accumulate as zombie rows whose stale
+    updated_at timestamps cause MIN(updated_at) to always appear old.
+
+    Returns the number of rows deleted.
+    """
+    if not current_universe:
+        return 0
+    conn = _get_connection()
+    try:
+        placeholders = ",".join("?" * len(current_universe))
+        cursor = conn.execute(
+            f"DELETE FROM universe_fundamentals WHERE symbol NOT IN ({placeholders})",
+            current_universe,
+        )
+        conn.commit()
+        return cursor.rowcount
     finally:
         conn.close()
