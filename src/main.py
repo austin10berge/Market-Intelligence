@@ -20,6 +20,7 @@ from .fetchers.vix import VixFetcher
 from .fetchers.insider_trading import InsiderTradingFetcher
 from .fetchers.congressional_trades import CongressionalTradesFetcher
 from .fetchers.unusual_volume import UnusualVolumeFetcher
+from .fetchers.analyst_ratings import AnalystRatingsFetcher
 from .models import ScoredSignal, Signal
 from .notify.home_assistant import send_ha_notification
 from .notify.ntfy import send_ntfy
@@ -63,6 +64,7 @@ FETCHERS = [
     InsiderTradingFetcher(),
     CongressionalTradesFetcher(),
     UnusualVolumeFetcher(),
+    AnalystRatingsFetcher(),
 ]
 
 
@@ -163,6 +165,7 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
             convergence_alerts=convergence_alerts,
             watchlist_stocks=watchlist_stocks,
             csp_candidates=csp_candidates,
+            scored_signals=scored_signals,
         )
 
         digest_text = await synthesize(system_prompt, user_prompt)

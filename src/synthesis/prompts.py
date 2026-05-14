@@ -26,7 +26,7 @@ USER_PROMPT_TEMPLATE = """Generate an evening market digest analysis for {date}.
 Composite Score: {composite_score} (range: -1.0 bearish to +1.0 bullish)
 Overall Posture: {posture}
 Signals at extremes: {extreme_count}
-{convergence_section}{watchlist_section}{csp_section}
+{convergence_section}{analyst_section}{watchlist_section}{csp_section}
 === FORMAT ===
 Use this exact structure (do NOT restate the raw signals):
 
@@ -113,6 +113,51 @@ def format_csp_candidates_for_prompt(candidates: list[dict], top_n: int = 5) -> 
     return "\n=== TOP CSP CANDIDATES ===\n" + "\n".join(lines) + "\n"
 
 
+def format_analyst_section(scored_signals: list) -> str:
+    """Format per-ticker analyst upgrades/downgrades for the LLM prompt."""
+    analyst = next(
+        (s for s in scored_signals if s.signal.source.value == "analyst_ratings"), None
+    )
+    if not analyst:
+        return ""
+
+    meta = analyst.signal.metadata
+    upgrades = meta.get("upgrade_tickers", {})
+    downgrades = meta.get("downgrade_tickers", {})
+    consensus = meta.get("consensus_by_ticker", {})
+
+    if not upgrades and not downgrades and not consensus:
+        return ""
+
+    lines = []
+
+    for sym, changes in sorted(upgrades.items()):
+        for ch in changes[:2]:  # cap at 2 actions per ticker to avoid verbosity
+            line = f"  ↑ {sym}: {ch['firm']} upgraded"
+            if ch.get("from") and ch.get("to"):
+                line += f" {ch['from']} → {ch['to']}"
+            lines.append(line)
+
+    for sym, changes in sorted(downgrades.items()):
+        for ch in changes[:2]:
+            line = f"  ↓ {sym}: {ch['firm']} downgraded"
+            if ch.get("from") and ch.get("to"):
+                line += f" {ch['from']} → {ch['to']}"
+            lines.append(line)
+
+    for sym, c in sorted(consensus.items()):
+        if sym not in upgrades and sym not in downgrades:
+            lines.append(
+                f"  ~ {sym}: consensus {c['buy_pct']}% buy / {c['sell_pct']}% sell "
+                f"({c['total']} analysts)"
+            )
+
+    if not lines:
+        return ""
+
+    return "\n=== ANALYST RATING CHANGES (30d, watchlist) ===\n" + "\n".join(lines) + "\n"
+
+
 def build_synthesis_prompt(
     date_str: str,
     signal_summaries: list[str],
@@ -122,6 +167,7 @@ def build_synthesis_prompt(
     convergence_alerts: list[str] | None = None,
     watchlist_stocks: list[dict] | None = None,
     csp_candidates: list[dict] | None = None,
+    scored_signals: list | None = None,
 ) -> tuple[str, str]:
     """Build the system + user prompt pair for LLM synthesis.
 
@@ -138,6 +184,7 @@ def build_synthesis_prompt(
     else:
         convergence_section = ""
 
+    analyst_section = format_analyst_section(scored_signals or [])
     watchlist_section = format_watchlist_for_prompt(watchlist_stocks or [])
     csp_section = format_csp_candidates_for_prompt(csp_candidates or [])
 
@@ -148,6 +195,7 @@ def build_synthesis_prompt(
         posture=posture,
         extreme_count=extreme_count,
         convergence_section=convergence_section,
+        analyst_section=analyst_section,
         watchlist_section=watchlist_section,
         csp_section=csp_section,
     )

@@ -467,6 +467,43 @@ def set_congressional_cache(data: dict) -> None:
         conn.close()
 
 
+def get_analyst_cache(max_age_hours: int = 12) -> dict | None:
+    """Return cached analyst ratings data if it exists and is fresh enough."""
+    conn = _get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_config WHERE key = 'cache_analyst_ratings'"
+        ).fetchone()
+        if not row:
+            return None
+        cached = json.loads(row["value"])
+        cached_at = datetime.fromisoformat(cached.get("cached_at", "2000-01-01"))
+        age_hours = (datetime.now() - cached_at).total_seconds() / 3600
+        if age_hours > max_age_hours:
+            return None
+        return cached
+    finally:
+        conn.close()
+
+
+def set_analyst_cache(data: dict) -> None:
+    """Store analyst ratings fetch results in the cache."""
+    conn = _get_connection()
+    try:
+        data["cached_at"] = datetime.now().isoformat()
+        conn.execute(
+            """
+            INSERT INTO app_config (key, value)
+            VALUES ('cache_analyst_ratings', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (json.dumps(data, default=_json_default),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def save_strategy(name: str, definition: dict) -> int:
     """Save or update a strategy definition."""
     conn = _get_connection()

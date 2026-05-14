@@ -430,6 +430,37 @@ def _score_unusual_volume(signal: Signal, context: dict) -> ScoredSignal:
         )
 
 
+def _score_analyst_ratings(signal: Signal, context: dict) -> ScoredSignal:
+    """Analyst ratings: net upgrades = bullish confirming signal, net downgrades = bearish."""
+    up_count = signal.metadata.get("upgrade_ticker_count", 0)
+    down_count = signal.metadata.get("downgrade_ticker_count", 0)
+    total_upgrades = signal.metadata.get("total_upgrades", 0)
+    total_downgrades = signal.metadata.get("total_downgrades", 0)
+    extreme = (up_count >= 3 and down_count == 0) or (down_count >= 3 and up_count == 0)
+
+    if total_upgrades == 0 and total_downgrades == 0:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
+            reasoning="Analyst Ratings: no rating changes on watchlist this period",
+        )
+
+    if up_count > down_count:
+        return ScoredSignal(
+            signal=signal, score=1, direction=SignalDirection.BULLISH, extreme=extreme,
+            reasoning=f"Analyst Ratings: upgrades on {up_count} ticker(s) vs downgrades on {down_count}",
+        )
+    elif down_count > up_count:
+        return ScoredSignal(
+            signal=signal, score=-1, direction=SignalDirection.BEARISH, extreme=extreme,
+            reasoning=f"Analyst Ratings: downgrades on {down_count} ticker(s) vs upgrades on {up_count}",
+        )
+    else:
+        return ScoredSignal(
+            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=extreme,
+            reasoning=f"Analyst Ratings: balanced — {up_count} upgrade ticker(s), {down_count} downgrade ticker(s)",
+        )
+
+
 # Registry of scoring functions
 _SCORERS = {
     SignalSource.FEAR_GREED: _score_fear_greed,
@@ -442,4 +473,5 @@ _SCORERS = {
     SignalSource.INSIDER_TRADING: _score_insider_trading,
     SignalSource.CONGRESSIONAL_TRADES: _score_congressional_trades,
     SignalSource.UNUSUAL_VOLUME: _score_unusual_volume,
+    SignalSource.ANALYST_RATINGS: _score_analyst_ratings,
 }
