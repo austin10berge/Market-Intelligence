@@ -831,14 +831,44 @@ async function triggerDataRefresh() {
 
     try {
         const res = await fetch(`${API_BASE}/market-data/refresh`, { method: 'POST' });
-        if (res.ok) {
-            if (warn) warn.innerHTML = '⏳ Data refresh started in the background. This takes ~2–3 minutes. Reload the page to check progress.';
-            if (text) text.textContent = 'Refreshing…';
-        } else {
+        if (!res.ok) {
             if (warn) warn.innerHTML = '❌ Refresh failed. Check server logs.';
+            return;
         }
     } catch (e) {
         console.error('Data refresh trigger failed:', e);
         if (warn) warn.innerHTML = '❌ Network error triggering refresh.';
+        return;
     }
+
+    if (text) text.textContent = 'Refreshing…';
+    const startTime = Date.now();
+    const maxWaitMs = 6 * 60 * 1000; // 6 minutes
+
+    const pollId = setInterval(async () => {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        if (Date.now() - startTime > maxWaitMs) {
+            clearInterval(pollId);
+            if (warn) warn.innerHTML = '⚠ Refresh is taking longer than expected. Run a Force Rescan when it finishes.';
+            return;
+        }
+
+        if (warn) warn.innerHTML = `⏳ Refreshing market data… ${elapsed}s elapsed`;
+
+        try {
+            const statusRes = await fetch(`${API_BASE}/market-data/status`);
+            if (!statusRes.ok) return;
+            const status = await statusRes.json();
+
+            if (!status.is_stale) {
+                clearInterval(pollId);
+                await loadDataFreshness();
+                // Data is fresh — clear scan cache and re-run scan automatically
+                await forceRescan();
+            }
+        } catch (e) {
+            // Keep polling; transient errors shouldn't abort the wait
+        }
+    }, 20000);
 }

@@ -14,6 +14,7 @@ repeatedly without creating duplicates.
 from __future__ import annotations
 
 import logging
+import math
 import sqlite3
 from datetime import datetime, date, timezone
 from pathlib import Path
@@ -160,15 +161,18 @@ def bulk_upsert_ohlcv_multi(data: dict[str, pd.DataFrame]) -> int:
             for idx, row in df.iterrows():
                 dt = idx.date() if hasattr(idx, "date") else str(idx)[:10]
                 try:
-                    all_rows.append((
-                        symbol,
-                        str(dt),
+                    o, h, l, c, v = (
                         float(row["Open"]),
                         float(row["High"]),
                         float(row["Low"]),
                         float(row["Close"]),
                         int(row["Volume"]),
-                    ))
+                    )
+                    # yfinance returns NaN for missing sessions; sqlite3 converts
+                    # NaN to NULL which violates the NOT NULL constraint.
+                    if any(math.isnan(x) for x in (o, h, l, c)):
+                        continue
+                    all_rows.append((symbol, str(dt), o, h, l, c, v))
                 except (ValueError, KeyError, TypeError):
                     continue
 
@@ -420,7 +424,9 @@ def get_store_status() -> dict:
         latest_date = ohlcv_latest["latest"] if ohlcv_latest else None
         fund_updated_at = fund_updated["oldest"] if fund_updated else None
 
-        # Staleness check: >48 hours since the oldest fundamental was updated
+        # Staleness check: use count-based threshold (90% of fundamentals updated
+        # within 48h) rather than MIN(updated_at), so single-ticker yfinance
+        # failures don't keep the stale flag forever.
         is_stale = False
         stale_hours: float | None = None
         if fund_updated_at:
@@ -428,7 +434,15 @@ def get_store_status() -> dict:
                 updated_dt = datetime.fromisoformat(fund_updated_at.replace("Z", "+00:00"))
                 age_hours = (datetime.now(timezone.utc) - updated_dt).total_seconds() / 3600
                 stale_hours = round(age_hours, 1)
-                is_stale = age_hours > 48
+
+                total = fund_count["cnt"] if fund_count else 0
+                recent = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM universe_fundamentals"
+                    " WHERE updated_at > datetime('now', '-48 hours')"
+                ).fetchone()
+                recent_count = recent["cnt"] if recent else 0
+                fresh_ratio = recent_count / total if total > 0 else 0.0
+                is_stale = fresh_ratio < 0.90
             except Exception:
                 is_stale = True
 

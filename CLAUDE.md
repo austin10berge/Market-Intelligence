@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Environments
+
+- **Dev** (this machine): https://dev-mi.austin10berge.com — always use this URL when testing or checking API/dashboard status
+- **Prod**: https://market.austin10berge.com — separate host (10.0.1.21), do not target unless explicitly asked
+
 ## Environment
 
 - **Python**: 3.12 (installed in `.venv`)
@@ -52,6 +57,25 @@ docker compose run --rm market-data-refresh python3 -m src.market_data.refresh -
 # Cache pre-warm (runs at 9:25 AM ET via cron)
 docker compose run --rm prewarm
 ```
+
+## Worktree → Dev Dashboard Testing
+
+Changes are developed in a git worktree under `.claude/worktrees/<id>/`. The live dashboard runs from the main folder (`/home/dev/workspace/Market-Intelligence`). To test worktree changes against the real stack without copying files:
+
+`docker-compose.local.yml` contains a `x-worktree-src` YAML anchor that bind-mounts the worktree's `src/` into the `pipeline` and `api` containers at `/app/src`, shadowing the COPYed image layer. **Update that path when switching worktrees.**
+
+```bash
+# One-time image build (only needed when pyproject.toml changes)
+docker compose -f docker-compose.yml -f docker-compose.local.yml build pipeline api
+
+# Trigger a pipeline run using worktree source
+docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm pipeline
+
+# Restart the API to pick up code changes (no rebuild)
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-build api
+```
+
+After the pipeline run, the dashboard's AI summary and `/api/market-posture` will reflect the new digest. Pure Python changes need no rebuild — only pyproject.toml dependency changes require `build`.
 
 ## Architecture
 
