@@ -56,62 +56,73 @@ def check_convergence(scored_signals: list) -> list[str]:
     return alerts
 
 def _score_fear_greed(signal: Signal, context: dict) -> ScoredSignal:
-    """Fear & Greed: <25 bearish, >75 bullish (contrarian at extremes)."""
+    """Fear & Greed: continuous linear score centred at 50 (neutral).
+
+    Score formula: (value - 50) / 25 → +1.0 at F&G=75, -1.0 at F&G=25.
+    High F&G (greed) is bullish for CSP sellers; low F&G (fear) is bearish.
+    """
     score_val = signal.value
     extreme = score_val < 20 or score_val > 80
 
-    if score_val <= 25:
-        # Extreme fear is contrarian bullish for theta sellers
-        return ScoredSignal(
-            signal=signal,
-            score=-1,
-            direction=SignalDirection.BEARISH,
-            extreme=extreme,
-            reasoning=f"F&G at {score_val} — fear zone, market stressed",
-        )
-    elif score_val >= 75:
-        return ScoredSignal(
-            signal=signal,
-            score=1,
-            direction=SignalDirection.BULLISH,
-            extreme=extreme,
-            reasoning=f"F&G at {score_val} — greed zone, watch for reversal",
-        )
+    NEUTRAL = 50.0
+    NORM_SPAN = 25.0
+    raw = (score_val - NEUTRAL) / NORM_SPAN
+    score = round(max(-1.0, min(1.0, raw)), 3)
+
+    THRESHOLD = 0.15
+    if score > THRESHOLD:
+        direction = SignalDirection.BULLISH
+        desc = "greed zone" if score_val >= 75 else "greed bias"
+    elif score < -THRESHOLD:
+        direction = SignalDirection.BEARISH
+        desc = "fear zone" if score_val <= 25 else "fear bias"
     else:
-        return ScoredSignal(
-            signal=signal,
-            score=0,
-            direction=SignalDirection.NEUTRAL,
-            extreme=False,
-            reasoning=f"F&G at {score_val} — neutral range",
-        )
+        direction = SignalDirection.NEUTRAL
+        desc = "neutral"
+
+    return ScoredSignal(
+        signal=signal,
+        score=score,
+        direction=direction,
+        extreme=extreme,
+        reasoning=f"F&G at {score_val} — {desc} → score {score:+.3f}",
+    )
 
 
 def _score_vix(signal: Signal, context: dict) -> ScoredSignal:
-    """VIX: <15 bullish (complacent), >25 bearish (stress), backwardation amplifies."""
+    """VIX: continuous linear score centred at 20 (neutral midpoint).
+
+    Score formula: (20 - vix) / 5 → +1.0 at VIX=15, -1.0 at VIX=25.
+    Backwardation applies a -0.5 floor (overrides bullish readings).
+    """
     vix = signal.value
     structure = signal.metadata.get("term_structure", "Unknown")
     extreme = vix < 12 or vix > 30
 
-    # Base score from VIX level
-    if vix <= 15:
-        score, direction = 1, SignalDirection.BULLISH
-        reasoning = f"VIX {vix} — low vol, calm market"
-    elif vix >= 25:
-        score, direction = -1, SignalDirection.BEARISH
-        reasoning = f"VIX {vix} — elevated vol, stress"
-    else:
-        score, direction = 0, SignalDirection.NEUTRAL
-        reasoning = f"VIX {vix} — moderate"
+    NEUTRAL_VIX = 20.0
+    NORM_SPAN = 5.0
+    raw = (NEUTRAL_VIX - vix) / NORM_SPAN
+    raw = max(-1.0, min(1.0, raw))
 
-    # Backwardation is an additional stress signal
     if structure == "Backwardation":
-        if score >= 0:
-            score = -1
-            direction = SignalDirection.BEARISH
-        reasoning += " | Backwardation — near-term stress exceeds long-term"
+        raw = min(raw, -0.5)
+        structure_note = " | Backwardation — near-term stress exceeds long-term"
     elif structure == "Contango":
-        reasoning += " | Contango — normal/calm term structure"
+        structure_note = " | Contango — normal/calm term structure"
+    else:
+        structure_note = ""
+
+    score = round(raw, 3)
+
+    THRESHOLD = 0.15
+    if score > THRESHOLD:
+        direction = SignalDirection.BULLISH
+    elif score < -THRESHOLD:
+        direction = SignalDirection.BEARISH
+    else:
+        direction = SignalDirection.NEUTRAL
+
+    reasoning = f"VIX {vix} → score {score:+.3f}{structure_note}"
 
     return ScoredSignal(
         signal=signal,
@@ -236,35 +247,38 @@ def _score_put_call(signal: Signal, context: dict) -> ScoredSignal:
 
 
 def _score_sector_etf(signal: Signal, context: dict) -> ScoredSignal:
-    """Sector rotation: defensive leading = bearish, cyclical leading = bullish."""
-    rotation = signal.metadata.get("rotation", "Neutral rotation")
+    """Sector rotation: continuous score based on rotation_spread magnitude.
+
+    rotation_spread = defensive_avg - cyclical_avg (from fetcher).
+    Positive spread → defensives leading → risk-off → bearish (negative score).
+    Negative spread → cyclicals leading → risk-on → bullish (positive score).
+    Score formula: -rotation_spread / 1.5, clipped to [-1, +1].
+    """
     rotation_spread = signal.metadata.get("rotation_spread", 0.0)
     extreme = abs(rotation_spread) > 1.5
 
-    if "Risk-off" in rotation:
-        return ScoredSignal(
-            signal=signal,
-            score=-1,
-            direction=SignalDirection.BEARISH,
-            extreme=extreme,
-            reasoning=f"Sector rotation: defensive leading by {rotation_spread:+.2f}%",
-        )
-    elif "Risk-on" in rotation:
-        return ScoredSignal(
-            signal=signal,
-            score=1,
-            direction=SignalDirection.BULLISH,
-            extreme=extreme,
-            reasoning=f"Sector rotation: cyclical leading by {abs(rotation_spread):.2f}%",
-        )
+    NORM_SPAN = 1.5
+    raw = -rotation_spread / NORM_SPAN
+    score = round(max(-1.0, min(1.0, raw)), 3)
+
+    THRESHOLD = 0.15
+    if score > THRESHOLD:
+        direction = SignalDirection.BULLISH
+        desc = f"cyclical leading ({-rotation_spread:+.2f}%)"
+    elif score < -THRESHOLD:
+        direction = SignalDirection.BEARISH
+        desc = f"defensive leading ({rotation_spread:+.2f}%)"
     else:
-        return ScoredSignal(
-            signal=signal,
-            score=0,
-            direction=SignalDirection.NEUTRAL,
-            extreme=False,
-            reasoning="Sector rotation: neutral, no clear tilt",
-        )
+        direction = SignalDirection.NEUTRAL
+        desc = f"neutral rotation ({rotation_spread:+.2f}%)"
+
+    return ScoredSignal(
+        signal=signal,
+        score=score,
+        direction=direction,
+        extreme=extreme,
+        reasoning=f"Sector rotation: {desc} → score {score:+.3f}",
+    )
 
 
 def _score_gex(signal: Signal, context: dict) -> ScoredSignal:
@@ -330,7 +344,14 @@ def _score_liquidity(signal: Signal, context: dict) -> ScoredSignal:
 
 
 def _score_insider_trading(signal: Signal, context: dict) -> ScoredSignal:
-    """Insider trading: net open-market buys = bullish, net sells = bearish."""
+    """Insider trading: scaled by ticker count, asymmetric buy/sell weighting.
+
+    Buys reach max signal at 2+ tickers (execs buy for one reason: conviction).
+    Sells reach max signal at 4+ tickers (execs sell for many reasons; dampened).
+    net = buy_count - sell_count:
+        positive → score = min(+1.0, net / 2.0)
+        negative → score = max(-1.0, net / 4.0)
+    """
     buy_count = signal.metadata.get("buy_ticker_count", 0)
     sell_count = signal.metadata.get("sell_ticker_count", 0)
     total_buys = signal.metadata.get("total_buys", 0)
@@ -343,21 +364,28 @@ def _score_insider_trading(signal: Signal, context: dict) -> ScoredSignal:
             reasoning="Insider Trading: no open-market activity this week",
         )
 
-    if buy_count > sell_count:
-        return ScoredSignal(
-            signal=signal, score=1, direction=SignalDirection.BULLISH, extreme=extreme,
-            reasoning=f"Insider Trading: exec buying in {buy_count} ticker(s) vs selling in {sell_count}",
-        )
-    elif sell_count > buy_count:
-        return ScoredSignal(
-            signal=signal, score=-1, direction=SignalDirection.BEARISH, extreme=extreme,
-            reasoning=f"Insider Trading: exec selling in {sell_count} ticker(s) vs buying in {buy_count}",
-        )
+    net = buy_count - sell_count
+    if net > 0:
+        raw = min(1.0, net / 2.0)
+    elif net < 0:
+        raw = max(-1.0, net / 4.0)
     else:
-        return ScoredSignal(
-            signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
-            reasoning=f"Insider Trading: balanced — {buy_count} buy ticker(s), {sell_count} sell ticker(s)",
-        )
+        raw = 0.0
+
+    score = round(raw, 3)
+
+    THRESHOLD = 0.15
+    if score > THRESHOLD:
+        direction = SignalDirection.BULLISH
+    elif score < -THRESHOLD:
+        direction = SignalDirection.BEARISH
+    else:
+        direction = SignalDirection.NEUTRAL
+
+    return ScoredSignal(
+        signal=signal, score=score, direction=direction, extreme=extreme,
+        reasoning=f"Insider Trading: {buy_count} buy ticker(s), {sell_count} sell ticker(s) → score {score:+.3f}",
+    )
 
 
 def _score_congressional_trades(signal: Signal, context: dict) -> ScoredSignal:

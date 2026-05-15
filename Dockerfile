@@ -18,6 +18,8 @@ RUN mkdir -p data
 
 # ── test target ──────────────────────────────────────────────────────────────
 FROM base AS test
+COPY pyproject.toml .
+RUN pip install --no-cache-dir ".[dev]"
 COPY tests/ tests/
 CMD ["python3", "-m", "pytest", "tests/", "-v", "--tb=short"]
 
