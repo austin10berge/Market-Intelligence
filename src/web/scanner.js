@@ -413,6 +413,21 @@ async function startScan() {
 async function forceRescan() {
     closeAllParamEdits();
     _disableButtons();
+
+    // Auto-refresh market data if it's more than 18 hours old
+    try {
+        const statusRes = await fetch(`${API_BASE}/market-data/status`);
+        if (statusRes.ok) {
+            const status = await statusRes.json();
+            if (status.stale_hours != null && status.stale_hours > 18) {
+                setStatus('running', `<span class="spinner"></span> Data is ${Math.round(status.stale_hours)}h old — refreshing before scan…`);
+                await _refreshMarketData();
+            }
+        }
+    } catch (e) {
+        // Network error checking status — proceed with scan anyway
+    }
+
     setStatus('running', '<span class="spinner"></span> Clearing cache…');
     try {
         await fetch(`${API_BASE}/screener/csp-scan?${_buildQueryString()}`, { method: 'DELETE' });
@@ -432,6 +447,39 @@ async function forceRescan() {
             if (finished) { clearInterval(_state.scanPollId); _state.scanPollId = null; }
         }, 6000);
     }
+}
+
+// Triggers a market data refresh and waits up to 6 minutes for it to complete.
+// Returns true if data became fresh, false on timeout or error.
+async function _refreshMarketData() {
+    try {
+        const res = await fetch(`${API_BASE}/market-data/refresh`, { method: 'POST' });
+        if (!res.ok) return false;
+    } catch (e) {
+        return false;
+    }
+
+    const startTime = Date.now();
+    const maxWaitMs = 6 * 60 * 1000;
+
+    while (Date.now() - startTime < maxWaitMs) {
+        await new Promise(r => setTimeout(r, 20000));
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        setStatus('running', `<span class="spinner"></span> Refreshing market data… ${elapsed}s elapsed`);
+        try {
+            const statusRes = await fetch(`${API_BASE}/market-data/status`);
+            if (statusRes.ok) {
+                const status = await statusRes.json();
+                if (!status.is_stale) {
+                    await loadDataFreshness();
+                    return true;
+                }
+            }
+        } catch (e) {
+            // transient error — keep polling
+        }
+    }
+    return false;
 }
 
 async function _fetchScan() {
@@ -825,50 +873,3 @@ async function loadDataFreshness() {
     }
 }
 
-async function triggerDataRefresh() {
-    const warn = document.getElementById('stale-warning');
-    const text = document.getElementById('data-freshness-text');
-
-    try {
-        const res = await fetch(`${API_BASE}/market-data/refresh`, { method: 'POST' });
-        if (!res.ok) {
-            if (warn) warn.innerHTML = '❌ Refresh failed. Check server logs.';
-            return;
-        }
-    } catch (e) {
-        console.error('Data refresh trigger failed:', e);
-        if (warn) warn.innerHTML = '❌ Network error triggering refresh.';
-        return;
-    }
-
-    if (text) text.textContent = 'Refreshing…';
-    const startTime = Date.now();
-    const maxWaitMs = 6 * 60 * 1000; // 6 minutes
-
-    const pollId = setInterval(async () => {
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
-
-        if (Date.now() - startTime > maxWaitMs) {
-            clearInterval(pollId);
-            if (warn) warn.innerHTML = '⚠ Refresh is taking longer than expected. Run a Force Rescan when it finishes.';
-            return;
-        }
-
-        if (warn) warn.innerHTML = `⏳ Refreshing market data… ${elapsed}s elapsed`;
-
-        try {
-            const statusRes = await fetch(`${API_BASE}/market-data/status`);
-            if (!statusRes.ok) return;
-            const status = await statusRes.json();
-
-            if (!status.is_stale) {
-                clearInterval(pollId);
-                await loadDataFreshness();
-                // Data is fresh — clear scan cache and re-run scan automatically
-                await forceRescan();
-            }
-        } catch (e) {
-            // Keep polling; transient errors shouldn't abort the wait
-        }
-    }, 20000);
-}
