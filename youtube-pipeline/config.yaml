@@ -1,0 +1,26 @@
+channels:
+  - name: "Fireship"
+    url: "https://www.youtube.com/@Fireship"
+  - name: "NetworkChuck"
+    url: "https://www.youtube.com/@NetworkChuck"
+
+pipeline:
+  # How far back to look on each run. Tracked-last-run wins when larger;
+  # this is the fallback floor and the cold-start window.
+  lookback_hours: 26
+
+  # Skip Shorts and other micro-content below this duration.
+  min_duration_seconds: 120
+
+  # Hard cap on transcript size sent to Claude. 400k chars ≈ 100k tokens —
+  # well under the 200k context window, with room for prompt + response.
+  max_transcript_chars: 400000
+
+  # Per-video timeout for the `claude -p` subprocess.
+  claude_timeout_seconds: 180
+
+  # Sleep between successive `claude -p` calls to stay clear of Pro rate limits.
+  inter_call_sleep_seconds: 3
+
+  # How many videos to scan per channel (yt-dlp --playlist-end).
+  channel_scan_depth: 15
