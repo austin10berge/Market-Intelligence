@@ -149,6 +149,10 @@ class OptionsConfig(BaseModel):
     position: OptionPosition = OptionPosition.LONG
     target_dte: int = 30
     target_delta: float = 0.50
+    # Multi-leg: when True alongside (type=call, position=short), the engine
+    # opens a paired long-stock position (100 shares per contract) as the
+    # "covered" side of a covered call. Both legs share a campaign_id.
+    paired_stock: bool = False
 
 
 class PyramidingConfig(BaseModel):
@@ -274,6 +278,46 @@ class WalkForwardFold(BaseModel):
     is_stats: dict[str, Any]
     oos_stats: dict[str, Any]
     regime: str
+
+
+class SweepSpec(BaseModel):
+    """One axis of a parameter sweep.
+
+    `param` is a dotted path into the strategy dict. Examples:
+      * "exit.stop_loss_pct"
+      * "exit.take_profit_pct"
+      * "pyramiding.pullback_pct"
+      * "pyramiding.max_positions"
+      * "options.target_dte"
+      * "options.target_delta"
+      * "position_sizing.value"
+    """
+    param: str
+    values: list[float]
+
+
+class ParameterSweepRequest(BaseModel):
+    """Run the same backtest N times with one strategy parameter varied."""
+    base: BacktestRequest
+    sweep: SweepSpec
+
+
+class SweepPoint(BaseModel):
+    param_value: float
+    stats: dict[str, Any]
+    trade_count: int
+    final_equity: float
+    total_return_pct: float | None = None
+    sharpe_ratio: float | None = None
+    max_drawdown_pct: float | None = None
+
+
+class ParameterSweepResult(BaseModel):
+    param: str
+    points: list[SweepPoint]
+    ticker: str
+    start_date: str
+    end_date: str
 
 
 class WalkForwardResult(BaseModel):

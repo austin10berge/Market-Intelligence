@@ -78,6 +78,9 @@ class EngineState:
     equity_curve: list[dict] = field(default_factory=list)
     next_campaign_id: int = 1
     current_campaign_id: int = 0
+    # IV lookup map for the underlying. Empty when the strategy is stock-only
+    # or no historical IV is available — engine falls back to scaled RV20.
+    iv_map: dict = field(default_factory=dict)
 
 
 def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
@@ -95,7 +98,7 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
         df["returns"] = df["Close"].pct_change()
         df["rv20"] = df["returns"].rolling(20).std() * math.sqrt(252)
 
-    iv_map = build_iv_lookup(request.ticker) if strategy.options.enabled else {}
+    state.iv_map = build_iv_lookup(request.ticker) if strategy.options.enabled else {}
 
     for i in range(len(df)):
         bar_timestamp: pd.Timestamp = df.index[i]
@@ -119,7 +122,6 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
             request=request,
             entry_tree=entry_tree,
             pyr=pyr,
-            iv_map=iv_map,
         )
 
         _record_equity(state, bar_date, close, df, i, request)
@@ -178,13 +180,14 @@ def _check_and_close_exits(
     for pos in state.positions:
         if pos.is_option:
             rem_dte = _calendar_dte_remaining(pos, bar_timestamp)
+            iv_now = _current_iv(pos, df, i, state)
             # The high/low of the option mark depends on direction of underlying move
             if pos.option_type == "call":
-                opt_high = _bs_price(high, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
-                opt_low = _bs_price(low, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+                opt_high = _bs_price(high, pos.option_strike, rem_dte, iv_now, pos.option_type)
+                opt_low = _bs_price(low, pos.option_strike, rem_dte, iv_now, pos.option_type)
             else:
-                opt_high = _bs_price(low, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
-                opt_low = _bs_price(high, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+                opt_high = _bs_price(low, pos.option_strike, rem_dte, iv_now, pos.option_type)
+                opt_low = _bs_price(high, pos.option_strike, rem_dte, iv_now, pos.option_type)
             pos_high, pos_low = opt_high, opt_low
         else:
             pos_high, pos_low = high, low
@@ -230,7 +233,7 @@ def _check_and_close_exits(
         for pos in list(state.positions):
             if pos.campaign_id not in triggered_campaigns:
                 continue
-            if _position_pnl(pos, close, bar_timestamp) > 0:
+            if _position_pnl(pos, close, bar_timestamp, df, i, state) > 0:
                 _close_position(state, pos, df, i, close, "sibling_profit_take", request)
 
 
@@ -246,12 +249,14 @@ def _maybe_open_position(
     request: BacktestRequest,
     entry_tree: dict,
     pyr,
-    iv_map: dict,
 ) -> None:
-    strategy = request.strategy
+    # Scale-in counts each tranche as one entry. For a covered call (two legs),
+    # we treat each pair as one tranche by counting unique campaign-positions
+    # per leg-pair (we open both legs in the same call below).
+    n_open_tranches = len(_distinct_tranches(state.positions))
 
     if state.positions:
-        if not pyr.enabled or len(state.positions) >= pyr.max_positions:
+        if not pyr.enabled or n_open_tranches >= pyr.max_positions:
             return
 
         # We're considering a scale-in. Compute the pullback test first.
@@ -269,7 +274,6 @@ def _maybe_open_position(
         elif pyr.trigger_mode == PyramidingTriggerMode.BOTH:
             if not (pullback_ok and signal_ok):
                 return
-        # New tranche joins the existing campaign
         campaign_id = state.current_campaign_id
     else:
         if not _safe_evaluate(entry_tree, df, i):
@@ -278,7 +282,26 @@ def _maybe_open_position(
         state.next_campaign_id += 1
         state.current_campaign_id = campaign_id
 
-    _open_position(state, i, bar_timestamp, close, df, request, iv_map, campaign_id)
+    _open_position(state, i, bar_timestamp, close, df, request, campaign_id)
+
+
+def _distinct_tranches(positions: list[OpenPosition]) -> list[OpenPosition]:
+    """Collapse paired legs (e.g. covered-call stock+option) into one tranche.
+
+    Otherwise a covered-call campaign of 3 tranches would look like 6 positions
+    and trip the pyramiding `max_positions` guard at the wrong place.
+    """
+    seen_keys = set()
+    out = []
+    for p in positions:
+        # Identify a tranche by (campaign_id, entry_bar_idx). Both legs of a
+        # paired open share both.
+        key = (p.campaign_id, p.entry_bar_idx)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        out.append(p)
+    return out
 
 
 def _open_position(
@@ -288,7 +311,37 @@ def _open_position(
     price: float,
     df: pd.DataFrame,
     request: BacktestRequest,
-    iv_map: dict,
+    campaign_id: int,
+) -> None:
+    """Open one tranche.
+
+    For a covered call (options.paired_stock=True with a short call), this
+    opens BOTH the long-stock leg and the short-call leg in a single tranche,
+    linked by (campaign_id, entry_bar_idx). The two legs are treated as one
+    unit by `_distinct_tranches`, the pyramiding counter, and the campaign
+    rollup.
+    """
+    opt_conf = request.strategy.options
+    is_covered_call = (
+        opt_conf.enabled
+        and opt_conf.paired_stock
+        and opt_conf.type == "call"
+        and opt_conf.position == OptionPosition.SHORT
+    )
+
+    if is_covered_call:
+        _open_covered_call(state, bar_idx, bar_timestamp, price, df, request, campaign_id)
+    else:
+        _open_single_leg(state, bar_idx, bar_timestamp, price, df, request, campaign_id)
+
+
+def _open_single_leg(
+    state: EngineState,
+    bar_idx: int,
+    bar_timestamp: pd.Timestamp,
+    price: float,
+    df: pd.DataFrame,
+    request: BacktestRequest,
     campaign_id: int,
 ) -> None:
     sizing = request.strategy.position_sizing
@@ -296,13 +349,13 @@ def _open_position(
     bar_date = bar_timestamp.strftime("%Y-%m-%d")
 
     equity = _calc_equity(state, price, df, bar_idx, request)
+    strike = None
+    iv = None
 
     if opt_conf.enabled:
         rv20 = float(df["rv20"].iloc[bar_idx]) if "rv20" in df.columns else None
-        iv = lookup_iv(iv_map, bar_timestamp.date(), rv20)
+        iv = lookup_iv(state.iv_map, bar_timestamp.date(), rv20)
 
-        # Compute strike for the target delta from the BUYER'S perspective,
-        # then we'll mark/credit appropriately depending on long vs short.
         target_delta = opt_conf.target_delta
         if opt_conf.type == "put":
             target_delta = -target_delta
@@ -320,7 +373,6 @@ def _open_position(
             return
         cost_per_contract = premium_per_share * 100
     else:
-        # Stock: include slippage on the buy
         premium_per_share = price * (1 + request.slippage_pct / 100.0)
         cost_per_contract = premium_per_share
 
@@ -339,7 +391,6 @@ def _open_position(
     notional = shares * cost_per_contract
 
     if is_short_option:
-        # Collect premium minus commission. No buying-power model — assumes margin.
         state.cash += notional - request.commission
     else:
         if notional + request.commission > state.cash:
@@ -369,6 +420,106 @@ def _open_position(
     state.positions.append(pos)
 
 
+def _open_covered_call(
+    state: EngineState,
+    bar_idx: int,
+    bar_timestamp: pd.Timestamp,
+    price: float,
+    df: pd.DataFrame,
+    request: BacktestRequest,
+    campaign_id: int,
+) -> None:
+    """Open a long-stock leg + a short-call leg sharing one tranche.
+
+    Sizing applies to the STOCK leg. We then write 1 short call per 100 shares
+    purchased — if the user's sizing doesn't yield a multiple of 100, the
+    excess shares ride uncovered (still in the stock leg).
+    """
+    sizing = request.strategy.position_sizing
+    opt_conf = request.strategy.options
+    bar_date = bar_timestamp.strftime("%Y-%m-%d")
+
+    equity = _calc_equity(state, price, df, bar_idx, request)
+
+    # Size the stock leg using the configured sizing method
+    stock_fill = price * (1 + request.slippage_pct / 100.0)
+    stock_shares = _calculate_shares(
+        sizing_method=sizing.method,
+        sizing_value=sizing.value,
+        risk_pct=sizing.risk_pct,
+        equity=equity,
+        fill_price=stock_fill,
+        stop_loss_pct=request.strategy.exit.stop_loss_pct,
+    )
+    if stock_shares < 100:
+        # Need at least one round lot to cover a call
+        return
+
+    stock_cost = stock_shares * stock_fill + request.commission
+    if stock_cost > state.cash:
+        affordable = math.floor((state.cash - request.commission) / stock_fill)
+        # Snap down to the nearest round lot so we can still cover
+        stock_shares = (affordable // 100) * 100
+        if stock_shares < 100:
+            return
+        stock_cost = stock_shares * stock_fill + request.commission
+
+    state.cash -= stock_cost
+
+    stock_leg = OpenPosition(
+        entry_date=bar_date,
+        entry_timestamp=bar_timestamp,
+        entry_price=stock_fill,
+        entry_underlying_price=price,
+        shares=stock_shares,
+        entry_bar_idx=bar_idx,
+        campaign_id=campaign_id,
+        highest_underlying_since_entry=float(df["High"].iloc[bar_idx]),
+        is_option=False,
+    )
+    state.positions.append(stock_leg)
+
+    # Write N short calls where N = floor(stock_shares / 100)
+    contracts = stock_shares // 100
+    if contracts <= 0:
+        return
+
+    rv20 = float(df["rv20"].iloc[bar_idx]) if "rv20" in df.columns else None
+    iv = lookup_iv(state.iv_map, bar_timestamp.date(), rv20)
+    strike = get_strike_for_delta(
+        price,
+        opt_conf.target_delta,
+        max(opt_conf.target_dte / 365.0, 0.001),
+        RISK_FREE_RATE,
+        iv,
+        "call",
+    )
+    premium_per_share = _bs_price(price, strike, opt_conf.target_dte, iv, "call")
+    if premium_per_share <= 0:
+        return
+
+    # Credit premium minus commission
+    state.cash += contracts * premium_per_share * 100 - request.commission
+
+    call_leg = OpenPosition(
+        entry_date=bar_date,
+        entry_timestamp=bar_timestamp,
+        entry_price=premium_per_share,
+        entry_underlying_price=price,
+        shares=float(contracts),
+        entry_bar_idx=bar_idx,
+        campaign_id=campaign_id,
+        highest_underlying_since_entry=float(df["High"].iloc[bar_idx]),
+        is_option=True,
+        option_type="call",
+        option_position=OptionPosition.SHORT.value,
+        option_strike=strike,
+        option_dte_entry=float(opt_conf.target_dte),
+        option_iv_entry=iv,
+    )
+    state.positions.append(call_leg)
+
+
 def _close_position(
     state: EngineState,
     pos: OpenPosition,
@@ -382,7 +533,8 @@ def _close_position(
 
     if pos.is_option:
         rem_dte = _calendar_dte_remaining(pos, bar_timestamp)
-        mark = _bs_price(price, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+        iv_now = _current_iv(pos, df, bar_idx, state)
+        mark = _bs_price(price, pos.option_strike, rem_dte, iv_now, pos.option_type)
         fill_price = _apply_option_exit_limits(pos, reason, mark, request)
     else:
         fill_price = _apply_stock_exit_limits(pos, reason, price, request)
@@ -541,6 +693,32 @@ def _bs_price(spot: float, strike: float, dte_calendar_days: float, iv: float, o
     return black_scholes_price(spot, strike, max(dte_calendar_days / 365.0, 0.001), RISK_FREE_RATE, iv, opt_type)
 
 
+def _current_iv(pos: OpenPosition, df: pd.DataFrame, bar_idx: int, state: EngineState) -> float:
+    """Resolve the IV to mark a position at `bar_idx`.
+
+    Previously the engine used `pos.option_iv_entry` for the option's whole
+    life — no IV crush, no vega risk. Now we re-look up IV on each bar from
+    the stock_iv_history table (or scaled-RV20 fallback). If both are missing,
+    we keep the entry IV so the mark doesn't go to zero.
+    """
+    if not pos.is_option:
+        return 0.0
+    bar_date = df.index[bar_idx].date()
+    rv20 = None
+    if "rv20" in df.columns:
+        v = df["rv20"].iloc[bar_idx]
+        if not pd.isna(v):
+            rv20 = float(v)
+    iv = lookup_iv(state.iv_map, bar_date, rv20)
+    if iv <= 0:
+        return pos.option_iv_entry or IV_FLOOR_FALLBACK
+    return iv
+
+
+# Used only if both stored IV and RV20 are missing for the marking bar
+IV_FLOOR_FALLBACK = 0.20
+
+
 def _calendar_dte_remaining(pos: OpenPosition, bar_timestamp: pd.Timestamp) -> float:
     """Days remaining until the option expires, in CALENDAR days.
 
@@ -553,11 +731,13 @@ def _calendar_dte_remaining(pos: OpenPosition, bar_timestamp: pd.Timestamp) -> f
     return max(pos.option_dte_entry - elapsed, 0)
 
 
-def _position_pnl(pos: OpenPosition, current_underlying: float, bar_timestamp: pd.Timestamp) -> float:
+def _position_pnl(pos: OpenPosition, current_underlying: float, bar_timestamp: pd.Timestamp,
+                  df: pd.DataFrame, bar_idx: int, state: EngineState) -> float:
     """Mark-to-market P&L of a single position in dollars."""
     if pos.is_option:
         rem_dte = _calendar_dte_remaining(pos, bar_timestamp)
-        mark = _bs_price(current_underlying, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+        iv_now = _current_iv(pos, df, bar_idx, state)
+        mark = _bs_price(current_underlying, pos.option_strike, rem_dte, iv_now, pos.option_type)
         if pos.option_position == OptionPosition.SHORT.value:
             return (pos.entry_price - mark) * pos.shares * 100
         return (mark - pos.entry_price) * pos.shares * 100
@@ -584,14 +764,17 @@ def _calc_equity(state: EngineState, current_price: float, df: pd.DataFrame, bar
 
     Short options are special: the premium was already credited to cash at entry,
     so the open-position mark is `-(current_mark * contracts * 100)` (we still
-    owe that close-out cost).
+    owe that close-out cost). Option marks use the IV at the marking bar
+    (via `_current_iv`), not the entry IV — so a vol spike makes shorts hurt
+    and longs benefit, even on flat underlying.
     """
     bar_timestamp = df.index[bar_idx]
     equity = state.cash
     for pos in state.positions:
         if pos.is_option:
             rem_dte = _calendar_dte_remaining(pos, bar_timestamp)
-            mark = _bs_price(current_price, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+            iv_now = _current_iv(pos, df, bar_idx, state)
+            mark = _bs_price(current_price, pos.option_strike, rem_dte, iv_now, pos.option_type)
             if pos.option_position == OptionPosition.SHORT.value:
                 equity -= pos.shares * mark * 100
             else:

@@ -397,6 +397,112 @@ def test_snap_strike_uses_realistic_grid():
     assert snap_strike(442.3, 442.3) == 440.0          # $5 grid above $200
 
 
+def test_iv_remarking_changes_short_option_mark_when_iv_rises(monkeypatch):
+    """A short option marked with a higher IV on a later bar should be worth
+    MORE to close (premium rose) — i.e., the short loses money even on flat
+    underlying. Previously IV was frozen at entry and this couldn't happen.
+    """
+    from src.backtester import engine as eng_mod
+    from src.backtester import iv_provider as iv_mod
+
+    # Build a flat-underlying df so the only thing changing the mark is IV.
+    closes = [100.0] * 30
+    df = _make_df(closes, start="2024-06-03")
+
+    # Synthesize an IV map: 0.20 for first 10 bars, then 0.60 (3× vol spike).
+    iv_by_date = {}
+    for i, ts in enumerate(df.index):
+        iv_by_date[ts.date()] = 0.20 if i < 10 else 0.60
+
+    monkeypatch.setattr(eng_mod, "build_iv_lookup", lambda ticker: iv_by_date)
+
+    strategy = StrategyDefinition(
+        name="iv",
+        entry=_always_true_entry(),
+        exit=ExitStrategy(max_hold_days=20),  # force a hold past the IV spike
+        position_sizing=PositionSizing(method=PositionSizingMethod.FIXED_SHARES, value=1),
+        options=OptionsConfig(enabled=True, type=OptionType.CALL, position=OptionPosition.SHORT,
+                              target_dte=60, target_delta=0.5),
+    )
+    req = BacktestRequest(strategy=strategy, ticker="TEST", initial_capital=10_000)
+    res = run_backtest(req, df)
+
+    t = res.trades[0]
+    assert t.option_position == "short"
+    # IV tripled mid-trade → mark goes up → buying back costs more → loss.
+    assert t.pnl < 0, f"short call with mid-life IV spike should lose, got pnl={t.pnl}"
+    # And the entry IV record should reflect the low pre-spike vol
+    assert t.option_iv_entry == pytest.approx(0.20, abs=0.02)
+
+
+def test_covered_call_opens_stock_and_short_call_in_one_tranche():
+    closes = [100.0] * 10
+    df = _make_df(closes)
+    strategy = StrategyDefinition(
+        name="cc",
+        entry=_always_true_entry(),
+        exit=ExitStrategy(max_hold_days=5),
+        position_sizing=PositionSizing(method=PositionSizingMethod.FIXED_DOLLAR, value=20000),
+        options=OptionsConfig(
+            enabled=True,
+            type=OptionType.CALL,
+            position=OptionPosition.SHORT,
+            paired_stock=True,
+            target_dte=30,
+            target_delta=0.30,
+        ),
+    )
+    req = BacktestRequest(strategy=strategy, ticker="TEST", initial_capital=30_000)
+    res = run_backtest(req, df)
+    # Two trades per cycle (stock + call) and they share campaign_id.
+    by_camp: dict[int, list] = {}
+    for t in res.trades:
+        by_camp.setdefault(t.campaign_id, []).append(t)
+    # At least one campaign with both a stock leg and a short-call leg
+    stock_call_pairs = [
+        legs for legs in by_camp.values()
+        if any(not t.is_option for t in legs) and any(t.is_option and t.option_position == "short" for t in legs)
+    ]
+    assert len(stock_call_pairs) >= 1, "expected at least one stock+short-call campaign"
+
+    legs = stock_call_pairs[0]
+    stock = next(t for t in legs if not t.is_option)
+    call = next(t for t in legs if t.is_option)
+    # Stock side bought ~200 shares for $20k @ $100 spot (with tiny slippage at 0)
+    assert stock.shares >= 100
+    # One call written per 100 shares
+    assert call.shares == stock.shares // 100
+    assert call.option_type == "call"
+    assert call.option_position == "short"
+
+
+def test_parameter_sweep_varies_stop_loss():
+    from src.backtester.models import ParameterSweepRequest, SweepSpec
+    from src.backtester.sweep import run_parameter_sweep
+
+    # Synthetic price path where the strategy's outcome depends on stop tightness
+    closes = [100, 99, 97, 94, 92, 95, 98, 100, 103, 106, 110]
+    df = _make_df(closes)
+    base_strategy = StrategyDefinition(
+        name="sweep",
+        entry=_always_true_entry(),
+        exit=ExitStrategy(stop_loss_pct=5.0, take_profit_pct=10.0),
+        position_sizing=PositionSizing(method=PositionSizingMethod.FIXED_SHARES, value=10),
+    )
+    base_req = BacktestRequest(strategy=base_strategy, ticker="TEST", initial_capital=10_000)
+
+    sweep_req = ParameterSweepRequest(
+        base=base_req,
+        sweep=SweepSpec(param="exit.stop_loss_pct", values=[2.0, 5.0, 10.0, 20.0]),
+    )
+    result = run_parameter_sweep(sweep_req, df)
+    assert result.param == "exit.stop_loss_pct"
+    assert len(result.points) == 4
+    # The returns shouldn't all be identical — different stops produce different outcomes
+    returns = [p.total_return_pct for p in result.points if p.total_return_pct is not None]
+    assert len(set(returns)) > 1, f"expected variation across sweep points, got {returns}"
+
+
 def test_indicator_cache_avoids_recomputation():
     """Two conditions referencing the same RSI(14) should compute the series once.
 

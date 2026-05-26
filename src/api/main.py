@@ -15,7 +15,8 @@ from pydantic import BaseModel
 
 from ..backtester.data_provider import get_historical_data
 from ..backtester.engine import run_backtest
-from ..backtester.models import BacktestRequest, WalkForwardRequest
+from ..backtester.models import BacktestRequest, ParameterSweepRequest, WalkForwardRequest
+from ..backtester.sweep import run_parameter_sweep
 from ..backtester.walk_forward import run_walk_forward
 from ..cache import (
     KEY_MARKET_OVERVIEW,
@@ -675,6 +676,34 @@ async def api_run_backtest(req: BacktestRequest):
         raise
     except Exception as e:
         logger.exception("Backtest run failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/backtest/sweep")
+async def api_run_parameter_sweep(req: ParameterSweepRequest):
+    """Run a single-parameter sensitivity sweep.
+
+    The same OHLCV history is shared across all N runs, so cost scales mostly
+    linearly with sweep size. Keep the value list reasonable (≤ 20 points).
+    """
+    try:
+        df = await asyncio.to_thread(
+            get_historical_data,
+            symbol=req.base.ticker,
+            start_date=req.base.start_date,
+            end_date=req.base.end_date,
+            timeframe=req.base.timeframe,
+        )
+        if df.empty:
+            raise HTTPException(status_code=404, detail=f"No data found for {req.base.ticker}")
+        result = await asyncio.to_thread(run_parameter_sweep, req, df)
+        return result.model_dump()
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Parameter sweep failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 

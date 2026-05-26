@@ -384,6 +384,11 @@
                             <span class="asset-title">Short Call</span>
                             <span class="asset-sub">Collect premium, bearish</span>
                         </label>
+                        <label class="asset-radio" data-asset="covered_call">
+                            <input type="radio" name="asset" value="covered_call">
+                            <span class="asset-title">Covered Call</span>
+                            <span class="asset-sub">Stock + sold call (100:1)</span>
+                        </label>
                     </div>
 
                     <div id="options-fields" style="display: none; margin-top: 1.25rem;">
@@ -570,6 +575,7 @@
                     <button class="tab-btn active" data-results-tab="summary">Summary</button>
                     <button class="tab-btn" data-results-tab="position">Position Chart</button>
                     <button class="tab-btn" data-results-tab="trades">Trades</button>
+                    <button class="tab-btn" data-results-tab="sweep">Param Sweep</button>
                     <button class="tab-btn" data-results-tab="walkforward">Walk-Forward</button>
                 </nav>
 
@@ -581,6 +587,10 @@
                             <div class="badge green" id="results-period">YYYY - YYYY</div>
                         </div>
                         <div class="stats-grid" id="stats-container"></div>
+                        <div id="exit-reasons-card" style="display: none;">
+                            <h3 style="margin-bottom: 0.75rem;">Exit Reasons</h3>
+                            <div id="exit-reasons-bars" style="margin-bottom: 1.5rem;"></div>
+                        </div>
                         <h3>Equity Curve</h3>
                         <div id="equity-chart" class="chart-container"></div>
                     </div>
@@ -616,6 +626,60 @@
                                 </thead>
                                 <tbody></tbody>
                             </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Parameter sweep -->
+                <section class="results-tabpanel" data-results-panel="sweep">
+                    <div class="wf-trigger-card">
+                        <div class="wf-blurb">
+                            <strong>Parameter sweep</strong> re-runs the strategy N times, changing one number each pass. Tells you how brittle the result is: is the edge real across a range of stop-losses, or did one specific value happen to work?
+                        </div>
+                    </div>
+                    <div class="panel-section">
+                        <div class="grid-row" style="align-items: end;">
+                            <div class="field">
+                                <label>Parameter</label>
+                                <select id="sweep-param" class="settings-input">
+                                    <option value="exit.stop_loss_pct">Stop Loss %</option>
+                                    <option value="exit.take_profit_pct">Take Profit %</option>
+                                    <option value="exit.trailing_stop_pct">Trailing Stop %</option>
+                                    <option value="exit.max_hold_days">Max Hold (Bars)</option>
+                                    <option value="pyramiding.pullback_pct">Pullback %</option>
+                                    <option value="pyramiding.max_positions">Max Tranches</option>
+                                    <option value="options.target_dte">Target DTE</option>
+                                    <option value="options.target_delta">Target Delta</option>
+                                    <option value="position_sizing.value">Sizing Value</option>
+                                </select>
+                            </div>
+                            <div class="field" style="grid-column: span 2;">
+                                <label>Values (comma-separated)</label>
+                                <input type="text" id="sweep-values" class="settings-input" value="5, 10, 15, 20, 25">
+                                <div class="field-help">Each value triggers one full backtest. Keep ≤ 20 points.</div>
+                            </div>
+                            <button class="btn" onclick="runParameterSweep()" style="height: 38px;">Run Sweep →</button>
+                        </div>
+                    </div>
+                    <div id="sweep-results-content" style="display: none;">
+                        <div class="panel-section">
+                            <h3 style="margin-bottom: 1rem;">Total Return vs <span id="sweep-param-label"></span></h3>
+                            <div id="sweep-chart" class="chart-container" style="height: 320px;"></div>
+                            <div class="fold-table-wrapper">
+                                <table class="data-table" id="sweep-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Value</th>
+                                            <th>Return</th>
+                                            <th>Sharpe</th>
+                                            <th>Max DD</th>
+                                            <th>Trades</th>
+                                            <th>Final $</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </section>

@@ -18,11 +18,12 @@ let lastResult = null;
 let savedStrategiesById = {};
 
 const ASSET_PRESETS = {
-    stock:      { enabled: false, type: "call", position: "long"  },
-    long_call:  { enabled: true,  type: "call", position: "long"  },
-    long_put:   { enabled: true,  type: "put",  position: "long"  },
-    short_put:  { enabled: true,  type: "put",  position: "short" },
-    short_call: { enabled: true,  type: "call", position: "short" },
+    stock:        { enabled: false, type: "call", position: "long",  paired_stock: false },
+    long_call:    { enabled: true,  type: "call", position: "long",  paired_stock: false },
+    long_put:     { enabled: true,  type: "put",  position: "long",  paired_stock: false },
+    short_put:    { enabled: true,  type: "put",  position: "short", paired_stock: false },
+    short_call:   { enabled: true,  type: "call", position: "short", paired_stock: false },
+    covered_call: { enabled: true,  type: "call", position: "short", paired_stock: true  },
 };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
@@ -202,6 +203,7 @@ function updateStrategySummary() {
         long_put: "long puts",
         short_put: "short puts (CSP)",
         short_call: "short calls",
+        covered_call: "covered calls (stock + sold call)",
     }[asset];
     const pyrOn = document.getElementById("pyr-enabled")?.checked;
     const pyrMode = document.getElementById("pyr-trigger-mode")?.value;
@@ -481,6 +483,7 @@ function buildStrategyPayload() {
             enabled: optCfg.enabled,
             type: optCfg.type,
             position: optCfg.position,
+            paired_stock: !!optCfg.paired_stock,
             target_dte: parseInt(document.getElementById("option-dte").value) || 30,
             target_delta: parseFloat(document.getElementById("option-delta").value) || 0.50
         },
@@ -593,9 +596,69 @@ function renderStandardResults(data) {
     document.getElementById("results-period").innerText = `${data.start_date} → ${data.end_date}`;
 
     renderStats(data.stats, "stats-container");
+    renderExitReasons(data.stats?.exit_reasons || {}, data.trades || []);
     renderEquityCurve(data.equity_curve, data.benchmark_curve, "equity-chart");
     renderPositionChart(data, "position-chart");
     renderTradesTable(data.trades || []);
+}
+
+// ── Exit reason breakdown (small bar chart inline in Summary) ───────────────
+
+function renderExitReasons(exitReasonsCounts, trades) {
+    const card = document.getElementById("exit-reasons-card");
+    const container = document.getElementById("exit-reasons-bars");
+    if (!card || !container) return;
+    const total = trades.length;
+    if (total === 0) {
+        card.style.display = "none";
+        return;
+    }
+    card.style.display = "block";
+
+    // Compute average P&L per exit reason so we know if "stop loss" reasons
+    // were small papercuts or campaign-killers.
+    const pnlByReason = {};
+    trades.forEach(t => {
+        if (!pnlByReason[t.exit_reason]) pnlByReason[t.exit_reason] = [];
+        pnlByReason[t.exit_reason].push(t.pnl);
+    });
+
+    // Order by count, descending, with a stable color per reason
+    const palette = {
+        take_profit: "#22c55e",
+        stop_loss: "#ef4444",
+        trailing_stop: "#f97316",
+        expiration: "#a78bfa",
+        time: "#94a3b8",
+        signal: "#3b82f6",
+        end_of_data: "#64748b",
+        sibling_profit_take: "#10b981",
+    };
+    const fallback = "#60a5fa";
+
+    const rows = Object.entries(exitReasonsCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([reason, count]) => {
+            const pnls = pnlByReason[reason] || [];
+            const avgPnl = pnls.length ? pnls.reduce((s, p) => s + p, 0) / pnls.length : 0;
+            const pct = (count / total) * 100;
+            const color = palette[reason] || fallback;
+            const label = reason.replace(/_/g, " ");
+            return `
+                <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                    <div style="flex: 0 0 130px; font-size: 0.82rem; text-transform: capitalize;">${label}</div>
+                    <div style="flex: 1; background: rgba(255,255,255,0.05); height: 22px; border-radius: 4px; overflow: hidden;">
+                        <div style="width: ${pct.toFixed(1)}%; height: 100%; background: ${color};"></div>
+                    </div>
+                    <div style="flex: 0 0 60px; text-align: right; font-size: 0.82rem;">${count} (${pct.toFixed(0)}%)</div>
+                    <div style="flex: 0 0 110px; text-align: right; font-size: 0.82rem;" class="${avgPnl >= 0 ? "text-green" : "text-red"}">
+                        avg ${formatMoney(avgPnl)}
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+    container.innerHTML = rows;
 }
 
 function renderWalkForwardResults(data) {
@@ -870,6 +933,46 @@ function renderPositionChart(data, containerId) {
         avgSeries.setData(avgCostPoints);
     }
 
+    // Per-tranche strike and break-even segments for option trades.
+    // Each segment is a 2-point line series spanning entry→exit, colored
+    // gray for strike and yellow for break-even. For shorts the break-even
+    // is on the OTHER side of the strike than for longs.
+    const optionTrades = trades.filter(t => t.is_option && t.option_strike != null);
+    optionTrades.forEach(t => {
+        // Strike line
+        const strikeSeries = chart.addLineSeries({
+            color: "rgba(148, 163, 184, 0.55)",
+            lineWidth: 1,
+            lineStyle: 2,  // dashed
+            crosshairMarkerVisible: false,
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+        strikeSeries.setData([
+            { time: t.entry_date, value: t.option_strike },
+            { time: t.exit_date,  value: t.option_strike },
+        ]);
+
+        // Break-even line: for a call, BE = strike + premium per share.
+        // For a put, BE = strike - premium. Same formula for both long and
+        // short — break-even refers to where the underlying makes the trade
+        // P&L=0 at expiry, independent of who paid premium.
+        const sign = t.option_type === "call" ? 1 : -1;
+        const be = t.option_strike + sign * t.entry_price;
+        const beSeries = chart.addLineSeries({
+            color: "rgba(234, 179, 8, 0.55)",
+            lineWidth: 1,
+            lineStyle: 3,  // dotted
+            crosshairMarkerVisible: false,
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+        beSeries.setData([
+            { time: t.entry_date, value: be },
+            { time: t.exit_date,  value: be },
+        ]);
+    });
+
     chart.timeScale().fitContent();
 }
 
@@ -931,6 +1034,7 @@ async function deleteSelectedStrategy() {
 
 function inferAssetFromDef(opt) {
     if (!opt || !opt.enabled) return "stock";
+    if (opt.paired_stock && opt.type === "call" && opt.position === "short") return "covered_call";
     const isShort = opt.position === "short";
     if (opt.type === "call") return isShort ? "short_call" : "long_call";
     return isShort ? "short_put" : "long_put";
@@ -1051,6 +1155,113 @@ function applyConditionToRow(row, cond) {
         const refPeriod = row.querySelector(".target-period");
         if (refPeriod && cond.ref_indicator?.params?.period != null) refPeriod.value = cond.ref_indicator.params.period;
     }
+}
+
+// ── Parameter sweep ──────────────────────────────────────────────────────────
+
+const SWEEP_PARAM_LABELS = {
+    "exit.stop_loss_pct": "Stop Loss %",
+    "exit.take_profit_pct": "Take Profit %",
+    "exit.trailing_stop_pct": "Trailing Stop %",
+    "exit.max_hold_days": "Max Hold (Bars)",
+    "pyramiding.pullback_pct": "Pullback %",
+    "pyramiding.max_positions": "Max Tranches",
+    "options.target_dte": "Target DTE",
+    "options.target_delta": "Target Delta",
+    "position_sizing.value": "Sizing Value",
+};
+
+async function runParameterSweep() {
+    if (document.getElementById("entry-conditions-container").querySelectorAll(".condition-node").length === 0) {
+        alert("Add at least one entry condition before sweeping.");
+        return;
+    }
+    const param = document.getElementById("sweep-param").value;
+    const raw = document.getElementById("sweep-values").value.trim();
+    const values = raw.split(/[,\s]+/).map(v => parseFloat(v)).filter(v => !isNaN(v));
+    if (values.length === 0) {
+        alert("Enter at least one numeric sweep value.");
+        return;
+    }
+    if (values.length > 30) {
+        if (!confirm(`${values.length} values will trigger ${values.length} backtests — proceed?`)) return;
+    }
+
+    const payload = {
+        base: buildBacktestPayload(),
+        sweep: { param, values },
+    };
+
+    showLoading(true, `Sweeping ${param} across ${values.length} values...`);
+    try {
+        const res = await fetch(`${apiBase}/backtest/sweep`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        renderSweepResults(data);
+    } catch (e) {
+        alert("Sweep failed: " + e.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+function renderSweepResults(data) {
+    document.getElementById("sweep-results-content").style.display = "block";
+    document.getElementById("sweep-param-label").innerText = SWEEP_PARAM_LABELS[data.param] || data.param;
+
+    // Bar chart: x = parameter value, y = total return %, colored by sign.
+    const container = document.getElementById("sweep-chart");
+    container.innerHTML = "";
+    const chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: 320,
+        layout: { background: { type: "solid", color: "transparent" }, textColor: "#94a3b8" },
+        grid: { vertLines: { color: "rgba(255,255,255,0.05)" }, horzLines: { color: "rgba(255,255,255,0.05)" } },
+        rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
+        timeScale: { visible: false },
+    });
+    // We don't have a real time axis — fake one by spreading points across
+    // synthetic dates so Lightweight Charts will render them in order.
+    const baseDate = new Date(2020, 0, 1);
+    const series = chart.addHistogramSeries({ priceFormat: { type: "percent" } });
+    const points = data.points.map((p, i) => {
+        const d = new Date(baseDate);
+        d.setDate(d.getDate() + i);
+        const val = p.total_return_pct ?? 0;
+        return {
+            time: d.toISOString().split("T")[0],
+            value: val,
+            color: val >= 0 ? "rgba(34, 197, 94, 0.7)" : "rgba(239, 68, 68, 0.7)",
+        };
+    });
+    series.setData(points);
+    chart.timeScale().fitContent();
+
+    // Detail table
+    const tbody = document.querySelector("#sweep-table tbody");
+    tbody.innerHTML = "";
+    data.points.forEach(p => {
+        const tr = document.createElement("tr");
+        const ret = p.total_return_pct;
+        const sharpe = p.sharpe_ratio;
+        const dd = p.max_drawdown_pct;
+        tr.innerHTML = `
+            <td><strong>${p.param_value}</strong></td>
+            <td class="${ret != null && ret >= 0 ? "text-green" : "text-red"}">${ret != null ? formatPct(ret) : "—"}</td>
+            <td>${sharpe != null ? sharpe.toFixed(2) : "—"}</td>
+            <td class="text-red">${dd != null ? "-" + formatPct(dd) : "—"}</td>
+            <td>${p.trade_count}</td>
+            <td>${formatMoney(p.final_equity)}</td>
+        `;
+        tbody.appendChild(tr);
+    });
 }
 
 async function saveStrategy() {
