@@ -1,4 +1,8 @@
-"""Pydantic models for strategy definitions, backtest requests, and results."""
+"""Pydantic models for strategy definitions, backtest requests, and results.
+
+Long-only by design (the engine no longer supports `direction=short` for shares —
+short positions are expressed via `options.position = "short"` on options strategies).
+"""
 
 from __future__ import annotations
 
@@ -6,16 +10,10 @@ from datetime import date
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
-
-
-class Direction(str, Enum):
-    LONG = "long"
-    SHORT = "short"
-    BOTH = "both"
 
 
 class OptionType(str, Enum):
@@ -23,9 +21,29 @@ class OptionType(str, Enum):
     PUT = "put"
 
 
+class OptionPosition(str, Enum):
+    """Whether we are paying premium (long) or collecting premium (short)."""
+    LONG = "long"   # Buying calls/puts
+    SHORT = "short"  # Selling calls (covered) or puts (CSP)
+
+
 class PyramidingExitMode(str, Enum):
     SELL_ALL = "sell_all"
     SELL_PROFITABLE = "sell_profitable"
+
+
+class PyramidingTriggerMode(str, Enum):
+    """How to decide when to add another tranche to an open campaign."""
+    PULLBACK_ONLY = "pullback_only"   # Price has moved X% from the chosen reference
+    SIGNAL_ONLY = "signal_only"        # Entry condition tree re-evaluates True
+    BOTH = "both"                      # Require pullback AND a fresh entry signal
+
+
+class PyramidingReference(str, Enum):
+    """Anchor used by the pullback measurement."""
+    LAST_FILL = "last_fill"           # % drop from the most recent tranche
+    ORIGINAL_ENTRY = "original_entry"  # % drop from the first tranche
+    HIGH_WATERMARK = "high_watermark"  # % drop from the highest close since first entry
 
 
 class PositionSizingMethod(str, Enum):
@@ -59,13 +77,11 @@ class WalkForwardMode(str, Enum):
 
 
 class IndicatorRef(BaseModel):
-    """Reference to a technical indicator with its parameters."""
-    name: str  # e.g. "RSI", "SMA", "EMA", "MACD_LINE", "MACD_SIGNAL", "BB_UPPER", etc.
-    params: dict[str, Any] = Field(default_factory=dict)  # e.g. {"period": 14}
+    name: str
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class ThresholdCondition(BaseModel):
-    """Indicator vs. static value (e.g. RSI(14) < 30)."""
     type: str = "threshold"
     indicator: IndicatorRef
     comparator: Comparator
@@ -73,7 +89,6 @@ class ThresholdCondition(BaseModel):
 
 
 class ReferenceCondition(BaseModel):
-    """Indicator vs. indicator (e.g. Price > SMA(200))."""
     type: str = "reference"
     indicator: IndicatorRef
     comparator: Comparator
@@ -81,43 +96,37 @@ class ReferenceCondition(BaseModel):
 
 
 class CrossoverCondition(BaseModel):
-    """Indicator crosses above/below another indicator."""
     type: str = "crossover"
     indicator: IndicatorRef
-    direction: str  # "above" or "below"
+    direction: str
     ref_indicator: IndicatorRef
 
 
 class PullbackCondition(BaseModel):
-    """Price dropped X% from N-day high."""
     type: str = "pullback"
     lookback: int = 20
     pct: float = 5.0
 
 
 class ConsecutiveCondition(BaseModel):
-    """N consecutive up or down candles."""
     type: str = "consecutive"
-    direction: str  # "up" or "down"
+    direction: str
     count: int = 3
 
 
 class ConditionGroup(BaseModel):
-    """Compound condition with AND/OR nesting. Children can be conditions or nested groups."""
     operator: ConditionOperator
-    conditions: list[dict[str, Any]]  # Raw dicts that get parsed by the evaluator
+    conditions: list[dict[str, Any]]
 
 
 # ── Exit Strategy ─────────────────────────────────────────────────────────────
 
 
 class ExitStrategy(BaseModel):
-    """All exit conditions for a strategy."""
     stop_loss_pct: float | None = None
     take_profit_pct: float | None = None
     trailing_stop_pct: float | None = None
     max_hold_days: int | None = None
-    # Indicator-based exit conditions (same tree structure as entry)
     conditions: dict[str, Any] | None = None
     pyramiding_exit_mode: PyramidingExitMode = PyramidingExitMode.SELL_ALL
 
@@ -127,8 +136,7 @@ class ExitStrategy(BaseModel):
 
 class PositionSizing(BaseModel):
     method: PositionSizingMethod = PositionSizingMethod.FIXED_DOLLAR
-    value: float = 10000.0  # Shares, dollars, percentage, or risk percentage
-    # For risk-based: what % of equity to risk per trade
+    value: float = 10000.0
     risk_pct: float | None = None
 
 
@@ -138,6 +146,7 @@ class PositionSizing(BaseModel):
 class OptionsConfig(BaseModel):
     enabled: bool = False
     type: OptionType = OptionType.CALL
+    position: OptionPosition = OptionPosition.LONG
     target_dte: int = 30
     target_delta: float = 0.50
 
@@ -145,43 +154,60 @@ class OptionsConfig(BaseModel):
 class PyramidingConfig(BaseModel):
     enabled: bool = False
     max_positions: int = 1
-    # If "entry_signal", we buy again if the entry tree evaluates to True on a new bar.
-    # If "pullback", we buy again if price drops X% from the last fill price.
-    scale_in_trigger: str = "entry_signal"  
-    scale_in_value: float | None = None  # e.g., 10.0 for 10% pullback
+    trigger_mode: PyramidingTriggerMode = PyramidingTriggerMode.SIGNAL_ONLY
+    pullback_pct: float | None = None
+    pullback_reference: PyramidingReference = PyramidingReference.LAST_FILL
+
+    # Legacy fields kept so already-saved strategies still deserialize.
+    # `model_validator` below migrates them into the new fields if present.
+    scale_in_trigger: str | None = None
+    scale_in_value: float | None = None
+
+    @model_validator(mode="after")
+    def _migrate_legacy(self) -> "PyramidingConfig":
+        if self.scale_in_trigger and self.trigger_mode == PyramidingTriggerMode.SIGNAL_ONLY:
+            if self.scale_in_trigger == "pullback":
+                self.trigger_mode = PyramidingTriggerMode.PULLBACK_ONLY
+            elif self.scale_in_trigger == "entry_signal":
+                self.trigger_mode = PyramidingTriggerMode.SIGNAL_ONLY
+        if self.pullback_pct is None and self.scale_in_value is not None:
+            self.pullback_pct = self.scale_in_value
+        return self
 
 
 # ── Strategy Definition ──────────────────────────────────────────────────────
 
 
 class StrategyDefinition(BaseModel):
-    """Complete strategy specification — entry, exit, sizing, direction."""
+    """Long-only strategy specification.
+
+    Shorting is only available via `options.position = "short"` (CSP, covered call).
+    Underlying-stock short selling was removed because the previous implementation
+    was broken (entered on every bar regardless of signals).
+    """
     name: str = "Untitled Strategy"
-    entry: dict[str, Any]  # ConditionGroup as dict (parsed at evaluation time)
+    entry: dict[str, Any]
     exit: ExitStrategy = Field(default_factory=ExitStrategy)
     position_sizing: PositionSizing = Field(default_factory=PositionSizing)
     options: OptionsConfig = Field(default_factory=OptionsConfig)
     pyramiding: PyramidingConfig = Field(default_factory=PyramidingConfig)
-    direction: Direction = Direction.LONG
 
 
 # ── Backtest Request ──────────────────────────────────────────────────────────
 
 
 class BacktestRequest(BaseModel):
-    """Full backtest execution request."""
     strategy: StrategyDefinition
     ticker: str
-    start_date: date | None = None  # None = go back as far as possible
-    end_date: date | None = None  # None = today
+    start_date: date | None = None
+    end_date: date | None = None
     initial_capital: float = 100000.0
-    commission: float = 0.0  # Per-trade flat fee
-    slippage_pct: float = 0.0  # Slippage as % of fill price
-    timeframe: str = "daily"  # "daily" or "weekly"
+    commission: float = 0.0
+    slippage_pct: float = 0.0
+    timeframe: str = "daily"
 
 
 class WalkForwardRequest(BaseModel):
-    """Walk-forward analysis request."""
     strategy: StrategyDefinition
     ticker: str
     start_date: date | None = None
@@ -191,27 +217,30 @@ class WalkForwardRequest(BaseModel):
     slippage_pct: float = 0.0
     timeframe: str = "daily"
     mode: WalkForwardMode = WalkForwardMode.ROLLING
-    in_sample_days: int = 756  # ~3 years of trading days
-    out_of_sample_days: int = 252  # ~1 year of trading days
+    in_sample_days: int = 756
+    out_of_sample_days: int = 252
 
 
 # ── Results ───────────────────────────────────────────────────────────────────
 
 
 class Trade(BaseModel):
-    """Record of a single completed trade."""
+    """One closed tranche. A pyramided campaign produces multiple Trade rows
+    that share the same `campaign_id`."""
     entry_date: str
     exit_date: str
-    direction: str
+    direction: str  # "long" (stock/long-option) or "short" (short-option)
     entry_price: float
     exit_price: float
-    shares: float
+    shares: float   # Stocks: shares. Options: contracts.
     pnl: float
     pnl_pct: float
-    exit_reason: str  # "stop_loss", "take_profit", "trailing_stop", "signal", "time", "end_of_data"
+    exit_reason: str
     bars_held: int
+    campaign_id: int = 0
     is_option: bool = False
     option_type: str | None = None
+    option_position: str | None = None
     option_strike: float | None = None
     option_dte_entry: float | None = None
     option_dte_exit: float | None = None
@@ -219,16 +248,13 @@ class Trade(BaseModel):
 
 
 class BacktestResult(BaseModel):
-    """Complete backtest output."""
-    # Equity curve: list of {"date": "YYYY-MM-DD", "equity": float}
+    """Equity-curve dicts carry extra optional keys: `avg_cost` (weighted-average
+    underlying entry price while at least one position is open, else None) and
+    `n_positions` (open tranches at the close of the bar)."""
     equity_curve: list[dict[str, Any]]
-    # Completed trades
     trades: list[Trade]
-    # Summary statistics
     stats: dict[str, Any]
-    # Benchmark (buy-and-hold) equity curve
     benchmark_curve: list[dict[str, Any]]
-    # Strategy metadata
     ticker: str
     start_date: str
     end_date: str
@@ -236,7 +262,6 @@ class BacktestResult(BaseModel):
 
 
 class WalkForwardFold(BaseModel):
-    """Results for a single walk-forward fold."""
     fold_number: int
     is_start: str
     is_end: str
@@ -244,17 +269,13 @@ class WalkForwardFold(BaseModel):
     oos_end: str
     is_stats: dict[str, Any]
     oos_stats: dict[str, Any]
-    regime: str  # "bull", "bear", "sideways"
+    regime: str
 
 
 class WalkForwardResult(BaseModel):
-    """Complete walk-forward analysis output."""
     folds: list[WalkForwardFold]
-    # Aggregated OOS-only equity curve
     aggregated_oos_curve: list[dict[str, Any]]
-    # Aggregated OOS statistics
     aggregated_oos_stats: dict[str, Any]
-    # Per-metric degradation ratios (OOS / IS)
     degradation_ratios: dict[str, float | None]
     mode: str
     ticker: str

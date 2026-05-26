@@ -93,10 +93,27 @@ def _get_indicator_value(
     df: pd.DataFrame,
     bar_idx: int,
 ) -> float | None:
-    """Compute an indicator and return its value at bar_idx."""
+    """Compute an indicator and return its value at bar_idx.
+
+    Caches the full series on the DataFrame so repeated bar-by-bar evaluations
+    of the same condition tree don't recompute RSI/SMA/etc. on every iteration.
+    The cache lives in `df.attrs["_bt_indicator_cache"]` and is keyed by
+    (name, frozenset(params)).
+    """
     name = indicator_def.get("name", "CLOSE")
-    params = indicator_def.get("params", {})
-    series = compute_indicator(name, df, params)
+    params = indicator_def.get("params", {}) or {}
+
+    cache = df.attrs.get("_bt_indicator_cache")
+    if cache is None:
+        cache = {}
+        df.attrs["_bt_indicator_cache"] = cache
+
+    key = (str(name).upper(), tuple(sorted(params.items())))
+    series = cache.get(key)
+    if series is None:
+        series = compute_indicator(name, df, params)
+        cache[key] = series
+
     val = series.iloc[bar_idx]
     if pd.isna(val):
         return None

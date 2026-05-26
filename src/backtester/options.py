@@ -71,6 +71,26 @@ def _norm_ppf(p: float) -> float:
         q = math.sqrt(-2*math.log(1-p))
         return -(((((c1*q+c2)*q+c3)*q+c4)*q+c5)*q+c6) / ((((d1*q+d2)*q+d3)*q+d4)*q+1)
 
+def snap_strike(raw_strike: float, spot: float) -> float:
+    """Snap a Black-Scholes-derived strike to a realistic OCC-style grid.
+
+    The previous implementation rounded to $0.01 — backtests bought strikes that
+    don't exist in real markets. Real grids depend on underlying price; this
+    follows the common buckets used by most US listings.
+    """
+    if raw_strike <= 0:
+        return raw_strike
+
+    ref = max(spot, raw_strike)
+    if ref < 25:
+        step = 1.0
+    elif ref < 200:
+        step = 2.5
+    else:
+        step = 5.0
+    return round(round(raw_strike / step) * step, 2)
+
+
 def get_strike_for_delta(
     spot: float,
     target_delta: float,
@@ -79,7 +99,8 @@ def get_strike_for_delta(
     volatility: float,
     option_type: str,
 ) -> float:
-    """Calculate strike price that produces the target delta under Black-Scholes."""
+    """Calculate strike price that produces the target delta under Black-Scholes,
+    then snap to a realistic OCC strike grid."""
     if time_to_expiry_years <= 0 or volatility <= 0 or spot <= 0:
         return spot
 
@@ -89,7 +110,7 @@ def get_strike_for_delta(
     else: # put
         if target_delta >= 0.0 or target_delta <= -1.0: return spot
         z = _norm_ppf(target_delta + 1.0)
-    
+
     sqrt_t = math.sqrt(time_to_expiry_years)
     k = spot * math.exp(-z * volatility * sqrt_t + (risk_free_rate + 0.5 * volatility**2) * time_to_expiry_years)
-    return round(k, 2)
+    return snap_strike(k, spot)
