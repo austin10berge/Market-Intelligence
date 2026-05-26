@@ -8,21 +8,31 @@
 # localhost:8000 instead of the production server. It also exposes the API
 # port explicitly in case you want to hit it directly from the browser.
 #
-# Volume mounts shadow /app/src with the active worktree source so code changes
-# are picked up immediately without rebuilding images. Only rebuild when
-# dependencies (pyproject.toml) change.
+# Volume mounts shadow the COPYed image layers with the active worktree
+# source so code changes are picked up immediately without rebuilding.
+# Only rebuild when dependencies (pyproject.toml) change.
 #
-# WORKTREE: update this path when switching to a different worktree.
+# WORKTREE: update WORKTREE_ROOT below when switching to a different worktree.
+# Currently pointed at: claude/options-backtester-review-DxKWQ
 #
 # The base docker-compose.yml is unchanged so production deploys are unaffected.
 
 x-worktree-src: &worktree-src
-  - /home/dev/workspace/Market-Intelligence/.claude/worktrees/bridge-cse_01D8aN9KY9Ljdj8g6T6JAnSf/src:/app/src
+  - /home/dev/workspace/Market-Intelligence/.claude/worktrees/options-backtester-review-DxKWQ/src:/app/src
+
+# The dashboard image bakes web assets in at build time, so HTML/JS edits
+# don't show up unless we shadow them too. We mount individual files (not the
+# whole src/web/) so the entrypoint can still write config.js into the
+# image filesystem without polluting the worktree.
+x-worktree-dashboard: &worktree-dashboard
+  - /home/dev/workspace/Market-Intelligence/.claude/worktrees/options-backtester-review-DxKWQ/src/web/backtest.html:/usr/share/nginx/html/backtest.html
+  - /home/dev/workspace/Market-Intelligence/.claude/worktrees/options-backtester-review-DxKWQ/src/web/backtest.js:/usr/share/nginx/html/backtest.js
 
 services:
   dashboard:
     environment:
       MARKET_INTELLIGENCE_API_URL: http://localhost:8000/api
+    volumes: *worktree-dashboard
 
   api:
     volumes: *worktree-src
