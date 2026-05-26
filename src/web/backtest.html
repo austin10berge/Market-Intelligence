@@ -290,6 +290,18 @@
 
         .options-conditional { display: none; }
         .options-conditional.active { display: contents; }
+
+        .nav-links { display: flex; gap: 1.25rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.88rem;
+            padding: 0.3rem 0;
+            border-bottom: 2px solid transparent;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .nav-links a:hover  { color: var(--text-primary); }
+        .nav-links a.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
     </style>
 </head>
 
@@ -297,7 +309,7 @@
     <div id="app">
         <header class="glass" style="margin-bottom: 1rem; padding: 1.25rem 1.5rem;">
             <div class="header-content" style="display: flex; align-items: center; gap: 1rem;">
-                <a href="index.html" class="btn-icon" style="text-decoration: none;">&#8592;</a>
+                <a href="/" class="btn-icon" style="text-decoration: none; color: var(--text-primary);" title="Back to Dashboard">&#8592;</a>
                 <h1 style="font-size: 1.4rem; margin-bottom: 0;">Strategy Backtester</h1>
                 <div style="margin-left: auto; display: flex; gap: 0.5rem; align-items: center;">
                     <select id="saved-strategies" class="settings-input" onchange="loadSelectedStrategy()" style="min-width: 200px;">
@@ -308,6 +320,14 @@
                 </div>
             </div>
         </header>
+
+        <nav class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/scanner.html">CSP Scanner</a>
+            <a href="/technical-analysis.html">Technical Analysis</a>
+            <a href="/watchlist.html">Watchlist</a>
+            <a href="/backtest.html" class="active">Backtester</a>
+        </nav>
 
         <main>
             <!-- Run bar — always visible, sticky at top of viewport while scrolling -->
