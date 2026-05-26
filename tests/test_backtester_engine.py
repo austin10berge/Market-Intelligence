@@ -170,6 +170,31 @@ def test_option_dte_uses_calendar_days_not_trading_bars():
 # ── Options: short put (CSP) accounting ──────────────────────────────────────
 
 
+def test_trade_records_underlying_prices_for_position_chart():
+    """The Position-chart panel needs the underlying price at entry/exit even
+    for option trades, where entry_price/exit_price are premiums."""
+    closes = [100, 102, 104, 106, 108, 110]
+    df = _make_df(closes)
+    strategy = StrategyDefinition(
+        name="underlying",
+        entry=_always_true_entry(),
+        exit=ExitStrategy(take_profit_pct=20.0),
+        position_sizing=PositionSizing(method=PositionSizingMethod.FIXED_SHARES, value=1),
+        options=OptionsConfig(enabled=True, type=OptionType.CALL, position=OptionPosition.LONG,
+                              target_dte=60, target_delta=0.5),
+    )
+    req = BacktestRequest(strategy=strategy, ticker="TEST", initial_capital=10_000)
+    res = run_backtest(req, df)
+    assert len(res.trades) >= 1
+    t = res.trades[0]
+    assert t.is_option
+    assert t.entry_underlying_price == pytest.approx(100.0)
+    # Exit underlying should be the closing price on the exit bar (some later bar)
+    assert t.exit_underlying_price > 100.0
+    # The premium fields are NOT the underlying for options
+    assert t.entry_price != t.entry_underlying_price
+
+
 def test_short_put_credits_premium_on_entry_and_profits_when_premium_decays():
     # Flat-to-rising underlying → short put profits from theta + delta.
     closes = [100, 100, 101, 102, 103, 104, 105]

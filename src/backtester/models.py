@@ -232,6 +232,10 @@ class Trade(BaseModel):
     direction: str  # "long" (stock/long-option) or "short" (short-option)
     entry_price: float
     exit_price: float
+    # Underlying price at entry/exit. For stock trades these equal entry_price /
+    # exit_price; for option trades they're the spot, used by the Position chart.
+    entry_underlying_price: float = 0.0
+    exit_underlying_price: float = 0.0
     shares: float   # Stocks: shares. Options: contracts.
     pnl: float
     pnl_pct: float

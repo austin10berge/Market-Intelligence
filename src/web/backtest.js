@@ -1,22 +1,29 @@
 /**
- * Strategy Backtester Frontend Logic
+ * Strategy Backtester Frontend.
  *
- * Key responsibilities:
- *   • Serialize the form into the BacktestRequest schema the API expects.
- *   • Render results: stats grid, equity-curve chart (with avg-cost-basis
- *     overlay when scale-in is active), trade table (Tranches vs Campaigns).
- *   • Saved-strategy CRUD (load, save, delete).
+ * Layout: three builder tabs (Setup / Strategy / Scale-In) on top of a sticky
+ * run bar with a live one-line strategy summary. Results live in four tabs:
+ * Summary (stats + equity curve), Position Chart (underlying + entry/exit
+ * markers + avg-cost basis), Trades (tranches or campaigns), Walk-Forward.
+ *
+ * Asset Type is a single radio that drives both `options.enabled` and
+ * `options.position` so users don't have to know the internal field names.
  */
 
 // ── Globals ──────────────────────────────────────────────────────────────────
 
 const apiBase = window.MARKET_INTELLIGENCE_CONFIG?.apiBase || "http://localhost:8000";
-let equityChart = null;
 let conditionIdCounter = 0;
 let lastResult = null;
-let lastIsWalkForward = false;
-let savedStrategiesIndex = {};   // id → name
-let savedStrategiesById = {};    // id → full {id, name, definition}
+let savedStrategiesById = {};
+
+const ASSET_PRESETS = {
+    stock:      { enabled: false, type: "call", position: "long"  },
+    long_call:  { enabled: true,  type: "call", position: "long"  },
+    long_put:   { enabled: true,  type: "put",  position: "long"  },
+    short_put:  { enabled: true,  type: "put",  position: "short" },
+    short_call: { enabled: true,  type: "call", position: "short" },
+};
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
@@ -27,28 +34,98 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("end-date").value = end.toISOString().split("T")[0];
     document.getElementById("start-date").value = start.toISOString().split("T")[0];
 
-    // Wire up the AND/OR + Tranches/Campaigns toggle groups
+    setupTabs(".builder-tabs .tab-btn", "data-builder-tab", "data-builder-panel");
+    setupTabs(".results-tabs .tab-btn", "data-results-tab", "data-results-panel");
+
+    // AND/OR and Tranches/Campaigns toggle groups
     document.querySelectorAll(".toggle-group .toggle-btn").forEach(btn => {
         btn.addEventListener("click", (e) => {
             const group = e.target.closest(".toggle-group");
             group.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
             e.target.classList.add("active");
-            // Re-render trade table when the user flips the view
-            if (group.id === "trade-view-toggle" && lastResult) {
-                renderTradesTable(getActiveTradesData());
-            }
+            if (group.id === "trade-view-toggle" && lastResult) renderTradesTable(lastResult.trades || []);
+            if (group.id === "strategy-mode-toggle") applyStrategyMode(e.target.dataset.val);
+            updateStrategySummary();
         });
+    });
+
+    // Asset Type radio
+    document.querySelectorAll("#asset-radio-group .asset-radio").forEach(label => {
+        label.addEventListener("click", () => selectAsset(label.dataset.asset));
     });
 
     addCondition("entry-conditions-container");
     addCondition("exit-conditions-container");
     updateEntryWarning();
     updatePyrFieldVisibility();
+    applyStrategyMode("simple");
+    selectAsset("stock");
+
+    // Re-render the summary whenever any input changes
+    document.addEventListener("input", updateStrategySummary);
+    document.addEventListener("change", updateStrategySummary);
 
     loadSavedStrategiesList();
+    updateStrategySummary();
 });
 
-// ── UI toggle helpers ────────────────────────────────────────────────────────
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+
+function setupTabs(btnSelector, tabAttr, panelAttr) {
+    const buttons = document.querySelectorAll(btnSelector);
+    const panels = document.querySelectorAll(`[${panelAttr}]`);
+    buttons.forEach(btn => {
+        btn.addEventListener("click", () => {
+            buttons.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            const targetName = btn.getAttribute(tabAttr);
+            panels.forEach(p => p.classList.toggle("active", p.getAttribute(panelAttr) === targetName));
+        });
+    });
+}
+
+// ── Asset type ───────────────────────────────────────────────────────────────
+
+function selectAsset(asset) {
+    document.querySelectorAll("#asset-radio-group .asset-radio").forEach(label => {
+        const isActive = label.dataset.asset === asset;
+        label.classList.toggle("selected", isActive);
+        const input = label.querySelector("input");
+        input.checked = isActive;
+    });
+    const cfg = ASSET_PRESETS[asset];
+    document.getElementById("options-fields").style.display = cfg.enabled ? "block" : "none";
+    updateStrategySummary();
+}
+
+function getSelectedAsset() {
+    const checked = document.querySelector("#asset-radio-group input[name='asset']:checked");
+    return checked ? checked.value : "stock";
+}
+
+// ── Strategy mode (Simple/Advanced) ──────────────────────────────────────────
+
+function applyStrategyMode(mode) {
+    const isAdvanced = mode === "advanced";
+    document.querySelectorAll(".advanced-only").forEach(el => {
+        // Display: a section/panel uses block; a toggle-group uses inline-flex; a field uses flex
+        if (!isAdvanced) {
+            el.style.display = "none";
+        } else if (el.classList.contains("field")) {
+            el.style.display = "flex";
+        } else if (el.classList.contains("toggle-group")) {
+            el.style.display = "inline-flex";
+        } else {
+            el.style.display = "block";
+        }
+    });
+    // Reflect the toggle group state in case mode came in from a strategy load
+    document.querySelectorAll("#strategy-mode-toggle .toggle-btn").forEach(b => {
+        b.classList.toggle("active", b.dataset.val === mode);
+    });
+}
+
+// ── UI helpers ───────────────────────────────────────────────────────────────
 
 function setSectionEnabled(containerId, enabled) {
     const el = document.getElementById(containerId);
@@ -63,7 +140,7 @@ function toggleSizingInputs() {
     const riskContainer = document.getElementById("risk-pct-container");
 
     if (method === "percent_equity") {
-        valueLabel.innerText = "Percentage (%)";
+        valueLabel.innerText = "Percent (%)";
         if (!valueInput.value || valueInput.disabled) valueInput.value = "100";
         riskContainer.style.display = "none";
     } else if (method === "fixed_dollar") {
@@ -75,25 +152,25 @@ function toggleSizingInputs() {
         if (!valueInput.value || valueInput.disabled) valueInput.value = "100";
         riskContainer.style.display = "none";
     } else if (method === "risk_based") {
-        valueLabel.innerText = "Stop Distance (N/A)";
+        valueLabel.innerText = "Stop Distance (calc'd)";
         valueInput.value = "0";
         valueInput.disabled = true;
-        riskContainer.style.display = "block";
+        riskContainer.style.display = "flex";
     }
     if (method !== "risk_based") valueInput.disabled = false;
 }
 
-function toggleWfInputs() { setSectionEnabled("wf-inputs", document.getElementById("wf-enabled").checked); }
-function toggleOptionsInputs() { setSectionEnabled("options-inputs", document.getElementById("options-enabled").checked); }
-function togglePyrInputs() { setSectionEnabled("pyr-inputs", document.getElementById("pyr-enabled").checked); }
+function togglePyrInputs() {
+    setSectionEnabled("pyr-inputs", document.getElementById("pyr-enabled").checked);
+    updateStrategySummary();
+}
 
 function updatePyrFieldVisibility() {
     const mode = document.getElementById("pyr-trigger-mode").value;
-    const pullbackPctEl = document.getElementById("pyr-pullback-pct-container");
-    const pullbackRefEl = document.getElementById("pyr-pullback-ref-container");
-    const showPullback = mode === "pullback_only" || mode === "both";
-    pullbackPctEl.style.display = showPullback ? "block" : "none";
-    pullbackRefEl.style.display = showPullback ? "block" : "none";
+    const show = mode === "pullback_only" || mode === "both";
+    document.getElementById("pyr-pullback-pct-container").style.display = show ? "flex" : "none";
+    document.getElementById("pyr-pullback-ref-container").style.display = show ? "flex" : "none";
+    updateStrategySummary();
 }
 
 function showLoading(show, msg = "This may take a few seconds.") {
@@ -101,7 +178,7 @@ function showLoading(show, msg = "This may take a few seconds.") {
     document.getElementById("loading-overlay").style.display = show ? "flex" : "none";
 }
 
-// ── Formatting helpers ───────────────────────────────────────────────────────
+// ── Formatters ───────────────────────────────────────────────────────────────
 
 function formatMoney(val) {
     if (val === null || val === undefined || val === "N/A") return "N/A";
@@ -112,13 +189,41 @@ function formatPct(val) {
     return Number(val).toFixed(2) + "%";
 }
 
-// ── Condition Builder ────────────────────────────────────────────────────────
+// ── Strategy summary (one-line description above run bar) ────────────────────
+
+function updateStrategySummary() {
+    const summaryEl = document.getElementById("strategy-summary");
+    if (!summaryEl) return;
+    const ticker = (document.getElementById("ticker")?.value || "?").trim().toUpperCase();
+    const asset = getSelectedAsset();
+    const assetLabel = {
+        stock: "stock",
+        long_call: "long calls",
+        long_put: "long puts",
+        short_put: "short puts (CSP)",
+        short_call: "short calls",
+    }[asset];
+    const pyrOn = document.getElementById("pyr-enabled")?.checked;
+    const pyrMode = document.getElementById("pyr-trigger-mode")?.value;
+    const pullbackPct = parseFloat(document.getElementById("pyr-pullback-pct")?.value);
+
+    let pyrPhrase = "no scale-in";
+    if (pyrOn) {
+        const max = document.getElementById("pyr-max").value;
+        if (pyrMode === "pullback_only") pyrPhrase = `scale-in up to ${max}× on ${pullbackPct}% pullbacks`;
+        else if (pyrMode === "signal_only") pyrPhrase = `scale-in up to ${max}× on entry signal`;
+        else pyrPhrase = `scale-in up to ${max}× on ${pullbackPct}% pullbacks AND entry signal`;
+    }
+    summaryEl.innerHTML = `<strong>${ticker}</strong> · ${assetLabel} · ${pyrPhrase}`;
+}
+
+// ── Condition builder ────────────────────────────────────────────────────────
 
 function addCondition(containerId) {
     const container = document.getElementById(containerId);
     const id = `cond_${conditionIdCounter++}`;
     const div = document.createElement("div");
-    div.className = "condition-node builder-row";
+    div.className = "condition-node";
     div.id = id;
     div.innerHTML = `
         <select class="settings-input cond-indicator" onchange="updateConditionParams('${id}')">
@@ -135,17 +240,14 @@ function addCondition(containerId) {
             <option value="PULLBACK">Pullback %</option>
             <option value="CONSECUTIVE">Consecutive Candles</option>
         </select>
-
         <span class="cond-params" id="${id}_params">
             <input type="number" class="settings-input param-period" value="14" placeholder="Period" style="width: 70px;">
         </span>
-
         <select class="settings-input cond-type" onchange="updateConditionType('${id}')">
             <option value="threshold">is vs. Value</option>
             <option value="reference">is vs. Indicator</option>
             <option value="crossover">crosses Indicator</option>
         </select>
-
         <span id="${id}_operator">
             <select class="settings-input cond-comparator">
                 <option value="lt">Less Than (&lt;)</option>
@@ -154,12 +256,10 @@ function addCondition(containerId) {
                 <option value="gte">Greater or Equal (&gt;=)</option>
             </select>
         </span>
-
         <span class="cond-target" id="${id}_target">
             <input type="number" class="settings-input target-value" value="30" style="width: 80px;">
         </span>
-
-        <button class="btn icon danger" onclick="removeCondition('${id}')" style="padding: 0.5rem; margin-left: auto;">✕</button>
+        <button class="btn ghost" onclick="removeCondition('${id}')" style="margin-left: auto; font-size: 1.1rem;">✕</button>
     `;
     container.appendChild(div);
     updateEntryWarning();
@@ -196,8 +296,8 @@ function updateConditionParams(rowId) {
         `;
     } else if (ind.startsWith("BB_")) {
         paramsContainer.innerHTML = `
-            <input type="number" class="settings-input param-period" value="20" placeholder="Period" style="width: 60px;">
-            <input type="number" class="settings-input param-stddev" value="2.0" step="0.1" placeholder="StdDev" style="width: 60px;">
+            <input type="number" class="settings-input param-period" value="20" style="width: 60px;">
+            <input type="number" class="settings-input param-stddev" value="2.0" step="0.1" style="width: 60px;">
         `;
     } else if (ind === "PULLBACK") {
         paramsContainer.innerHTML = "";
@@ -220,9 +320,7 @@ function updateConditionParams(rowId) {
             candles
         `;
     } else {
-        paramsContainer.innerHTML = `
-            <input type="number" class="settings-input param-period" value="14" placeholder="Period" style="width: 70px;">
-        `;
+        paramsContainer.innerHTML = `<input type="number" class="settings-input param-period" value="14" style="width: 70px;">`;
     }
 }
 
@@ -345,13 +443,23 @@ function serializeConditions(containerId, operatorId) {
     });
 
     if (conditions.length === 0) return null;
-    const operator = document.querySelector(`#${operatorId} .active`).dataset.val;
+    const operatorBtn = document.querySelector(`#${operatorId} .active`);
+    const operator = operatorBtn ? operatorBtn.dataset.val : "AND";
     return { operator, conditions };
+}
+
+function getActiveStrategyMode() {
+    const btn = document.querySelector("#strategy-mode-toggle .active");
+    return btn ? btn.dataset.val : "simple";
 }
 
 function buildStrategyPayload() {
     const entryTree = serializeConditions("entry-conditions-container", "entry-operator-toggle");
-    const exitTree = serializeConditions("exit-conditions-container", "exit-operator-toggle");
+    const isAdvanced = getActiveStrategyMode() === "advanced";
+    const exitTree = isAdvanced ? serializeConditions("exit-conditions-container", "exit-operator-toggle") : null;
+
+    const asset = getSelectedAsset();
+    const optCfg = ASSET_PRESETS[asset];
 
     return {
         name: "UI Strategy",
@@ -360,8 +468,8 @@ function buildStrategyPayload() {
             conditions: exitTree,
             stop_loss_pct: parseFloat(document.getElementById("stop-loss").value) || null,
             take_profit_pct: parseFloat(document.getElementById("take-profit").value) || null,
-            trailing_stop_pct: parseFloat(document.getElementById("trailing-stop").value) || null,
-            max_hold_days: parseInt(document.getElementById("max-hold").value) || null,
+            trailing_stop_pct: isAdvanced ? (parseFloat(document.getElementById("trailing-stop").value) || null) : null,
+            max_hold_days: isAdvanced ? (parseInt(document.getElementById("max-hold").value) || null) : null,
             pyramiding_exit_mode: document.getElementById("pyr-exit").value
         },
         position_sizing: {
@@ -370,9 +478,9 @@ function buildStrategyPayload() {
             risk_pct: parseFloat(document.getElementById("risk-pct").value) || null
         },
         options: {
-            enabled: document.getElementById("options-enabled").checked,
-            type: document.getElementById("option-type").value,
-            position: document.getElementById("option-position").value,
+            enabled: optCfg.enabled,
+            type: optCfg.type,
+            position: optCfg.position,
             target_dte: parseInt(document.getElementById("option-dte").value) || 30,
             target_delta: parseFloat(document.getElementById("option-delta").value) || 0.50
         },
@@ -388,15 +496,8 @@ function buildStrategyPayload() {
 
 // ── Execution ────────────────────────────────────────────────────────────────
 
-async function runBacktest() {
-    if (document.getElementById("entry-conditions-container").querySelectorAll(".condition-node").length === 0) {
-        alert("Please add at least one entry condition.");
-        return;
-    }
-
-    const isWf = document.getElementById("wf-enabled").checked;
-
-    const payload = {
+function buildBacktestPayload() {
+    return {
         strategy: buildStrategyPayload(),
         ticker: document.getElementById("ticker").value.trim().toUpperCase(),
         start_date: document.getElementById("start-date").value,
@@ -406,45 +507,83 @@ async function runBacktest() {
         commission: parseFloat(document.getElementById("commission").value) || 0.0,
         slippage_pct: parseFloat(document.getElementById("slippage").value) || 0.0
     };
+}
 
+async function runBacktest() {
+    if (document.getElementById("entry-conditions-container").querySelectorAll(".condition-node").length === 0) {
+        alert("Add at least one entry condition.");
+        return;
+    }
+    const payload = buildBacktestPayload();
     showLoading(true, `Crunching historical data for ${payload.ticker}...`);
-
     try {
-        let endpoint = `${apiBase}/backtest/run`;
-        if (isWf) {
-            endpoint = `${apiBase}/backtest/walk-forward`;
-            payload.mode = document.getElementById("wf-mode").value;
-            payload.in_sample_days = parseInt(document.getElementById("wf-is-days").value);
-            payload.out_of_sample_days = parseInt(document.getElementById("wf-oos-days").value);
-        }
-
-        const res = await fetch(endpoint, {
+        const res = await fetch(`${apiBase}/backtest/run`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         });
-
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.detail || `HTTP ${res.status}`);
         }
-
         const data = await res.json();
         lastResult = data;
-        lastIsWalkForward = isWf;
         document.getElementById("results-panel").style.display = "block";
-
-        if (isWf) {
-            renderWalkForwardResults(data);
-        } else {
-            document.getElementById("wf-results-section").style.display = "none";
-            renderStandardResults(data);
-        }
+        // Default to Summary tab when a fresh run completes
+        switchResultsTab("summary");
+        renderStandardResults(data);
+        // Reset the WF section so a previous run doesn't leak in
+        document.getElementById("wf-results-content").style.display = "none";
+        document.getElementById("wf-controls").classList.remove("active");
     } catch (e) {
         alert("Backtest failed: " + e.message);
     } finally {
         showLoading(false);
     }
+}
+
+async function runWalkForward() {
+    if (document.getElementById("entry-conditions-container").querySelectorAll(".condition-node").length === 0) {
+        alert("Add at least one entry condition before running walk-forward.");
+        return;
+    }
+    // Expand the IS/OOS controls so the user can tweak before/after — and they
+    // double as "what we ran with" once results land.
+    document.getElementById("wf-controls").classList.add("active");
+
+    const payload = {
+        ...buildBacktestPayload(),
+        mode: document.getElementById("wf-mode").value,
+        in_sample_days: parseInt(document.getElementById("wf-is-days").value),
+        out_of_sample_days: parseInt(document.getElementById("wf-oos-days").value)
+    };
+    showLoading(true, `Running walk-forward folds for ${payload.ticker}...`);
+    try {
+        const res = await fetch(`${apiBase}/backtest/walk-forward`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        renderWalkForwardResults(data);
+    } catch (e) {
+        alert("Walk-forward failed: " + e.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+function switchResultsTab(name) {
+    document.querySelectorAll(".results-tabs .tab-btn").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-results-tab") === name);
+    });
+    document.querySelectorAll("[data-results-panel]").forEach(p => {
+        p.classList.toggle("active", p.getAttribute("data-results-panel") === name);
+    });
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -455,21 +594,19 @@ function renderStandardResults(data) {
 
     renderStats(data.stats, "stats-container");
     renderEquityCurve(data.equity_curve, data.benchmark_curve, "equity-chart");
-    renderTradesTable(data.trades);
+    renderPositionChart(data, "position-chart");
+    renderTradesTable(data.trades || []);
 }
 
 function renderWalkForwardResults(data) {
-    document.getElementById("wf-results-section").style.display = "block";
+    document.getElementById("wf-results-content").style.display = "block";
     document.getElementById("wf-mode-badge").innerText = data.mode.toUpperCase();
-    document.getElementById("results-title").innerText = `Aggregated OOS Results: ${data.ticker}`;
-    document.getElementById("results-period").innerText = `${data.start_date} → ${data.end_date}`;
-
-    renderStats(data.aggregated_oos_stats, "wf-stats-container");
-    renderEquityCurve(data.aggregated_oos_curve, null, "wf-equity-chart");
+    renderStats(data.aggregated_oos_stats || {}, "wf-stats-container");
+    renderEquityCurve(data.aggregated_oos_curve || [], null, "wf-equity-chart");
 
     const tbody = document.querySelector("#wf-fold-table tbody");
     tbody.innerHTML = "";
-    data.folds.forEach(f => {
+    (data.folds || []).forEach(f => {
         const deg = data.degradation_ratios?.sharpe_ratio;
         const degStr = deg !== null && deg !== undefined ? Number(deg).toFixed(2) : "N/A";
         const tr = document.createElement("tr");
@@ -501,42 +638,29 @@ function renderStats(stats, containerId) {
     `;
 }
 
-// ── Trade table: Tranches vs Campaigns ────────────────────────────────────────
+// ── Trade table: Tranches vs Campaigns ───────────────────────────────────────
 
 function getActiveTradeView() {
     const btn = document.querySelector("#trade-view-toggle .active");
     return btn ? btn.dataset.val : "tranches";
 }
 
-function getActiveTradesData() {
-    return lastResult?.trades || [];
-}
-
 function groupTradesByCampaign(trades) {
-    // Aggregate tranches that share a campaign_id into one summary row
     const groups = new Map();
     trades.forEach(t => {
         const key = t.campaign_id || 0;
         if (!groups.has(key)) {
             groups.set(key, {
-                campaign_id: key,
-                entry_date: t.entry_date,
-                exit_date: t.exit_date,
-                tranches: 0,
-                contracts_or_shares: 0,
-                cost_basis: 0,
-                proceeds: 0,
-                pnl: 0,
-                is_option: t.is_option,
-                option_type: t.option_type,
-                option_position: t.option_position,
-                exit_reasons: new Set(),
+                campaign_id: key, entry_date: t.entry_date, exit_date: t.exit_date,
+                tranches: 0, contracts_or_shares: 0, cost_basis: 0, proceeds: 0,
+                pnl: 0, is_option: t.is_option, option_type: t.option_type,
+                option_position: t.option_position, exit_reasons: new Set(),
                 direction: t.direction,
             });
         }
         const g = groups.get(key);
-        g.tranches += 1;
         const multiplier = t.is_option ? 100 : 1;
+        g.tranches += 1;
         g.contracts_or_shares += t.shares;
         g.cost_basis += t.shares * t.entry_price * multiplier;
         g.proceeds += t.shares * t.exit_price * multiplier;
@@ -547,8 +671,9 @@ function groupTradesByCampaign(trades) {
     });
     const rows = [...groups.values()];
     rows.forEach(g => {
-        g.avg_entry = g.cost_basis / g.contracts_or_shares / (g.is_option ? 100 : 1);
-        g.avg_exit = g.proceeds / g.contracts_or_shares / (g.is_option ? 100 : 1);
+        const m = g.is_option ? 100 : 1;
+        g.avg_entry = g.cost_basis / g.contracts_or_shares / m;
+        g.avg_exit = g.proceeds / g.contracts_or_shares / m;
         g.pnl_pct = g.cost_basis > 0 ? (g.pnl / g.cost_basis) * 100 : 0;
     });
     return rows.sort((a, b) => b.entry_date.localeCompare(a.entry_date));
@@ -569,8 +694,7 @@ function renderTradesTable(trades) {
             <th>Avg Entry</th><th>Avg Exit</th>
             <th>P&L %</th><th>P&L $</th><th>Exit Reasons</th>
         `;
-        const groups = groupTradesByCampaign(trades);
-        groups.forEach(g => {
+        groupTradesByCampaign(trades).forEach(g => {
             const tr = document.createElement("tr");
             tr.innerHTML = `
                 <td>${g.entry_date}</td>
@@ -592,7 +716,7 @@ function renderTradesTable(trades) {
     if (hasOptions) {
         thead.innerHTML = `
             <th>Entry</th><th>Exit</th><th>Side</th>
-            <th>Type/Strike</th><th>Contracts</th>
+            <th>Strike</th><th>Contracts</th>
             <th>Entry Prem.</th><th>Exit Prem.</th>
             <th>Cost ($)</th><th>P&L %</th><th>P&L $</th><th>Reason</th>
         `;
@@ -604,8 +728,7 @@ function renderTradesTable(trades) {
         `;
     }
 
-    const sorted = [...trades].reverse();
-    sorted.forEach(t => {
+    [...trades].reverse().forEach(t => {
         const tr = document.createElement("tr");
         if (t.is_option) {
             const sideLabel = (t.option_position || "long").toUpperCase() + " " + (t.option_type || "").toUpperCase();
@@ -614,7 +737,7 @@ function renderTradesTable(trades) {
                 <td>${t.entry_date}</td>
                 <td>${t.exit_date}</td>
                 <td>${sideLabel}</td>
-                <td>${t.option_type ? t.option_type.toUpperCase()[0] : ""} ${t.option_strike ?? ""}</td>
+                <td>${t.option_strike ?? ""}</td>
                 <td>${t.shares}</td>
                 <td>${formatMoney(t.entry_price)}</td>
                 <td>${formatMoney(t.exit_price)}</td>
@@ -640,20 +763,25 @@ function renderTradesTable(trades) {
     });
 }
 
-// ── Equity curve (with optional avg-cost overlay) ────────────────────────────
+// ── Equity curve ─────────────────────────────────────────────────────────────
 
-function renderEquityCurve(curveData, benchData, containerId) {
+function makeChart(containerId) {
     const container = document.getElementById(containerId);
     container.innerHTML = "";
     const chart = LightweightCharts.createChart(container, {
         width: container.clientWidth,
-        height: 400,
+        height: 420,
         layout: { background: { type: "solid", color: "transparent" }, textColor: "#94a3b8" },
         grid: { vertLines: { color: "rgba(255,255,255,0.05)" }, horzLines: { color: "rgba(255,255,255,0.05)" } },
         timeScale: { timeVisible: false, borderColor: "rgba(255,255,255,0.1)" },
         rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
     });
+    window.addEventListener("resize", () => chart.applyOptions({ width: container.clientWidth }));
+    return { chart, container };
+}
 
+function renderEquityCurve(curveData, benchData, containerId) {
+    const { chart } = makeChart(containerId);
     const eqSeries = chart.addAreaSeries({
         lineColor: "#3b82f6",
         topColor: "rgba(59, 130, 246, 0.4)",
@@ -666,30 +794,83 @@ function renderEquityCurve(curveData, benchData, containerId) {
         const bSeries = chart.addLineSeries({ color: "#94a3b8", lineWidth: 1, lineStyle: 2 });
         bSeries.setData(benchData.map(d => ({ time: d.date, value: d.equity })));
     }
+    chart.timeScale().fitContent();
+}
 
-    // Average cost basis overlay (on its own scale) — only when we have any.
-    const hasAvgCost = curveData.some(d => d.avg_cost != null);
-    if (hasAvgCost) {
-        const avgSeries = chart.addLineSeries({
-            color: "#f59e0b",
-            lineWidth: 1,
-            lineStyle: 0,
-            priceScaleId: "avg_cost",
-            title: "Avg cost",
+// ── Position chart: underlying price + entry/exit markers + avg-cost line ──
+
+function reconstructUnderlyingSeries(data) {
+    // Benchmark is buy-and-hold of the underlying. Derive close from it.
+    const bench = data.benchmark_curve || [];
+    if (bench.length === 0) return [];
+    const firstEquity = bench[0].equity;
+    if (firstEquity <= 0) return [];
+    return bench.map(d => ({ time: d.date, value: d.equity / firstEquity }));
+}
+
+function renderPositionChart(data, containerId) {
+    const underlyingNormalized = reconstructUnderlyingSeries(data);
+    if (underlyingNormalized.length === 0) {
+        document.getElementById(containerId).innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">No price history to plot.</div>';
+        return;
+    }
+    // Recover absolute close from the first trade's entry_underlying_price if any,
+    // otherwise from the avg_cost on the equity_curve.
+    const trades = data.trades || [];
+    let scale = 1.0;
+    if (trades.length > 0 && trades[0].entry_underlying_price > 0) {
+        // Find normalized value at the trade's entry date
+        const t0 = trades[0];
+        const normEntry = underlyingNormalized.find(p => p.time === t0.entry_date);
+        if (normEntry && normEntry.value > 0) {
+            scale = t0.entry_underlying_price / normEntry.value;
+        }
+    } else if (data.equity_curve && data.equity_curve.length) {
+        // No trades — scale benchmark so it shows real $ rather than 1.0-normalized.
+        // Use initial_capital / shares = first_close; bench[0].equity == initial_capital,
+        // so we just multiply by initial / first_normalized which is initial / 1.
+        scale = data.initial_capital;
+    }
+    const priceData = underlyingNormalized.map(d => ({ time: d.time, value: d.value * scale }));
+
+    const { chart } = makeChart(containerId);
+    const priceSeries = chart.addLineSeries({ color: "#60a5fa", lineWidth: 2, title: "Close" });
+    priceSeries.setData(priceData);
+
+    // Entry/exit markers from trades
+    const markers = [];
+    trades.forEach(t => {
+        const isShortOption = t.is_option && t.option_position === "short";
+        const entryColor = isShortOption ? "#f97316" : "#22c55e";  // orange for short, green for long
+        const exitColor = t.pnl >= 0 ? "#22c55e" : "#ef4444";
+        markers.push({
+            time: t.entry_date,
+            position: "belowBar",
+            color: entryColor,
+            shape: "arrowUp",
+            text: `Open${t.is_option ? " " + (t.option_position || "long")[0].toUpperCase() : ""}`,
         });
-        chart.priceScale("avg_cost").applyOptions({
-            scaleMargins: { top: 0.1, bottom: 0.4 },
-            borderColor: "rgba(245, 158, 11, 0.2)",
+        markers.push({
+            time: t.exit_date,
+            position: "aboveBar",
+            color: exitColor,
+            shape: "arrowDown",
+            text: t.exit_reason.replace(/_/g, " "),
         });
-        // Only feed points where we hold something; gaps render as breaks.
-        const pts = curveData
-            .filter(d => d.avg_cost != null)
-            .map(d => ({ time: d.date, value: d.avg_cost }));
-        avgSeries.setData(pts);
+    });
+    // Lightweight Charts requires markers sorted ascending by time
+    markers.sort((a, b) => a.time.localeCompare(b.time));
+    priceSeries.setMarkers(markers);
+
+    // Avg cost basis line on the same scale
+    const eq = data.equity_curve || [];
+    const avgCostPoints = eq.filter(d => d.avg_cost != null).map(d => ({ time: d.date, value: d.avg_cost }));
+    if (avgCostPoints.length > 0) {
+        const avgSeries = chart.addLineSeries({ color: "#f59e0b", lineWidth: 1, title: "Avg cost" });
+        avgSeries.setData(avgCostPoints);
     }
 
     chart.timeScale().fitContent();
-    window.addEventListener("resize", () => chart.applyOptions({ width: container.clientWidth }));
 }
 
 // ── Saved strategies ─────────────────────────────────────────────────────────
@@ -701,10 +882,8 @@ async function loadSavedStrategiesList() {
         const data = await res.json();
         const select = document.getElementById("saved-strategies");
         select.innerHTML = '<option value="">Load Strategy...</option>';
-        savedStrategiesIndex = {};
         savedStrategiesById = {};
         (data.strategies || []).forEach(s => {
-            savedStrategiesIndex[s.id] = s.name;
             savedStrategiesById[s.id] = s;
             const opt = document.createElement("option");
             opt.value = s.id;
@@ -731,13 +910,15 @@ function loadSelectedStrategy() {
         return;
     }
     applyStrategyToForm(record.definition);
+    updateStrategySummary();
 }
 
 async function deleteSelectedStrategy() {
     const sel = document.getElementById("saved-strategies");
     const id = sel.value;
     if (!id) return;
-    if (!confirm(`Delete strategy "${savedStrategiesIndex[id]}"?`)) return;
+    const name = savedStrategiesById[id]?.name || "this strategy";
+    if (!confirm(`Delete "${name}"?`)) return;
     try {
         const res = await fetch(`${apiBase}/backtest/strategies/${id}`, { method: "DELETE" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -746,6 +927,13 @@ async function deleteSelectedStrategy() {
     } catch (e) {
         alert("Failed to delete: " + e.message);
     }
+}
+
+function inferAssetFromDef(opt) {
+    if (!opt || !opt.enabled) return "stock";
+    const isShort = opt.position === "short";
+    if (opt.type === "call") return isShort ? "short_call" : "long_call";
+    return isShort ? "short_put" : "long_put";
 }
 
 function applyStrategyToForm(def) {
@@ -764,16 +952,13 @@ function applyStrategyToForm(def) {
     document.getElementById("max-hold").value = ex.max_hold_days ?? "";
     if (ex.pyramiding_exit_mode) document.getElementById("pyr-exit").value = ex.pyramiding_exit_mode;
 
-    // Options
+    // Asset Type (inferred from options config)
+    selectAsset(inferAssetFromDef(def.options));
     const opt = def.options || {};
-    document.getElementById("options-enabled").checked = !!opt.enabled;
-    if (opt.type) document.getElementById("option-type").value = opt.type;
-    if (opt.position) document.getElementById("option-position").value = opt.position;
     if (opt.target_dte != null) document.getElementById("option-dte").value = opt.target_dte;
     if (opt.target_delta != null) document.getElementById("option-delta").value = opt.target_delta;
-    toggleOptionsInputs();
 
-    // Pyramiding — supports both new and legacy fields
+    // Pyramiding (supports both new and legacy fields)
     const pyr = def.pyramiding || {};
     document.getElementById("pyr-enabled").checked = !!pyr.enabled;
     if (pyr.max_positions != null) document.getElementById("pyr-max").value = pyr.max_positions;
@@ -788,7 +973,13 @@ function applyStrategyToForm(def) {
     togglePyrInputs();
     updatePyrFieldVisibility();
 
-    // Rebuild conditions from the entry/exit trees
+    // Conditions — flip to Advanced if exit conditions exist or entry has >1 leaf
+    const entryConds = def.entry?.conditions || [];
+    const exitConds = ex.conditions?.conditions || [];
+    const needsAdvanced = entryConds.length > 1 || exitConds.length > 0
+        || ex.trailing_stop_pct != null || ex.max_hold_days != null;
+    applyStrategyMode(needsAdvanced ? "advanced" : "simple");
+
     rebuildConditionsFromTree("entry-conditions-container", "entry-operator-toggle", def.entry);
     rebuildConditionsFromTree("exit-conditions-container", "exit-operator-toggle", ex.conditions);
     updateEntryWarning();
@@ -797,10 +988,7 @@ function applyStrategyToForm(def) {
 function rebuildConditionsFromTree(containerId, toggleId, tree) {
     const container = document.getElementById(containerId);
     container.innerHTML = "";
-    if (!tree || !tree.conditions || tree.conditions.length === 0) {
-        return;
-    }
-    // Set AND/OR toggle
+    if (!tree || !tree.conditions || tree.conditions.length === 0) return;
     const op = (tree.operator || "AND").toUpperCase();
     document.querySelectorAll(`#${toggleId} .toggle-btn`).forEach(b => {
         b.classList.toggle("active", b.dataset.val === op);

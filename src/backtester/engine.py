@@ -415,6 +415,8 @@ def _close_position(
         direction=direction,
         entry_price=round(pos.entry_price, 4),
         exit_price=round(fill_price, 4),
+        entry_underlying_price=round(pos.entry_underlying_price, 4),
+        exit_underlying_price=round(price, 4),
         shares=pos.shares,
         pnl=round(pnl, 2),
         pnl_pct=round(pnl_pct, 2),

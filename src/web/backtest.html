@@ -11,30 +11,73 @@
     <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="/config.js"></script>
     <style>
-        .builder-section {
-            background: rgba(15, 23, 42, 0.4);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
+        .builder-tabs, .results-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.25rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
 
-        .builder-row {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-            margin-bottom: 1rem;
-            flex-wrap: wrap;
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0.75rem 1.25rem;
+            font-family: inherit;
+            font-size: 0.92rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: color 0.15s, border-color 0.15s;
+        }
+
+        .tab-btn:hover { color: var(--text-primary); }
+        .tab-btn.active {
+            color: var(--accent-blue);
+            border-bottom-color: var(--accent-blue);
+        }
+
+        .builder-panel, .results-tabpanel { display: none; }
+        .builder-panel.active, .results-tabpanel.active { display: block; }
+
+        .panel-section {
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 12px;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .panel-section h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin: 0 0 0.85rem;
+        }
+
+        .grid-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 0.85rem;
+            align-items: end;
+        }
+
+        .field { display: flex; flex-direction: column; }
+        .field label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.3rem;
         }
 
         .settings-input {
             background: rgba(15, 23, 42, 0.6);
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: var(--text-primary);
-            padding: 0.5rem 0.75rem;
+            padding: 0.45rem 0.7rem;
             border-radius: 6px;
             font-family: inherit;
             font-size: 0.9rem;
-            transition: border-color 0.2s, box-shadow 0.2s;
+            transition: border-color 0.15s, box-shadow 0.15s;
         }
 
         .settings-input:focus {
@@ -50,28 +93,62 @@
             padding: 0.5rem 1rem;
             border-radius: 6px;
             font-weight: 500;
+            font-size: 0.88rem;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: background 0.15s;
         }
-
         .btn:hover { background: #2563eb; }
         .btn.secondary { background: rgba(255, 255, 255, 0.1); }
         .btn.secondary:hover { background: rgba(255, 255, 255, 0.2); }
         .btn.danger { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
         .btn.danger:hover { background: rgba(239, 68, 68, 0.3); }
+        .btn.ghost { background: transparent; color: var(--text-secondary); }
+        .btn.ghost:hover { color: var(--text-primary); }
+
+        .asset-radio-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.55rem;
+        }
+        .asset-radio {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.2rem;
+            padding: 0.7rem 0.4rem;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+            text-align: center;
+        }
+        .asset-radio input { display: none; }
+        .asset-radio .asset-title { font-weight: 600; font-size: 0.88rem; }
+        .asset-radio .asset-sub { font-size: 0.7rem; color: var(--text-secondary); }
+        .asset-radio:hover { border-color: rgba(59, 130, 246, 0.4); }
+        .asset-radio.selected {
+            border-color: var(--accent-blue);
+            background: rgba(59, 130, 246, 0.12);
+        }
 
         .condition-node {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 8px;
-            padding: 1rem;
+            padding: 0.9rem;
             margin-bottom: 0.5rem;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
         }
+        .condition-node .settings-input { padding: 0.4rem 0.55rem; font-size: 0.85rem; }
 
         .chart-container {
             width: 100%;
-            height: 400px;
-            margin-bottom: 2rem;
+            height: 420px;
+            margin-bottom: 1.5rem;
             border-radius: 12px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.05);
@@ -81,78 +158,60 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 1rem;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
         }
-
         .stat-card {
             background: rgba(15, 23, 42, 0.4);
-            padding: 1rem;
+            padding: 0.9rem 1rem;
             border-radius: 12px;
             text-align: center;
         }
-
         .stat-val {
-            font-size: 1.25rem;
+            font-size: 1.2rem;
             font-weight: 600;
-            margin-top: 0.5rem;
+            margin-top: 0.35rem;
         }
-
         .stat-label {
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--text-secondary);
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
 
         .toggle-group {
-            display: flex;
+            display: inline-flex;
             background: rgba(15, 23, 42, 0.6);
             border-radius: 6px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
-
         .toggle-btn {
-            padding: 0.5rem 1rem;
+            padding: 0.45rem 0.95rem;
             background: transparent;
             border: none;
             color: var(--text-secondary);
             cursor: pointer;
-            transition: all 0.2s;
-            font-size: 0.85rem;
+            transition: all 0.15s;
+            font-size: 0.82rem;
             font-weight: 500;
         }
-
         .toggle-btn.active {
             background: var(--accent-blue);
             color: white;
         }
 
-        .fold-table-wrapper { overflow-x: auto; margin-bottom: 1.5rem; }
-
-        table.data-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.85rem;
-        }
-
-        table.data-table th, table.data-table td {
-            padding: 0.75rem;
-            text-align: left;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        table.data-table th {
-            color: var(--text-secondary);
-            font-weight: 600;
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.85rem;
         }
 
         .field-help {
             font-size: 0.7rem;
             color: var(--text-secondary);
-            margin-top: 0.25rem;
-            line-height: 1.3;
-            max-width: 320px;
+            margin-top: 0.3rem;
+            line-height: 1.35;
         }
 
         .inline-warning {
@@ -165,326 +224,457 @@
             font-size: 0.85rem;
             margin-bottom: 0.75rem;
         }
+
+        .run-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            position: sticky;
+            top: 1rem;
+            z-index: 10;
+        }
+
+        .strategy-summary {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            max-width: 60ch;
+        }
+        .strategy-summary strong { color: var(--text-primary); font-weight: 600; }
+
+        .fold-table-wrapper { overflow-x: auto; margin-bottom: 1.5rem; }
+        table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        table.data-table th, table.data-table td {
+            padding: 0.65rem 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        table.data-table th { color: var(--text-secondary); font-weight: 600; }
+
+        .wf-trigger-card {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .wf-trigger-card .wf-blurb {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            max-width: 55ch;
+        }
+        .wf-controls {
+            display: none;
+            gap: 0.85rem;
+            align-items: end;
+            padding: 1rem 1.25rem;
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 10px;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .wf-controls.active { display: flex; }
+
+        .options-conditional { display: none; }
+        .options-conditional.active { display: contents; }
     </style>
 </head>
 
 <body>
     <div id="app">
-        <header class="glass" style="margin-bottom: 1rem; padding: 1.5rem;">
+        <header class="glass" style="margin-bottom: 1rem; padding: 1.25rem 1.5rem;">
             <div class="header-content" style="display: flex; align-items: center; gap: 1rem;">
                 <a href="index.html" class="btn-icon" style="text-decoration: none;">&#8592;</a>
-                <div>
-                    <h1 style="font-size: 1.5rem; margin-bottom: 0;">Strategy Backtester</h1>
+                <h1 style="font-size: 1.4rem; margin-bottom: 0;">Strategy Backtester</h1>
+                <div style="margin-left: auto; display: flex; gap: 0.5rem; align-items: center;">
+                    <select id="saved-strategies" class="settings-input" onchange="loadSelectedStrategy()" style="min-width: 200px;">
+                        <option value="">Load Strategy...</option>
+                    </select>
+                    <button class="btn secondary" onclick="saveStrategy()">Save</button>
+                    <button class="btn danger" id="delete-strategy-btn" onclick="deleteSelectedStrategy()" style="display:none;">Delete</button>
                 </div>
             </div>
         </header>
 
         <main>
-            <section class="glass card full-width" style="margin-bottom: 2rem;">
-                <div class="card-header">
-                    <h2>Configuration</h2>
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <select id="saved-strategies" class="settings-input" onchange="loadSelectedStrategy()">
-                            <option value="">Load Strategy...</option>
-                        </select>
-                        <button class="btn secondary" onclick="saveStrategy()">Save</button>
-                        <button class="btn danger" id="delete-strategy-btn" onclick="deleteSelectedStrategy()" style="display:none;">Delete</button>
-                    </div>
+            <!-- Run bar — always visible, sticky at top of viewport while scrolling -->
+            <div class="run-bar">
+                <div class="strategy-summary" id="strategy-summary">
+                    Configure a strategy and hit <strong>Run</strong>.
                 </div>
+                <button class="btn" style="padding: 0.7rem 2rem; font-size: 1rem;" id="run-btn" onclick="runBacktest()">Run Backtest 🚀</button>
+            </div>
 
-                <!-- Target & Dates -->
-                <div class="builder-section">
-                    <h3 style="font-size: 1rem; margin-bottom: 1rem;">Target & Dates</h3>
-                    <div class="builder-row">
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Ticker</label>
-                            <input type="text" id="ticker" class="settings-input" value="SPY" style="width: 100px;">
+            <!-- Builder Tabs -->
+            <nav class="builder-tabs" role="tablist">
+                <button class="tab-btn active" data-builder-tab="setup">Setup</button>
+                <button class="tab-btn" data-builder-tab="strategy">Strategy</button>
+                <button class="tab-btn" data-builder-tab="scalein">Scale-In</button>
+            </nav>
+
+            <!-- ── SETUP TAB ──────────────────────────────────────────────── -->
+            <section class="builder-panel active" data-builder-panel="setup">
+                <div class="panel-section">
+                    <h3>Target & Dates</h3>
+                    <div class="grid-row">
+                        <div class="field">
+                            <label>Ticker</label>
+                            <input type="text" id="ticker" class="settings-input" value="SPY">
                         </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Start Date</label>
+                        <div class="field">
+                            <label>Start Date</label>
                             <input type="date" id="start-date" class="settings-input">
                         </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">End Date</label>
+                        <div class="field">
+                            <label>End Date</label>
                             <input type="date" id="end-date" class="settings-input">
                         </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Timeframe</label>
+                        <div class="field">
+                            <label>Timeframe</label>
                             <select id="timeframe" class="settings-input">
                                 <option value="daily">Daily</option>
                                 <option value="weekly">Weekly</option>
                             </select>
                         </div>
+                        <div class="field">
+                            <label>Initial Capital</label>
+                            <input type="number" id="capital" class="settings-input" value="10000">
+                        </div>
                     </div>
                 </div>
 
-                <!-- Asset Type / Options -->
-                <div class="builder-section">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <h3 style="font-size: 1rem; margin: 0;">Asset Type</h3>
-                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                            <input type="checkbox" id="options-enabled" onchange="toggleOptionsInputs()"> Enable Options
+                <div class="panel-section">
+                    <h3>Asset Type</h3>
+                    <div class="asset-radio-group" id="asset-radio-group">
+                        <label class="asset-radio selected" data-asset="stock">
+                            <input type="radio" name="asset" value="stock" checked>
+                            <span class="asset-title">Stock (Long)</span>
+                            <span class="asset-sub">Buy & hold the underlying</span>
+                        </label>
+                        <label class="asset-radio" data-asset="long_call">
+                            <input type="radio" name="asset" value="long_call">
+                            <span class="asset-title">Long Call</span>
+                            <span class="asset-sub">Pay premium, profit on rise</span>
+                        </label>
+                        <label class="asset-radio" data-asset="long_put">
+                            <input type="radio" name="asset" value="long_put">
+                            <span class="asset-title">Long Put</span>
+                            <span class="asset-sub">Pay premium, profit on drop</span>
+                        </label>
+                        <label class="asset-radio" data-asset="short_put">
+                            <input type="radio" name="asset" value="short_put">
+                            <span class="asset-title">Short Put (CSP)</span>
+                            <span class="asset-sub">Collect premium, bullish</span>
+                        </label>
+                        <label class="asset-radio" data-asset="short_call">
+                            <input type="radio" name="asset" value="short_call">
+                            <span class="asset-title">Short Call</span>
+                            <span class="asset-sub">Collect premium, bearish</span>
                         </label>
                     </div>
-                    <div class="builder-row" id="options-inputs" style="opacity: 0.5; pointer-events: none;">
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Side</label>
-                            <select id="option-position" class="settings-input">
-                                <option value="long">Buy (Long)</option>
-                                <option value="short">Sell (Short — CSP / CC)</option>
-                            </select>
-                            <div class="field-help">Short = collect premium (CSP for puts, covered call for calls). Long = pay premium.</div>
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Type</label>
-                            <select id="option-type" class="settings-input">
-                                <option value="call">Call</option>
-                                <option value="put">Put</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Target DTE</label>
-                            <input type="number" id="option-dte" class="settings-input" value="30">
-                            <div class="field-help">Calendar days to expiration at entry.</div>
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Target Delta</label>
-                            <input type="number" id="option-delta" class="settings-input" value="0.50" step="0.01" min="0.01" max="0.99">
-                            <div class="field-help">Absolute delta. For puts, sign is flipped internally.</div>
+
+                    <div id="options-fields" style="display: none; margin-top: 1.25rem;">
+                        <div class="grid-row">
+                            <div class="field">
+                                <label>Target DTE (calendar days)</label>
+                                <input type="number" id="option-dte" class="settings-input" value="30">
+                            </div>
+                            <div class="field">
+                                <label>Target Delta (absolute)</label>
+                                <input type="number" id="option-delta" class="settings-input" value="0.50" step="0.01" min="0.01" max="0.99">
+                                <div class="field-help">Sign is handled internally — enter 0.30 for both ±0.30 options.</div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Entry Conditions -->
-                <div class="builder-section">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <h3 style="font-size: 1rem; margin: 0;">Entry Conditions</h3>
-                        <div class="toggle-group" id="entry-operator-toggle">
+                <div class="panel-section">
+                    <h3>Costs</h3>
+                    <div class="grid-row">
+                        <div class="field">
+                            <label>Commission $ / fill</label>
+                            <input type="number" id="commission" class="settings-input" value="0" step="0.01">
+                        </div>
+                        <div class="field">
+                            <label>Slippage %</label>
+                            <input type="number" id="slippage" class="settings-input" value="0" step="0.01">
+                            <div class="field-help">Applied on stock fills; option fills use the BS mark.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── STRATEGY TAB ─────────────────────────────────────────────── -->
+            <section class="builder-panel" data-builder-panel="strategy">
+                <div class="panel-section">
+                    <div class="section-header">
+                        <h3 style="margin: 0;">Builder Mode</h3>
+                        <div class="toggle-group" id="strategy-mode-toggle">
+                            <button class="toggle-btn active" data-val="simple">Simple</button>
+                            <button class="toggle-btn" data-val="advanced">Advanced</button>
+                        </div>
+                    </div>
+                    <div class="field-help" id="strategy-mode-help">
+                        <strong>Simple:</strong> one entry condition, one optional exit condition, stop/take-profit only.
+                        <strong>Advanced</strong> reveals AND/OR compound trees, multiple conditions, trailing stop, max-hold, and exit-signal logic.
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <div class="section-header">
+                        <h3 style="margin: 0;">Entry Conditions</h3>
+                        <div class="toggle-group advanced-only" id="entry-operator-toggle" style="display:none;">
                             <button class="toggle-btn active" data-val="AND">ALL (AND)</button>
                             <button class="toggle-btn" data-val="OR">ANY (OR)</button>
                         </div>
                     </div>
-
                     <div id="entry-warning" class="inline-warning">
-                        ⚠ Entry conditions are empty — the strategy will never open a position.
+                        ⚠ Entry is empty — the strategy will never open a position.
                     </div>
-
                     <div id="entry-conditions-container"></div>
-
-                    <button class="btn secondary" style="margin-top: 1rem; width: 100%;" onclick="addCondition('entry-conditions-container')">+ Add Condition</button>
+                    <button class="btn secondary advanced-only" style="margin-top: 0.75rem; width: 100%; display:none;" onclick="addCondition('entry-conditions-container')">+ Add Entry Condition</button>
                 </div>
 
-                <!-- Exit Conditions -->
-                <div class="builder-section">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <h3 style="font-size: 1rem; margin: 0;">Exit Conditions (Compound)</h3>
+                <div class="panel-section">
+                    <div class="section-header">
+                        <h3 style="margin: 0;">Exit — Hard Limits</h3>
+                    </div>
+                    <div class="grid-row">
+                        <div class="field">
+                            <label>Stop Loss %</label>
+                            <input type="number" id="stop-loss" class="settings-input" placeholder="None" step="0.1">
+                        </div>
+                        <div class="field">
+                            <label>Take Profit %</label>
+                            <input type="number" id="take-profit" class="settings-input" placeholder="None" step="0.1">
+                        </div>
+                        <div class="field advanced-only" style="display:none;">
+                            <label>Trailing Stop %</label>
+                            <input type="number" id="trailing-stop" class="settings-input" placeholder="None" step="0.1">
+                        </div>
+                        <div class="field advanced-only" style="display:none;">
+                            <label>Max Hold (Bars)</label>
+                            <input type="number" id="max-hold" class="settings-input" placeholder="None">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section advanced-only" style="display:none;">
+                    <div class="section-header">
+                        <h3 style="margin: 0;">Exit — Indicator Signal</h3>
                         <div class="toggle-group" id="exit-operator-toggle">
                             <button class="toggle-btn" data-val="AND">ALL (AND)</button>
                             <button class="toggle-btn active" data-val="OR">ANY (OR)</button>
                         </div>
                     </div>
-
                     <div id="exit-conditions-container"></div>
-
-                    <button class="btn secondary" style="margin-top: 1rem; width: 100%;" onclick="addCondition('exit-conditions-container')">+ Add Condition</button>
+                    <button class="btn secondary" style="margin-top: 0.75rem; width: 100%;" onclick="addCondition('exit-conditions-container')">+ Add Exit Condition</button>
                 </div>
 
-                <!-- Position Sizing & Fixed Exits -->
-                <div class="builder-section">
-                    <h3 style="font-size: 1rem; margin-bottom: 1rem;">Position Sizing & Risk</h3>
-                    <div class="builder-row">
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Capital</label>
-                            <input type="number" id="capital" class="settings-input" value="10000" style="width: 120px;">
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Sizing Method</label>
+                <div class="panel-section">
+                    <h3>Position Sizing</h3>
+                    <div class="grid-row">
+                        <div class="field">
+                            <label>Method</label>
                             <select id="sizing-method" class="settings-input" onchange="toggleSizingInputs()">
                                 <option value="percent_equity">Percent of Equity</option>
                                 <option value="fixed_dollar">Fixed Dollar Amount</option>
                                 <option value="fixed_shares">Fixed Shares</option>
-                                <option value="risk_based">Risk-Based (% of Equity)</option>
+                                <option value="risk_based">Risk-Based</option>
                             </select>
                         </div>
-                        <div>
-                            <label class="stat-label" id="sizing-value-label" style="display: block; margin-bottom: 0.25rem;">Value</label>
-                            <input type="number" id="sizing-value" class="settings-input" value="100" style="width: 100px;">
+                        <div class="field">
+                            <label id="sizing-value-label">Value</label>
+                            <input type="number" id="sizing-value" class="settings-input" value="100">
                         </div>
-                        <div id="risk-pct-container" style="display: none;">
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Risk % per Trade</label>
-                            <input type="number" id="risk-pct" class="settings-input" value="2.0" step="0.1" style="width: 100px;">
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Commission $</label>
-                            <input type="number" id="commission" class="settings-input" value="0" step="0.01" style="width: 90px;">
-                            <div class="field-help">Flat fee per fill.</div>
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Slippage %</label>
-                            <input type="number" id="slippage" class="settings-input" value="0" step="0.01" style="width: 90px;">
-                        </div>
-                    </div>
-
-                    <h3 style="font-size: 1rem; margin-bottom: 1rem; margin-top: 1.5rem;">Exits</h3>
-                    <div class="builder-row">
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Stop Loss %</label>
-                            <input type="number" id="stop-loss" class="settings-input" placeholder="None" style="width: 100px;" step="0.1">
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Take Profit %</label>
-                            <input type="number" id="take-profit" class="settings-input" placeholder="None" style="width: 100px;" step="0.1">
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Trailing Stop %</label>
-                            <input type="number" id="trailing-stop" class="settings-input" placeholder="None" style="width: 100px;" step="0.1">
-                        </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Max Hold (Bars)</label>
-                            <input type="number" id="max-hold" class="settings-input" placeholder="None" style="width: 100px;">
+                        <div class="field" id="risk-pct-container" style="display: none;">
+                            <label>Risk % per Trade</label>
+                            <input type="number" id="risk-pct" class="settings-input" value="2.0" step="0.1">
                         </div>
                     </div>
                 </div>
+            </section>
 
-                <!-- Pyramiding / Scale-In -->
-                <div class="builder-section">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <h3 style="font-size: 1rem; margin: 0;">Scale-In (Average Down / Pyramid)</h3>
-                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                            <input type="checkbox" id="pyr-enabled" onchange="togglePyrInputs()"> Enable Scale-In
+            <!-- ── SCALE-IN TAB ─────────────────────────────────────────────── -->
+            <section class="builder-panel" data-builder-panel="scalein">
+                <div class="panel-section">
+                    <div class="section-header">
+                        <h3 style="margin: 0;">Scale-In (Average Down)</h3>
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9rem;">
+                            <input type="checkbox" id="pyr-enabled" onchange="togglePyrInputs()"> Enable scale-in
                         </label>
                     </div>
+                    <div class="field-help" style="margin-bottom: 1rem;">
+                        When enabled, the engine can add tranches to an open position as price moves against you. Use this to model "double-down to recover losing positions" strategies.
+                    </div>
+
                     <div id="pyr-inputs" style="opacity: 0.5; pointer-events: none;">
-                        <div class="builder-row">
-                            <div>
-                                <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Max Tranches</label>
-                                <input type="number" id="pyr-max" class="settings-input" value="3" min="2" style="width: 90px;">
+                        <div class="grid-row">
+                            <div class="field">
+                                <label>Max Tranches</label>
+                                <input type="number" id="pyr-max" class="settings-input" value="3" min="2">
                             </div>
-                            <div>
-                                <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Trigger</label>
+                            <div class="field">
+                                <label>Trigger</label>
                                 <select id="pyr-trigger-mode" class="settings-input" onchange="updatePyrFieldVisibility()">
                                     <option value="pullback_only">Pullback only</option>
                                     <option value="signal_only">Entry signal only</option>
                                     <option value="both">Both (pullback AND signal)</option>
                                 </select>
-                                <div class="field-help">"Pullback only" = price drop fires the next tranche, ignoring the entry tree. "Signal only" = re-evaluate the entry conditions each bar. "Both" = require both.</div>
                             </div>
-                            <div id="pyr-pullback-pct-container">
-                                <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Pullback %</label>
-                                <input type="number" id="pyr-pullback-pct" class="settings-input" value="10.0" step="0.5" style="width: 90px;">
+                            <div class="field" id="pyr-pullback-pct-container">
+                                <label>Pullback %</label>
+                                <input type="number" id="pyr-pullback-pct" class="settings-input" value="10.0" step="0.5">
                             </div>
-                            <div id="pyr-pullback-ref-container">
-                                <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Pullback Reference</label>
+                            <div class="field" id="pyr-pullback-ref-container">
+                                <label>Pullback Reference</label>
                                 <select id="pyr-pullback-ref" class="settings-input">
                                     <option value="last_fill">From last fill</option>
                                     <option value="original_entry">From original entry</option>
                                     <option value="high_watermark">From highest since entry</option>
                                 </select>
-                                <div class="field-help">"last fill" needs a fresh drop each tranche (steep). "original entry" fires multiple tranches off one drop. "highest since entry" tracks the campaign peak.</div>
                             </div>
-                            <div>
-                                <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Exit Mode</label>
+                            <div class="field">
+                                <label>Exit Mode</label>
                                 <select id="pyr-exit" class="settings-input">
-                                    <option value="sell_all">Sell whole campaign on exit</option>
+                                    <option value="sell_all">Sell whole campaign</option>
                                     <option value="sell_profitable">Sell only profitable tranches</option>
                                 </select>
                             </div>
                         </div>
+                        <div class="field-help" id="pyr-reference-help" style="margin-top: 1rem;">
+                            <strong>last fill</strong> requires a fresh drop after each tranche — steep ladders.
+                            <strong>original entry</strong> fires multiple tranches off the same overall drop.
+                            <strong>highest since entry</strong> tracks the campaign's peak — better for trailing scale-ins.
+                        </div>
                     </div>
                 </div>
+            </section>
 
-                <!-- Walk Forward -->
-                <div class="builder-section" style="margin-bottom: 0;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <h3 style="font-size: 1rem; margin: 0;">Walk-Forward Analysis</h3>
-                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                            <input type="checkbox" id="wf-enabled" onchange="toggleWfInputs()"> Enable
-                        </label>
+            <!-- ── RESULTS ──────────────────────────────────────────────────── -->
+            <div id="results-panel" style="display: none;">
+                <nav class="results-tabs">
+                    <button class="tab-btn active" data-results-tab="summary">Summary</button>
+                    <button class="tab-btn" data-results-tab="position">Position Chart</button>
+                    <button class="tab-btn" data-results-tab="trades">Trades</button>
+                    <button class="tab-btn" data-results-tab="walkforward">Walk-Forward</button>
+                </nav>
+
+                <!-- Summary -->
+                <section class="results-tabpanel active" data-results-panel="summary">
+                    <div class="panel-section">
+                        <div class="section-header">
+                            <h3 id="results-title">Backtest Results</h3>
+                            <div class="badge green" id="results-period">YYYY - YYYY</div>
+                        </div>
+                        <div class="stats-grid" id="stats-container"></div>
+                        <h3>Equity Curve</h3>
+                        <div id="equity-chart" class="chart-container"></div>
                     </div>
+                </section>
 
-                    <div class="builder-row" id="wf-inputs" style="opacity: 0.5; pointer-events: none;">
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Mode</label>
+                <!-- Position chart — underlying price + entry/exit markers + avg cost line -->
+                <section class="results-tabpanel" data-results-panel="position">
+                    <div class="panel-section">
+                        <div class="section-header">
+                            <h3 style="margin: 0;">Underlying Price with Entries & Exits</h3>
+                            <div class="field-help" style="margin: 0;">
+                                Triangles mark fills. Orange line = weighted-average cost basis while at least one tranche is open.
+                            </div>
+                        </div>
+                        <div id="position-chart" class="chart-container"></div>
+                    </div>
+                </section>
+
+                <!-- Trades -->
+                <section class="results-tabpanel" data-results-panel="trades">
+                    <div class="panel-section">
+                        <div class="section-header">
+                            <h3 style="margin: 0;">Trade History</h3>
+                            <div class="toggle-group" id="trade-view-toggle">
+                                <button class="toggle-btn active" data-val="tranches">Tranches</button>
+                                <button class="toggle-btn" data-val="campaigns">Campaigns</button>
+                            </div>
+                        </div>
+                        <div class="fold-table-wrapper" style="max-height: 500px; overflow-y: auto;">
+                            <table class="data-table" id="trades-table">
+                                <thead style="position: sticky; top: 0; background: rgba(30, 41, 59, 0.95); z-index: 1;">
+                                    <tr id="trades-table-head"></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Walk-forward -->
+                <section class="results-tabpanel" data-results-panel="walkforward">
+                    <div class="wf-trigger-card">
+                        <div class="wf-blurb">
+                            <strong>Walk-forward</strong> splits the date range into in-sample (IS) and out-of-sample (OOS) folds, runs the strategy on each, and reports OOS-only performance — a more honest estimate of forward performance.
+                        </div>
+                        <button class="btn" id="wf-run-btn" onclick="runWalkForward()">Re-run as Walk-Forward →</button>
+                    </div>
+                    <div class="wf-controls" id="wf-controls">
+                        <div class="field">
+                            <label>Mode</label>
                             <select id="wf-mode" class="settings-input">
                                 <option value="rolling">Rolling Window</option>
                                 <option value="anchored">Anchored (Growing IS)</option>
                             </select>
                         </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">In-Sample (Trading Bars)</label>
+                        <div class="field">
+                            <label>In-Sample (Bars)</label>
                             <input type="number" id="wf-is-days" class="settings-input" value="756">
-                            <div class="field-help">756 ≈ 3 years of trading days.</div>
+                            <div class="field-help">756 ≈ 3 yr.</div>
                         </div>
-                        <div>
-                            <label class="stat-label" style="display: block; margin-bottom: 0.25rem;">Out-of-Sample (Trading Bars)</label>
+                        <div class="field">
+                            <label>Out-of-Sample (Bars)</label>
                             <input type="number" id="wf-oos-days" class="settings-input" value="252">
-                            <div class="field-help">252 ≈ 1 year of trading days.</div>
+                            <div class="field-help">252 ≈ 1 yr.</div>
                         </div>
                     </div>
-                </div>
 
-                <div style="margin-top: 1.5rem; text-align: right;">
-                    <button class="btn" style="padding: 0.75rem 2rem; font-size: 1.05rem;" id="run-btn" onclick="runBacktest()">Run Backtest 🚀</button>
-                </div>
-            </section>
-
-            <div id="results-panel" style="display: none;">
-
-                <section id="wf-results-section" class="glass card full-width" style="margin-bottom: 2rem; display: none;">
-                    <div class="card-header">
-                        <h2>Walk-Forward Analysis (Out-of-Sample)</h2>
-                        <div class="badge blue" id="wf-mode-badge">Rolling</div>
-                    </div>
-
-                    <div class="stats-grid" id="wf-stats-container"></div>
-
-                    <h3>Aggregated OOS Equity Curve</h3>
-                    <div id="wf-equity-chart" class="chart-container"></div>
-
-                    <h3>Fold Breakdown</h3>
-                    <div class="fold-table-wrapper">
-                        <table class="data-table" id="wf-fold-table">
-                            <thead>
-                                <tr>
-                                    <th>Fold</th>
-                                    <th>Period (IS)</th>
-                                    <th>Period (OOS)</th>
-                                    <th>Regime</th>
-                                    <th>IS Return</th>
-                                    <th>OOS Return</th>
-                                    <th>Degradation</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </section>
-
-                <section class="glass card full-width">
-                    <div class="card-header">
-                        <h2 id="results-title">Backtest Results</h2>
-                        <div class="badge green" id="results-period">YYYY - YYYY</div>
-                    </div>
-
-                    <div class="stats-grid" id="stats-container"></div>
-
-                    <h3>Equity Curve</h3>
-                    <div id="equity-chart" class="chart-container"></div>
-
-                    <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem;">
-                        <h3 style="margin: 0;">Trade History</h3>
-                        <div class="toggle-group" id="trade-view-toggle" style="margin-left: auto;">
-                            <button class="toggle-btn active" data-val="tranches">Tranches</button>
-                            <button class="toggle-btn" data-val="campaigns">Campaigns</button>
+                    <div id="wf-results-content" style="display: none;">
+                        <div class="panel-section">
+                            <div class="section-header">
+                                <h3 style="margin: 0;">Aggregated OOS Performance</h3>
+                                <div class="badge blue" id="wf-mode-badge">Rolling</div>
+                            </div>
+                            <div class="stats-grid" id="wf-stats-container"></div>
+                            <h3>OOS Equity Curve</h3>
+                            <div id="wf-equity-chart" class="chart-container"></div>
+                            <h3>Fold Breakdown</h3>
+                            <div class="fold-table-wrapper">
+                                <table class="data-table" id="wf-fold-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Fold</th>
+                                            <th>Period (IS)</th>
+                                            <th>Period (OOS)</th>
+                                            <th>Regime</th>
+                                            <th>IS Return</th>
+                                            <th>OOS Return</th>
+                                            <th>Degradation</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
                         </div>
-                    </div>
-                    <div class="fold-table-wrapper" style="max-height: 400px; overflow-y: auto;">
-                        <table class="data-table" id="trades-table">
-                            <thead style="position: sticky; top: 0; background: rgba(30, 41, 59, 0.95); z-index: 1;">
-                                <tr id="trades-table-head"></tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
                     </div>
                 </section>
             </div>
