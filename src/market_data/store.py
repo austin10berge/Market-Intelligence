@@ -5,7 +5,7 @@ Tables
   universe_daily_ohlcv   — (symbol, date, open, high, low, close, volume)
   universe_fundamentals  — (symbol, market_cap_b, price, beta, iv_pct,
                             fcf, debt_to_equity, revenue_growth, earnings_growth,
-                            dividend_yield, forward_pe, universes, updated_at)
+                            dividend_yield, forward_pe, peg_ratio, universes, updated_at)
 
 All writes use INSERT … ON CONFLICT … DO UPDATE so they are safe to call
 repeatedly without creating duplicates.
@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS universe_fundamentals (
     earnings_growth REAL,
     dividend_yield  REAL,
     forward_pe      REAL,
+    peg_ratio       REAL,
     universes       TEXT NOT NULL DEFAULT '',
     updated_at      TEXT NOT NULL
 );
@@ -77,6 +78,7 @@ _NEW_FUNDAMENTAL_COLUMNS = [
     "earnings_growth REAL",
     "dividend_yield REAL",
     "forward_pe REAL",
+    "peg_ratio REAL",
     "universes TEXT NOT NULL DEFAULT ''",
 ]
 
@@ -298,7 +300,7 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
     """Upsert fundamental data rows.
 
     Each row dict should have: symbol, market_cap_b, price, beta, iv_pct,
-    and optionally: fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield, forward_pe, universes.
+    and optionally: fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield, forward_pe, peg_ratio, universes.
     Returns the number of rows upserted.
     """
     if not rows:
@@ -320,6 +322,7 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
                 r.get("earnings_growth"),
                 r.get("dividend_yield"),
                 r.get("forward_pe"),
+                r.get("peg_ratio"),
                 r.get("universes", ""),
                 now,
             )
@@ -330,8 +333,8 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
             INSERT INTO universe_fundamentals
                 (symbol, market_cap_b, price, beta, iv_pct,
                  fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
-                 forward_pe, universes, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 forward_pe, peg_ratio, universes, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol) DO UPDATE SET
                 market_cap_b    = excluded.market_cap_b,
                 price           = excluded.price,
@@ -343,6 +346,7 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
                 earnings_growth = excluded.earnings_growth,
                 dividend_yield  = excluded.dividend_yield,
                 forward_pe      = excluded.forward_pe,
+                peg_ratio       = excluded.peg_ratio,
                 universes       = excluded.universes,
                 updated_at      = excluded.updated_at
             """,
@@ -363,7 +367,7 @@ def get_all_fundamentals() -> list[dict]:
         rows = conn.execute(
             """SELECT symbol, market_cap_b, price, beta, iv_pct,
                       fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
-                      forward_pe, universes, updated_at
+                      forward_pe, peg_ratio, universes, updated_at
                FROM universe_fundamentals"""
         ).fetchall()
         return [dict(r) for r in rows]

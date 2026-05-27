@@ -644,6 +644,7 @@ function renderStockCandidates(candidates) {
                 <div class="metric ${m1Class}" data-label="1M">${m1Sign}${c.pct_1m.toFixed(2)}%</div>
                 <div class="metric" data-label="P/E">${c.pe}</div>
                 <div class="metric" data-label="Fwd P/E">${c.forward_pe}</div>
+                <div class="metric" data-label="PEG">${c.peg_ratio != null ? c.peg_ratio : 'N/A'}</div>
                 <div class="metric" data-label="Beta">${c.beta}</div>
                 <div class="metric" data-label="IV/RV20" title="${ivRv20Tooltip}">${ivRv20Display}</div>
                 <div class="metric" data-label="IV Pct" title="${ivPctTooltip}">${ivPctDisplay}</div>
@@ -745,6 +746,10 @@ function renderCspCandidates(candidates) {
             <div class="metric">
                 <span class="m-val">${c.forward_pe != null ? c.forward_pe : '—'}</span>
                 <span class="m-lbl">Fwd P/E</span>
+            </div>
+            <div class="metric">
+                <span class="m-val">${c.peg_ratio != null ? c.peg_ratio : '—'}</span>
+                <span class="m-lbl">PEG</span>
             </div>
         </div>
     `).join('');

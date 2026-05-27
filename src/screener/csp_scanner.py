@@ -156,6 +156,7 @@ class ScannerParams:
     min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH
     min_dividend_yield:  float | None = DEFAULT_MIN_DIVIDEND_YIELD
     max_forward_pe:      float | None = None
+    max_peg_ratio:       float | None = None
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
     restrict_to_watchlist_universe: bool = False
@@ -185,6 +186,7 @@ class ScannerParams:
         min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH,
         min_dividend_yield: float | None = DEFAULT_MIN_DIVIDEND_YIELD,
         max_forward_pe: float | None = None,
+        max_peg_ratio: float | None = None,
         restrict_to_watchlist_universe: bool = False,
     ) -> "ScannerParams":
         """Build ScannerParams from API query parameters (all optional)."""
@@ -212,6 +214,7 @@ class ScannerParams:
             min_earnings_growth = min_earnings_growth,
             min_dividend_yield  = min_dividend_yield,
             max_forward_pe      = max_forward_pe,
+            max_peg_ratio       = max_peg_ratio,
             restrict_to_watchlist_universe = restrict_to_watchlist_universe,
         )
 
@@ -450,6 +453,12 @@ def _fundamental_filter_from_store(
             if forward_pe > params.max_forward_pe:
                 continue
 
+        # PEG ratio gate
+        peg_ratio = row.get("peg_ratio")
+        if params.max_peg_ratio is not None and peg_ratio is not None:
+            if peg_ratio > params.max_peg_ratio:
+                continue
+
         passing_tickers.append(symbol)
         fundamental_rows.append({
             "symbol":       symbol,
@@ -459,6 +468,7 @@ def _fundamental_filter_from_store(
             "iv":           iv_pct,
             "fcf":          row.get("fcf"),
             "forward_pe":   row.get("forward_pe"),
+            "peg_ratio":    row.get("peg_ratio"),
         })
 
     logger.info("Fundamental filter (store): %d/%d tickers passed", len(passing_tickers), len(tickers))
@@ -877,6 +887,7 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         fund = fundamentals_by_symbol.get(c["symbol"], {})
         c["fcf"]        = fund.get("fcf")
         c["forward_pe"] = fund.get("forward_pe")
+        c["peg_ratio"]  = fund.get("peg_ratio")
 
     filter_summary: FilterSummary = {
         "combined_unique":           len(universe),

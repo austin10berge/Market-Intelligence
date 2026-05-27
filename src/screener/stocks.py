@@ -660,6 +660,7 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
 
                 pe_val = info.get("trailingPE")
                 forward_pe_val = info.get("forwardPE")
+                peg_ratio_val = _to_float(info.get("trailingPegRatio"))
                 beta_val = info.get("beta")
                 fcf_raw = _to_float(info.get("freeCashflow"))
                 fcf_val = round(fcf_raw / 1e9, 2) if fcf_raw is not None else None
@@ -708,6 +709,7 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                         "price_history_1m": price_history_1m,
                         "pe": round(float(pe_val), 2) if pd.notna(pe_val) else "N/A",
                         "forward_pe": round(float(forward_pe_val), 2) if pd.notna(forward_pe_val) else "N/A",
+                        "peg_ratio": round(peg_ratio_val, 2) if peg_ratio_val is not None else "N/A",
                         "beta": round(float(beta_val), 2) if pd.notna(beta_val) else "N/A",
                         "fcf": fcf_val,
                         "debt_to_equity": round(debt_to_equity_val, 2) if debt_to_equity_val is not None else "N/A",
