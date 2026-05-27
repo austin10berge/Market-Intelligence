@@ -155,6 +155,7 @@ class ScannerParams:
     min_revenue_growth:  float | None = DEFAULT_MIN_REVENUE_GROWTH
     min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH
     min_dividend_yield:  float | None = DEFAULT_MIN_DIVIDEND_YIELD
+    max_forward_pe:      float | None = None
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
     restrict_to_watchlist_universe: bool = False
@@ -183,6 +184,7 @@ class ScannerParams:
         min_revenue_growth: float | None = DEFAULT_MIN_REVENUE_GROWTH,
         min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH,
         min_dividend_yield: float | None = DEFAULT_MIN_DIVIDEND_YIELD,
+        max_forward_pe: float | None = None,
         restrict_to_watchlist_universe: bool = False,
     ) -> "ScannerParams":
         """Build ScannerParams from API query parameters (all optional)."""
@@ -209,6 +211,7 @@ class ScannerParams:
             min_revenue_growth  = min_revenue_growth,
             min_earnings_growth = min_earnings_growth,
             min_dividend_yield  = min_dividend_yield,
+            max_forward_pe      = max_forward_pe,
             restrict_to_watchlist_universe = restrict_to_watchlist_universe,
         )
 
@@ -439,6 +442,12 @@ def _fundamental_filter_from_store(
         dividend_yield = row.get("dividend_yield")
         if params.min_dividend_yield is not None and dividend_yield is not None:
             if dividend_yield < params.min_dividend_yield:
+                continue
+
+        # Forward PE gate
+        forward_pe = row.get("forward_pe")
+        if params.max_forward_pe is not None and forward_pe is not None:
+            if forward_pe > params.max_forward_pe:
                 continue
 
         passing_tickers.append(symbol)
@@ -866,8 +875,8 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
     fundamentals_by_symbol = {r["symbol"]: r for r in tech_rows}
     for c in candidates:
         fund = fundamentals_by_symbol.get(c["symbol"], {})
-        c["fcf"] = fund.get("fcf")
-        c["pe"]  = fund.get("forward_pe")
+        c["fcf"]        = fund.get("fcf")
+        c["forward_pe"] = fund.get("forward_pe")
 
     filter_summary: FilterSummary = {
         "combined_unique":           len(universe),

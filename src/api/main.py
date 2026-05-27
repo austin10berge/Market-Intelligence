@@ -371,6 +371,7 @@ async def get_csp_scan_candidates(
     min_revenue_growth:  float | None = Query(default=-0.10),
     min_earnings_growth: float | None = Query(default=None),
     min_dividend_yield:  float | None = Query(default=None),
+    max_forward_pe:      float | None = Query(default=None),
     restrict_to_watchlist_universe: bool = False,
 ):
     """Run the broad-universe CSP scanner (S&P 500, NASDAQ 100, and NASDAQ large-cap ≥$2B).
@@ -413,6 +414,7 @@ async def get_csp_scan_candidates(
         min_revenue_growth=min_revenue_growth,
         min_earnings_growth=min_earnings_growth,
         min_dividend_yield=min_dividend_yield,
+        max_forward_pe=max_forward_pe,
         restrict_to_watchlist_universe=restrict_to_watchlist_universe,
     )
     # Each unique param combination gets its own cache key
@@ -462,6 +464,7 @@ async def invalidate_csp_scan_cache(
     min_revenue_growth:  float | None = Query(default=-0.10),
     min_earnings_growth: float | None = Query(default=None),
     min_dividend_yield:  float | None = Query(default=None),
+    max_forward_pe:      float | None = Query(default=None),
     restrict_to_watchlist_universe: bool = False,
 ):
     """Bust the cache for a specific param combination (or the default set)."""
@@ -477,6 +480,7 @@ async def invalidate_csp_scan_cache(
         min_revenue_growth=min_revenue_growth,
         min_earnings_growth=min_earnings_growth,
         min_dividend_yield=min_dividend_yield,
+        max_forward_pe=max_forward_pe,
         restrict_to_watchlist_universe=restrict_to_watchlist_universe,
     )
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"

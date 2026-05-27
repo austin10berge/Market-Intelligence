@@ -408,6 +408,10 @@ function renderCspCandidates(candidates) {
                     <span class="m-val">${c.dte ?? '—'}</span>
                     <span class="m-lbl">DTE</span>
                 </div>
+                <div class="metric">
+                    <span class="m-val">${c.forward_pe != null ? c.forward_pe : '—'}</span>
+                    <span class="m-lbl">Fwd P/E</span>
+                </div>
             </div>
         `).join("");
 }
@@ -547,6 +551,7 @@ function renderStockCandidates(candidates) {
                 <div class="metric ${w1Class}" data-label="1W">${w1Sign}${c.pct_1w.toFixed(2)}%</div>
                 <div class="metric ${m1Class}" data-label="1M">${m1Sign}${c.pct_1m.toFixed(2)}%</div>
                 <div class="metric" data-label="P/E">${c.pe}</div>
+                <div class="metric" data-label="Fwd P/E">${c.forward_pe}</div>
                 <div class="metric" data-label="Beta">${c.beta}</div>
                 <div class="metric" data-label="IV/RV20" title="${ivRv20Tooltip}">${ivRv20Display}</div>
                 <div class="metric" data-label="IV Pct" title="${ivPctTooltip}">${ivPctDisplay}</div>

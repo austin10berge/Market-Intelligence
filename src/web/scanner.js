@@ -742,6 +742,10 @@ function renderCspCandidates(candidates) {
                 <span class="m-val">${c.dte ?? '—'}</span>
                 <span class="m-lbl">DTE</span>
             </div>
+            <div class="metric">
+                <span class="m-val">${c.forward_pe != null ? c.forward_pe : '—'}</span>
+                <span class="m-lbl">Fwd P/E</span>
+            </div>
         </div>
     `).join('');
 }
