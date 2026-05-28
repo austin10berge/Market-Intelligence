@@ -374,15 +374,30 @@ def apply_fundamental_filter(
     store_lookup = {r["symbol"]: r for r in store_rows}
     use_store = len(store_lookup) >= 50  # sanity: need a reasonable fill
 
-    if use_store:
-        logger.info(
-            "Fundamental filter: using local store (%d tickers available)",
-            len(store_lookup),
-        )
-        return _fundamental_filter_from_store(tickers, params, store_lookup)
+    if not use_store:
+        logger.info("Fundamental filter: local store empty — falling back to yfinance")
+        return _fundamental_filter_from_yfinance(tickers, params)
 
-    logger.info("Fundamental filter: local store empty — falling back to yfinance")
-    return _fundamental_filter_from_yfinance(tickers, params)
+    store_tickers   = [t for t in tickers if t in store_lookup]
+    missing_tickers = [t for t in tickers if t not in store_lookup]
+
+    logger.info(
+        "Fundamental filter: using local store (%d tickers available, %d store hits, %d misses)",
+        len(store_lookup), len(store_tickers), len(missing_tickers),
+    )
+
+    passing_tickers, fundamental_rows = _fundamental_filter_from_store(store_tickers, params, store_lookup)
+
+    if missing_tickers:
+        logger.info(
+            "Fundamental filter: %d tickers missing from store — fetching live from yfinance",
+            len(missing_tickers),
+        )
+        miss_pass, miss_rows = _fundamental_filter_from_yfinance(missing_tickers, params)
+        passing_tickers.extend(miss_pass)
+        fundamental_rows.extend(miss_rows)
+
+    return passing_tickers, fundamental_rows
 
 
 def _fundamental_filter_from_store(
