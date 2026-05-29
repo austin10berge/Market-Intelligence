@@ -38,6 +38,7 @@ from ..market_data.store import (
     get_store_status,
     ensure_tables,
 )
+from ..db import get_watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ _INFO_BATCH_SLEEP_S = 1.0
 _SP500_WIKI_URL        = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 _NASDAQ100_API_URL     = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
 _NASDAQ_SCREENER_URL   = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&exchange=nasdaq"
+_NYSE_SCREENER_URL     = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&exchange=nyse"
 _NASDAQ_LARGE_CAP_MIN_B = 2.0
 
 _WIKI_USER_AGENT = "Mozilla/5.0 (compatible; MarketIntelligenceBot/1.0; +https://github.com/)"
@@ -321,15 +323,52 @@ def fetch_nasdaq_large_cap_tickers() -> list[str]:
         return []
 
 
+def fetch_nyse_large_cap_tickers() -> list[str]:
+    """Fetch all NYSE-listed stocks with market cap ≥ $2B from the NASDAQ screener API."""
+    try:
+        import requests as _requests
+        resp = _requests.get(_NYSE_SCREENER_URL, headers=_NASDAQ_HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data.get("data", {}).get("table", {}).get("rows", [])
+        if not rows:
+            logger.error("NYSE screener API returned no rows. Keys: %s", list(data.get("data", {}).keys()))
+            return []
+
+        tickers: list[str] = []
+        min_cap = _NASDAQ_LARGE_CAP_MIN_B * 1e9
+        for r in rows:
+            sym = str(r.get("symbol", "")).upper().strip().replace(".", "-")
+            if not sym:
+                continue
+            try:
+                cap = float(str(r.get("marketCap") or "0").replace(",", ""))
+            except (TypeError, ValueError):
+                continue
+            if cap >= min_cap:
+                tickers.append(sym)
+
+        tickers = sorted(set(tickers))
+        logger.info(
+            "Fetched %d NYSE large-cap tickers (>=$%.0fB) from NYSE screener",
+            len(tickers), _NASDAQ_LARGE_CAP_MIN_B,
+        )
+        return tickers
+    except Exception as exc:
+        logger.error("Failed to fetch NYSE large-cap tickers: %s", exc, exc_info=True)
+        return []
+
+
 def fetch_universe() -> list[str]:
-    """Return the deduplicated union of S&P 500, NASDAQ 100, and NASDAQ large-cap tickers."""
+    """Return the deduplicated union of S&P 500, NASDAQ 100, NASDAQ large-cap, and NYSE large-cap tickers."""
     sp500        = fetch_sp500_tickers()
     nasdaq100    = fetch_nasdaq100_tickers()
     nasdaq_large = fetch_nasdaq_large_cap_tickers()
-    combined = sorted(set(sp500) | set(nasdaq100) | set(nasdaq_large))
+    nyse_large   = fetch_nyse_large_cap_tickers()
+    combined = sorted(set(sp500) | set(nasdaq100) | set(nasdaq_large) | set(nyse_large))
     logger.info(
-        "Universe: %d S&P500 + %d NDX100 + %d NASDAQ≥$2B = %d unique",
-        len(sp500), len(nasdaq100), len(nasdaq_large), len(combined),
+        "Universe: %d S&P500 + %d NDX100 + %d NASDAQ≥$2B + %d NYSE≥$2B = %d unique",
+        len(sp500), len(nasdaq100), len(nasdaq_large), len(nyse_large), len(combined),
     )
     return combined
 
@@ -832,6 +871,14 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
 
     # 1. Universe
     universe = fetch_universe()
+
+    # Merge watchlist tickers so manually tracked stocks are always scanned
+    watchlist = get_watchlist()
+    watchlist_extras = [t for t in watchlist if t not in set(universe)]
+    if watchlist_extras:
+        logger.info("Injecting %d watchlist tickers not already in universe: %s", len(watchlist_extras), watchlist_extras)
+        universe = sorted(set(universe) | set(watchlist_extras))
+
     logger.info("CSP scan started — universe: %d tickers, params: %s", len(universe), asdict(params))
 
     empty_summary = {

@@ -1,4 +1,4 @@
-"""Daily refresh job — downloads OHLCV + fundamentals for the S&P 500, NASDAQ 100, and NASDAQ large-cap (>=$2B) universe.
+"""Daily refresh job — downloads OHLCV + fundamentals for the S&P 500, NASDAQ 100, NASDAQ large-cap (>=$2B), and NYSE large-cap (>=$2B) universe.
 
 Usage (from Docker):
     python -m src.market_data.refresh          # incremental (last 5 trading days)
@@ -20,7 +20,7 @@ from datetime import datetime
 import pandas as pd
 import yfinance as yf
 
-from ..screener.csp_scanner import fetch_sp500_tickers, fetch_nasdaq100_tickers, fetch_nasdaq_large_cap_tickers
+from ..screener.csp_scanner import fetch_sp500_tickers, fetch_nasdaq100_tickers, fetch_nasdaq_large_cap_tickers, fetch_nyse_large_cap_tickers
 from .store import (
     ensure_tables,
     bulk_upsert_ohlcv_multi,
@@ -175,16 +175,18 @@ def refresh_universe(full: bool = False) -> dict:
     sp500        = fetch_sp500_tickers()
     nasdaq100    = fetch_nasdaq100_tickers()
     nasdaq_large = fetch_nasdaq_large_cap_tickers()
+    nyse_large   = fetch_nyse_large_cap_tickers()
 
     membership: dict[str, set[str]] = defaultdict(set)
     for sym in sp500:        membership[sym].add("sp500")
     for sym in nasdaq100:    membership[sym].add("nasdaq100")
     for sym in nasdaq_large: membership[sym].add("nasdaq_large")
+    for sym in nyse_large:   membership[sym].add("nyse_large")
 
     universe = sorted(membership.keys())
     logger.info(
-        "Universe: %d S&P500 + %d NDX100 + %d NASDAQ>=$2B = %d unique tickers",
-        len(sp500), len(nasdaq100), len(nasdaq_large), len(universe),
+        "Universe: %d S&P500 + %d NDX100 + %d NASDAQ>=$2B + %d NYSE>=$2B = %d unique tickers",
+        len(sp500), len(nasdaq100), len(nasdaq_large), len(nyse_large), len(universe),
     )
 
     if not universe:
