@@ -376,6 +376,19 @@
                 </div>
             </div>
 
+            <!-- Sector filter -->
+            <div class="conditions-area" style="margin-top: 0.75rem;">
+                <button id="btn-sectors" class="btn-conditions" onclick="toggleSectorPicker()">
+                    Filter Sectors ▼
+                </button>
+                <div id="sector-picker-panel" class="condition-picker-panel" style="display:none;">
+                    <div id="sector-checkboxes" class="checkbox-group"></div>
+                </div>
+                <div id="sector-chips" class="condition-chips">
+                    <span class="no-conditions">No sectors selected — all included</span>
+                </div>
+            </div>
+
             <!-- Universe scope toggle -->
             <div class="universe-toggle-area">
                 <button id="btn-watchlist-universe" class="btn-universe-toggle" onclick="toggleWatchlistUniverse()">

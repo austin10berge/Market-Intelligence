@@ -82,6 +82,7 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
             dividend_yield = _to_float(info.get("dividendYield"))
             forward_pe = _to_float(info.get("forwardPE"))
             peg_ratio = _to_float(info.get("trailingPegRatio"))
+            sector = info.get("sector") or None
 
             rows.append({
                 "symbol": symbol,
@@ -96,6 +97,7 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
                 "dividend_yield": round(dividend_yield, 4) if dividend_yield is not None else None,
                 "forward_pe": round(forward_pe, 2) if forward_pe is not None else None,
                 "peg_ratio": round(peg_ratio, 2) if peg_ratio is not None else None,
+                "sector": sector,
             })
         except Exception as exc:
             logger.warning("Fundamental fetch failed for %s: %s", symbol, exc)

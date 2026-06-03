@@ -56,13 +56,17 @@ const _state = {
         min_earnings_growth: null,
         min_dividend_yield:  null,
         restrict_to_watchlist_universe: false,
+        sectors: [],      // list of selected sector strings (empty = all)
     },
     // Available conditions fetched from API
     availableConditions: [],
+    // Available sectors fetched from API
+    availableSectors: [],
     // UI
     scanPollId: null,
     scanStart:  null,
     conditionsOpen: false,
+    sectorsOpen: false,
 };
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
@@ -96,6 +100,7 @@ function _restoreParams() {
         if (typeof saved.min_dividend_yield  === 'number' || saved.min_dividend_yield  === null) p.min_dividend_yield  = saved.min_dividend_yield;
         if (Array.isArray(saved.conditions)) p.conditions = saved.conditions;
         if (typeof saved.restrict_to_watchlist_universe === 'boolean') p.restrict_to_watchlist_universe = saved.restrict_to_watchlist_universe;
+        if (Array.isArray(saved.sectors)) p.sectors = saved.sectors;
     } catch { /* corrupt storage — use defaults */ }
 }
 
@@ -125,9 +130,9 @@ const PARAM_CONFIG = [
     { key: 'adx_max',   label: 'ADX ≤',      suffix: '',   min: 0,   max: 100,  step: 1,   decimals: 0 },
     { key: 'dte_min',   label: 'DTE ≥',      suffix: 'd',  min: 1,   max: 90,   step: 1,   decimals: 0 },
     { key: 'dte_max',   label: 'DTE ≤',      suffix: 'd',  min: 1,   max: 180,  step: 1,   decimals: 0 },
-    { key: 'min_fcf_b',          label: 'FCF >',  suffix: 'B',  min: -50,  max: 500,  step: 1,   decimals: 1 },
-    { key: 'max_debt_to_equity',  label: 'D/E <',  suffix: '',   min: 0,    max: 20,   step: 0.1, decimals: 1 },
-    { key: 'min_revenue_growth',  label: 'Rev >',  suffix: '%',  min: -100, max: 100,  step: 1,   decimals: 0, scale: 100 },
+    { key: 'min_fcf_b',          label: 'FCF >',  suffix: 'B',  min: -50,  max: 500,  step: 1,   decimals: 1, nullable: true },
+    { key: 'max_debt_to_equity',  label: 'D/E <',  suffix: '',   min: 0,    max: 500,  step: 1,   decimals: 0, nullable: true },
+    { key: 'min_revenue_growth',  label: 'Rev >',  suffix: '%',  min: -100, max: 100,  step: 1,   decimals: 0, scale: 100, nullable: true },
     { key: 'min_earnings_growth', label: 'EPS >',  suffix: '%',  min: -100, max: 100,  step: 1,   decimals: 0, scale: 100, nullable: true },
     { key: 'min_dividend_yield',  label: 'Div >',  suffix: '%',  min: 0,    max: 20,   step: 0.1, decimals: 1, scale: 100, nullable: true },
 ];
@@ -140,6 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const univBtn = document.getElementById('btn-watchlist-universe');
     if (univBtn) univBtn.classList.toggle('active', _state.params.restrict_to_watchlist_universe);
     loadAvailableConditions().then(() => renderConditionPicker());
+    _loadSectors().then(() => { _renderSectorFilter(); _renderSectorChips(); });
     loadDataFreshness();
 });
 
@@ -189,8 +195,11 @@ function renderParamBadges() {
 
 function enableNullableBadge(key) {
     const activationDefaults = {
+        min_fcf_b:           0.0,
+        max_debt_to_equity:  2.0,
+        min_revenue_growth:  -0.10,
         min_earnings_growth: -0.20,
-        min_dividend_yield: 0.01,
+        min_dividend_yield:  0.01,
     };
     _state.params[key] = activationDefaults[key] ?? 0;
     renderParamBadges();
@@ -360,6 +369,82 @@ function toggleConditionPicker() {
     if (btn)   btn.textContent = _state.conditionsOpen ? 'Close ▲' : 'Add Conditions ▼';
 }
 
+// ── Sector filter ─────────────────────────────────────────────────────────────
+
+async function _loadSectors() {
+    try {
+        const res = await fetch(`${API_BASE}/screener/csp-scan/sectors`);
+        const data = await res.json();
+        _state.availableSectors = data.sectors || [];
+    } catch (e) {
+        console.warn('Could not load sectors', e);
+    }
+}
+
+function _renderSectorFilter() {
+    const container = document.getElementById('sector-checkboxes');
+    if (!container) return;
+    if (!_state.availableSectors.length) {
+        container.innerHTML = '<span class="no-conditions">No sector data yet — run a data refresh first</span>';
+        return;
+    }
+    container.innerHTML = _state.availableSectors.map(sector => {
+        const active = _state.params.sectors.includes(sector);
+        const safeId = `sector-cb-${sector.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        return `
+            <label class="cp-item ${active ? 'active' : ''}" id="sector-item-${_esc(sector)}">
+                <input type="checkbox" id="${safeId}" ${active ? 'checked' : ''}
+                       onchange="toggleSector(${JSON.stringify(sector)}, this.checked)">
+                <span class="cp-item-label">${_esc(sector)}</span>
+            </label>`;
+    }).join('');
+}
+
+function toggleSector(sector, checked) {
+    if (checked && !_state.params.sectors.includes(sector)) {
+        _state.params.sectors.push(sector);
+    } else {
+        _state.params.sectors = _state.params.sectors.filter(s => s !== sector);
+    }
+    const item = document.getElementById(`sector-item-${sector}`);
+    if (item) item.classList.toggle('active', checked);
+    _renderSectorChips();
+    _persistParams();
+}
+
+function _renderSectorChips() {
+    const container = document.getElementById('sector-chips');
+    if (!container) return;
+    if (!_state.params.sectors.length) {
+        container.innerHTML = '<span class="no-conditions">No sectors selected — all included</span>';
+        return;
+    }
+    container.innerHTML = _state.params.sectors.map(sector => `
+        <span class="condition-chip">${_esc(sector)}
+            <button class="chip-remove" onclick="removeSector(${JSON.stringify(sector)})" title="Remove">×</button>
+        </span>`).join('');
+}
+
+function removeSector(sector) {
+    _state.params.sectors = _state.params.sectors.filter(s => s !== sector);
+    const item = document.getElementById(`sector-item-${sector}`);
+    if (item) {
+        item.classList.remove('active');
+        const cb = item.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = false;
+    }
+    _renderSectorChips();
+    _persistParams();
+}
+
+function toggleSectorPicker() {
+    _state.sectorsOpen = !_state.sectorsOpen;
+    const panel = document.getElementById('sector-picker-panel');
+    const btn   = document.getElementById('btn-sectors');
+    if (panel) panel.style.display = _state.sectorsOpen ? 'block' : 'none';
+    if (btn)   btn.textContent = _state.sectorsOpen ? 'Close ▲' : 'Filter Sectors ▼';
+}
+
 // ── Build query params from current state ─────────────────────────────────────
 
 function _buildQueryString() {
@@ -383,6 +468,7 @@ function _buildQueryString() {
     if (p.min_earnings_growth !== null && p.min_earnings_growth !== undefined) qs.set('min_earnings_growth', p.min_earnings_growth);
     if (p.min_dividend_yield  !== null && p.min_dividend_yield  !== undefined) qs.set('min_dividend_yield',  p.min_dividend_yield);
     if (_state.params.restrict_to_watchlist_universe) qs.set('restrict_to_watchlist_universe', 'true');
+    if (_state.params.sectors && _state.params.sectors.length) qs.set('sectors', _state.params.sectors.join(','));
     return qs.toString();
 }
 
@@ -546,7 +632,7 @@ function _handleScanResult(data) {
     sortAndRenderCsp();
 
     // ── Render stock table (async fetch for rich data) ────────────────────────
-    const uniqueTickers = [...new Set(candidates.map(c => c.symbol))];
+    const uniqueTickers = [...new Set((data.fundamental_data || candidates).map(r => r.symbol))];
     document.getElementById('stocks-section').style.display = '';
     const stocksList = document.getElementById('stocks-list');
     stocksList.innerHTML = "<div class='trade-item' style='justify-content:center'>Loading stock data…</div>";

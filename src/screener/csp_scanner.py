@@ -34,6 +34,7 @@ import yfinance as yf
 from .options import screen_csp_candidates
 from ..market_data.store import (
     get_all_fundamentals,
+    get_available_sectors,
     get_ohlcv,
     get_store_status,
     ensure_tables,
@@ -127,6 +128,12 @@ AVAILABLE_CONDITIONS: list[dict] = [
         "description": "Price pulled back below medium-term MA — potential CSP entry on weakness",
         "group": "Price vs MA",
     },
+    {
+        "id": "price_below_sma200_and_sma50_below_sma200",
+        "label": "Price & 50 SMA below 200 SMA",
+        "description": "Price AND 50-day SMA are both below the 200-day SMA (bearish trend)",
+        "group": "Trend",
+    },
 ]
 
 # Index by id for fast lookup
@@ -162,6 +169,8 @@ class ScannerParams:
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
     restrict_to_watchlist_universe: bool = False
+    # Sector filter — empty list means no filter (all sectors pass)
+    sectors: list[str] = field(default_factory=list)
 
     def cache_key_suffix(self) -> str:
         """Return a short deterministic hash of the params for cache keying."""
@@ -190,6 +199,7 @@ class ScannerParams:
         max_forward_pe: float | None = None,
         max_peg_ratio: float | None = None,
         restrict_to_watchlist_universe: bool = False,
+        sectors: str | None = None,
     ) -> "ScannerParams":
         """Build ScannerParams from API query parameters (all optional)."""
         parsed_conditions: list[str] = []
@@ -198,6 +208,7 @@ class ScannerParams:
                 c.strip() for c in conditions.split(",")
                 if c.strip() in _CONDITION_IDS
             ]
+        parsed_sectors: list[str] = [s.strip() for s in sectors.split(",") if s.strip()] if sectors else []
         return cls(
             min_market_cap_b = min_cap   if min_cap   is not None else DEFAULT_MIN_MARKET_CAP_B,
             max_price        = max_price if max_price is not None else DEFAULT_MAX_PRICE,
@@ -218,6 +229,7 @@ class ScannerParams:
             max_forward_pe      = max_forward_pe,
             max_peg_ratio       = max_peg_ratio,
             restrict_to_watchlist_universe = restrict_to_watchlist_universe,
+            sectors          = sorted(parsed_sectors),
         )
 
 
@@ -513,6 +525,12 @@ def _fundamental_filter_from_store(
             if peg_ratio > params.max_peg_ratio:
                 continue
 
+        # Sector filter
+        if params.sectors:
+            row_sector = row.get("sector") or ""
+            if row_sector not in params.sectors:
+                continue
+
         passing_tickers.append(symbol)
         fundamental_rows.append({
             "symbol":       symbol,
@@ -523,6 +541,7 @@ def _fundamental_filter_from_store(
             "fcf":          row.get("fcf"),
             "forward_pe":   row.get("forward_pe"),
             "peg_ratio":    row.get("peg_ratio"),
+            "sector":       row.get("sector"),
         })
 
     logger.info("Fundamental filter (store): %d/%d tickers passed", len(passing_tickers), len(tickers))
@@ -750,6 +769,11 @@ def _check_conditions(indicators: dict, conditions: list[str]) -> tuple[bool, di
             results[cond] = bool(p is not None and s50 is not None and p < s50)
         elif cond == "price_near_lower_bb":
             results[cond] = bool(p is not None and s20 is not None and p < s20)
+        elif cond == "price_below_sma200_and_sma50_below_sma200":
+            results[cond] = bool(
+                p is not None and s50 is not None and s200 is not None
+                and p < s200 and s50 < s200
+            )
         else:
             logger.warning("Unknown condition id '%s' — treating as failed", cond)
             results[cond] = False  # unknown condition — fail-safe

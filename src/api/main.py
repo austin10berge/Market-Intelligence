@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, closing
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -44,7 +44,9 @@ from ..db import (
     get_stock_watchlist,
     get_strategies,
     get_watchlist,
+    get_youtube_channels,
     save_strategy,
+    save_youtube_channels,
     update_csp_settings,
     update_stock_watchlist,
     update_watchlist,
@@ -54,7 +56,7 @@ from ..main import run_pipeline
 from ..market_data.refresh import refresh_universe
 from ..market_data.store import ensure_tables as ensure_market_data_tables
 from ..market_data.store import get_store_status
-from ..screener.csp_scanner import AVAILABLE_CONDITIONS, ScannerParams, run_csp_scan
+from ..screener.csp_scanner import AVAILABLE_CONDITIONS, ScannerParams, get_available_sectors, run_csp_scan
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
 
@@ -109,6 +111,9 @@ app.add_middleware(
 
 class WatchlistUpdate(BaseModel):
     tickers: list[str]
+
+class YoutubeChannelsUpdate(BaseModel):
+    channels: list[str]
 
 class CspSettingsUpdate(BaseModel):
     min_dte: int
@@ -353,6 +358,12 @@ def get_scan_conditions():
     return {"conditions": AVAILABLE_CONDITIONS}
 
 
+@app.get("/api/screener/csp-scan/sectors")
+def get_scan_sectors():
+    """Return distinct non-null sectors from the local universe_fundamentals store."""
+    return {"sectors": get_available_sectors()}
+
+
 @app.get("/api/screener/csp-scan")
 async def get_csp_scan_candidates(
     min_cap:    float | None = None,
@@ -374,6 +385,8 @@ async def get_csp_scan_candidates(
     max_forward_pe:      float | None = Query(default=None),
     max_peg_ratio:       float | None = Query(default=None),
     restrict_to_watchlist_universe: bool = False,
+    sectors:             str   | None = None,
+    response: Response = None,
 ):
     """Run the broad-universe CSP scanner (S&P 500, NASDAQ 100, and NASDAQ large-cap ≥$2B).
 
@@ -418,7 +431,11 @@ async def get_csp_scan_candidates(
         max_forward_pe=max_forward_pe,
         max_peg_ratio=max_peg_ratio,
         restrict_to_watchlist_universe=restrict_to_watchlist_universe,
+        sectors=sectors,
     )
+    if response is not None:
+        response.headers["Cache-Control"] = "no-store"
+
     # Each unique param combination gets its own cache key
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
 
@@ -469,6 +486,7 @@ async def invalidate_csp_scan_cache(
     max_forward_pe:      float | None = Query(default=None),
     max_peg_ratio:       float | None = Query(default=None),
     restrict_to_watchlist_universe: bool = False,
+    sectors:             str   | None = None,
 ):
     """Bust the cache for a specific param combination (or the default set)."""
     params = ScannerParams.from_query(
@@ -486,6 +504,7 @@ async def invalidate_csp_scan_cache(
         max_forward_pe=max_forward_pe,
         max_peg_ratio=max_peg_ratio,
         restrict_to_watchlist_universe=restrict_to_watchlist_universe,
+        sectors=sectors,
     )
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"
     await cache_delete(cache_key)
@@ -627,6 +646,26 @@ async def api_update_stock_watchlist(data: WatchlistUpdate):
         from ..cache import cache_delete
         await cache_delete(KEY_SCREENER_STOCKS)
         return {"status": "success", "watchlist": updated_tickers}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── YouTube Channels ──────────────────────────────────────────────────────────
+
+@app.get("/api/youtube-channels")
+def api_get_youtube_channels():
+    try:
+        return {"channels": get_youtube_channels()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/youtube-channels")
+def api_save_youtube_channels(data: YoutubeChannelsUpdate):
+    try:
+        channels = [c.strip() for c in data.channels if c.strip()]
+        save_youtube_channels(channels)
+        return {"channels": channels}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

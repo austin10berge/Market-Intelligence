@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS universe_fundamentals (
     forward_pe      REAL,
     peg_ratio       REAL,
     universes       TEXT NOT NULL DEFAULT '',
+    sector          TEXT,
     updated_at      TEXT NOT NULL
 );
 """
@@ -80,6 +81,7 @@ _NEW_FUNDAMENTAL_COLUMNS = [
     "forward_pe REAL",
     "peg_ratio REAL",
     "universes TEXT NOT NULL DEFAULT ''",
+    "sector TEXT",
 ]
 
 
@@ -300,7 +302,7 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
     """Upsert fundamental data rows.
 
     Each row dict should have: symbol, market_cap_b, price, beta, iv_pct,
-    and optionally: fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield, forward_pe, peg_ratio, universes.
+    and optionally: fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield, forward_pe, peg_ratio, universes, sector.
     Returns the number of rows upserted.
     """
     if not rows:
@@ -324,6 +326,7 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
                 r.get("forward_pe"),
                 r.get("peg_ratio"),
                 r.get("universes", ""),
+                r.get("sector"),
                 now,
             )
             for r in rows
@@ -333,8 +336,8 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
             INSERT INTO universe_fundamentals
                 (symbol, market_cap_b, price, beta, iv_pct,
                  fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
-                 forward_pe, peg_ratio, universes, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 forward_pe, peg_ratio, universes, sector, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol) DO UPDATE SET
                 market_cap_b    = excluded.market_cap_b,
                 price           = excluded.price,
@@ -348,6 +351,7 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
                 forward_pe      = excluded.forward_pe,
                 peg_ratio       = excluded.peg_ratio,
                 universes       = excluded.universes,
+                sector          = excluded.sector,
                 updated_at      = excluded.updated_at
             """,
             params,
@@ -367,7 +371,7 @@ def get_all_fundamentals() -> list[dict]:
         rows = conn.execute(
             """SELECT symbol, market_cap_b, price, beta, iv_pct,
                       fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
-                      forward_pe, peg_ratio, universes, updated_at
+                      forward_pe, peg_ratio, universes, sector, updated_at
                FROM universe_fundamentals"""
         ).fetchall()
         return [dict(r) for r in rows]
@@ -385,11 +389,25 @@ def get_fundamentals_for_tickers(tickers: list[str]) -> list[dict]:
         rows = conn.execute(
             f"""SELECT symbol, market_cap_b, price, beta, iv_pct,
                        fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
-                       forward_pe, universes, updated_at
+                       forward_pe, peg_ratio, universes, sector, updated_at
                 FROM universe_fundamentals WHERE symbol IN ({placeholders})""",
             tickers,
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_available_sectors() -> list[str]:
+    """Return distinct non-null sectors from universe_fundamentals, sorted."""
+    conn = _get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT sector FROM universe_fundamentals WHERE sector IS NOT NULL ORDER BY sector"
+        ).fetchall()
+        return [r["sector"] for r in rows]
+    except Exception:
+        return []
     finally:
         conn.close()
 
