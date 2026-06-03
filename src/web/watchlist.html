@@ -123,6 +123,17 @@
                 </div>
             </section>
 
+            <!-- YouTube Channels Section -->
+            <section class="glass card" style="margin-bottom: 2rem;">
+                <h2>Monitored YouTube Channels</h2>
+                <p class="subtitle">Enter one YouTube channel URL per line. These will be used by the pipeline to monitor content from these channels.</p>
+                <textarea id="youtube-channels-input" style="height: 180px;" placeholder="https://www.youtube.com/@SomeChannel&#10;https://www.youtube.com/@AnotherChannel"></textarea>
+                <div class="action-bar">
+                    <button id="save-youtube-btn" class="btn-primary" onclick="saveYoutubeChannels()">Save Channels</button>
+                    <span id="youtube-status-msg"></span>
+                </div>
+            </section>
+
             <!-- CSP Settings Section -->
             <section class="glass card">
                 <h2>CSP Screener Parameters</h2>
@@ -259,8 +270,10 @@
         const API_BASE = (window.MARKET_INTELLIGENCE_CONFIG?.apiBase) || "http://127.0.0.1:8000/api";
         const input = document.getElementById("watchlist-input");
         const stockInput = document.getElementById("stock-watchlist-input");
+        const youtubeInput = document.getElementById("youtube-channels-input");
         const statusMsg = document.getElementById("status-msg");
         const stockStatusMsg = document.getElementById("stock-status-msg");
+        const youtubeStatusMsg = document.getElementById("youtube-status-msg");
         const cspStatusMsg = document.getElementById("csp-status-msg");
 
         document.addEventListener("DOMContentLoaded", async () => {
@@ -286,6 +299,18 @@
             } catch (e) {
                 stockInput.value = "";
                 showStatus(stockStatusMsg, "Failed to load stock watchlist.", "status-error");
+            }
+
+            // Load YouTube Channels
+            try {
+                youtubeInput.value = "Loading...";
+                const res = await fetch(`${API_BASE}/youtube-channels`);
+                if (!res.ok) throw new Error("Network response was not ok");
+                const data = await res.json();
+                youtubeInput.value = data.channels.join("\n");
+            } catch (e) {
+                youtubeInput.value = "";
+                showStatus(youtubeStatusMsg, "Failed to load YouTube channels.", "status-error");
             }
 
             // Load CSP Settings
@@ -388,6 +413,30 @@
             } finally {
                 btn.disabled = false;
                 btn.innerText = "Save Stock Watchlist";
+            }
+        }
+
+        async function saveYoutubeChannels() {
+            const btn = document.getElementById("save-youtube-btn");
+            btn.disabled = true;
+            btn.innerText = "Saving...";
+
+            try {
+                const channels = youtubeInput.value.split("\n").map(c => c.trim()).filter(c => c.length > 0);
+                const res = await fetch(`${API_BASE}/youtube-channels`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ channels })
+                });
+                if (!res.ok) throw new Error("Failed to save");
+                const data = await res.json();
+                youtubeInput.value = data.channels.join("\n");
+                showStatus(youtubeStatusMsg, "✅ YouTube channels saved successfully!", "status-success");
+            } catch (e) {
+                showStatus(youtubeStatusMsg, "❌ Failed to save YouTube channels.", "status-error");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Save Channels";
             }
         }
 

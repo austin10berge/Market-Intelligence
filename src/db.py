@@ -321,6 +321,36 @@ def update_stock_watchlist(tickers: list[str]) -> None:
         conn.close()
 
 
+def get_youtube_channels() -> list[str]:
+    """Retrieve the monitored YouTube channel URLs list."""
+    conn = _get_connection()
+    try:
+        row = conn.execute("SELECT value FROM app_config WHERE key = 'youtube_channels'").fetchone()
+        if row:
+            raw = row["value"]
+            return [line for line in raw.splitlines() if line.strip()]
+        return []
+    finally:
+        conn.close()
+
+
+def save_youtube_channels(channels: list[str]) -> None:
+    """Save the monitored YouTube channel URLs to the database."""
+    conn = _get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO app_config (key, value)
+            VALUES ('youtube_channels', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            ("\n".join(channels),)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def store_stock_iv_snapshot(snapshot_date: date, symbol: str, atm_iv: float) -> None:
     """Store or update a daily ATM IV snapshot for a stock symbol."""
     conn = _get_connection()
