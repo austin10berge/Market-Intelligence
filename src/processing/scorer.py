@@ -344,47 +344,36 @@ def _score_liquidity(signal: Signal, context: dict) -> ScoredSignal:
 
 
 def _score_insider_trading(signal: Signal, context: dict) -> ScoredSignal:
-    """Insider trading: scaled by ticker count, asymmetric buy/sell weighting.
+    """Insider trading: buys-only scoring — range 0.0–1.0 (never negative).
 
-    Buys reach max signal at 2+ tickers (execs buy for one reason: conviction).
-    Sells reach max signal at 4+ tickers (execs sell for many reasons; dampened).
-    net = buy_count - sell_count:
-        positive → score = min(+1.0, net / 2.0)
-        negative → score = max(-1.0, net / 4.0)
+    Execs buy for one reason: conviction.  Sells are excluded from scoring
+    (they occur for many non-sentiment reasons).
+    Score: min(1.0, buy_ticker_count / 2.0)
+        0 tickers → 0.0 (neutral)
+        1 ticker  → 0.5 (mild bullish)
+        2+ tickers → 1.0 (strong bullish)
     """
     buy_count = signal.metadata.get("buy_ticker_count", 0)
-    sell_count = signal.metadata.get("sell_ticker_count", 0)
     total_buys = signal.metadata.get("total_buys", 0)
-    total_sells = signal.metadata.get("total_sells", 0)
-    extreme = (buy_count >= 3 and sell_count == 0) or (sell_count >= 3 and buy_count == 0)
+    extreme = buy_count >= 3
 
-    if total_buys == 0 and total_sells == 0:
+    if total_buys == 0:
         return ScoredSignal(
             signal=signal, score=0, direction=SignalDirection.NEUTRAL, extreme=False,
-            reasoning="Insider Trading: no open-market activity this week",
+            reasoning="Insider Trading: no open-market buys this week",
         )
 
-    net = buy_count - sell_count
-    if net > 0:
-        raw = min(1.0, net / 2.0)
-    elif net < 0:
-        raw = max(-1.0, net / 4.0)
-    else:
-        raw = 0.0
-
-    score = round(raw, 3)
+    score = round(min(1.0, buy_count / 2.0), 3)
 
     THRESHOLD = 0.15
     if score > THRESHOLD:
         direction = SignalDirection.BULLISH
-    elif score < -THRESHOLD:
-        direction = SignalDirection.BEARISH
     else:
         direction = SignalDirection.NEUTRAL
 
     return ScoredSignal(
         signal=signal, score=score, direction=direction, extreme=extreme,
-        reasoning=f"Insider Trading: {buy_count} buy ticker(s), {sell_count} sell ticker(s) → score {score:+.3f}",
+        reasoning=f"Insider Trading: {buy_count} buy ticker(s) → score {score:+.3f}",
     )
 
 

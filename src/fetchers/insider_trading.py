@@ -188,34 +188,35 @@ class InsiderTradingFetcher(BaseFetcher):
                     "lookback_days": LOOKBACK_DAYS,
                     "errors": errors,
                 },
-                summary=f"Insider Trading: no open-market buys or sells in past {LOOKBACK_DAYS}d",
+                summary=f"Insider Trading ({LOOKBACK_DAYS}d): no open-market buys in past {LOOKBACK_DAYS}d",
             )
 
-        # Build top movers summary
+        # Build top buyers summary
         top_buys = sorted(buy_tickers.items(), key=lambda x: len(x[1]), reverse=True)[:3]
-        top_sells = sorted(sell_tickers.items(), key=lambda x: len(x[1]), reverse=True)[:3]
 
         buy_summary = ", ".join(
             f"{sym} ({len(txns)} buy{'s' if len(txns) > 1 else ''})"
             for sym, txns in top_buys
         ) if top_buys else "none"
 
-        sell_summary = ", ".join(
-            f"{sym} ({len(txns)} sell{'s' if len(txns) > 1 else ''})"
-            for sym, txns in top_sells
-        ) if top_sells else "none"
+        # Score: buys only — range 0.0–1.0 (never negative)
+        if total_buy_tickers > 0:
+            score_value = round(min(1.0, total_buy_tickers / 2.0), 3)
+        else:
+            score_value = 0.0
 
-        # Composite score: ratio of buy tickers to sell tickers
-        net = total_buy_tickers - total_sell_tickers
-        score_value = round(net / max(total_buy_tickers + total_sell_tickers, 1), 3)
+        # Extreme: only triggered by buy conviction
+        extreme = total_buy_tickers >= 3
 
-        summary = (
-            f"Insider Trading ({LOOKBACK_DAYS}d): "
-            f"{total_buys} buy{'s' if total_buys != 1 else ''} across {total_buy_tickers} ticker{'s' if total_buy_tickers != 1 else ''} "
-            f"({buy_summary}), "
-            f"{total_sells} sell{'s' if total_sells != 1 else ''} across {total_sell_tickers} ticker{'s' if total_sell_tickers != 1 else ''} "
-            f"({sell_summary})"
-        )
+        if total_buy_tickers > 0:
+            summary = (
+                f"Insider Trading ({LOOKBACK_DAYS}d): "
+                f"{total_buys} buy{'s' if total_buys != 1 else ''} across "
+                f"{total_buy_tickers} ticker{'s' if total_buy_tickers != 1 else ''} "
+                f"— {buy_summary}"
+            )
+        else:
+            summary = f"Insider Trading ({LOOKBACK_DAYS}d): no open-market buys in past {LOOKBACK_DAYS}d"
 
         metadata = {
             "buy_tickers": dict(buy_tickers),
