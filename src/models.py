@@ -29,6 +29,7 @@ class SignalSource(str, Enum):
     INSIDER_TRADING = "insider_trading"
     CONGRESSIONAL_TRADES = "congressional_trades"
     UNUSUAL_VOLUME = "unusual_volume"
+    NEWS = "news"
 
 
 class Signal(BaseModel):

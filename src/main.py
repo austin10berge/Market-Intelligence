@@ -20,7 +20,9 @@ from .fetchers.vix import VixFetcher
 from .fetchers.insider_trading import InsiderTradingFetcher
 from .fetchers.congressional_trades import CongressionalTradesFetcher
 from .fetchers.unusual_volume import UnusualVolumeFetcher
+from .fetchers.news import NewsFetcher
 from .models import ScoredSignal, Signal
+from .notify.discord import send_discord_digest
 from .notify.home_assistant import send_ha_notification
 from .notify.ntfy import send_ntfy
 from .processing.preprocessor import compute_composite_score, determine_posture
@@ -63,6 +65,7 @@ FETCHERS = [
     InsiderTradingFetcher(),
     CongressionalTradesFetcher(),
     UnusualVolumeFetcher(),
+    NewsFetcher(),
 ]
 
 
@@ -154,6 +157,19 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
         # Check for insider + congressional convergence on the same tickers
         convergence_alerts = check_convergence(scored_signals)
 
+        # Extract sector and news metadata for enriched LLM prompt
+        sector_signal = next(
+            (ss for ss in scored_signals if "sector" in ss.signal.source.value.lower()),
+            None
+        )
+        sector_metadata = sector_signal.signal.metadata if sector_signal else None
+
+        news_signal = next(
+            (ss for ss in scored_signals if ss.signal.source.value == "news"),
+            None
+        )
+        news_headlines = news_signal.signal.metadata.get("headlines", []) if news_signal else []
+
         system_prompt, user_prompt = build_synthesis_prompt(
             date_str=today.strftime("%A, %B %d, %Y"),
             signal_summaries=[ss.signal.summary for ss in scored_signals],
@@ -163,6 +179,8 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
             convergence_alerts=convergence_alerts,
             watchlist_stocks=watchlist_stocks,
             csp_candidates=csp_candidates,
+            sector_metadata=sector_metadata,
+            news_headlines=news_headlines,
         )
 
         digest_text = await synthesize(system_prompt, user_prompt)
@@ -202,6 +220,8 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
                 title=f"📊 Market Digest — {posture.value}",
                 message=full_text,
                 priority=4 if extreme_count > 0 else 3,
+                posture=posture.value,
+                composite_score=composite,
             )
 
         logger.info("✅ Pipeline complete!")
@@ -238,18 +258,22 @@ async def _fetch_all() -> list[Signal]:
     return [r for r in results if r is not None]
 
 
-async def _notify(title: str, message: str, priority: int = 3) -> None:
-    """Send notification via NTFY (primary), fall back to Home Assistant."""
-    # Try NTFY first
-    sent = await send_ntfy(title, message, priority=priority, tags="chart")
-    if sent:
-        return
+async def _notify(title: str, message: str, priority: int = 3, posture: str = "", composite_score: float = 0.0) -> None:
+    """Send via NTFY (primary) and Discord (parallel); fall back to Home Assistant if NTFY fails."""
+    ntfy_task = send_ntfy(title, message, priority=priority, tags="chart")
+    discord_task = send_discord_digest(title, message, posture, composite_score)
+    results = await asyncio.gather(ntfy_task, discord_task, return_exceptions=True)
+    ntfy_sent = results[0] if not isinstance(results[0], Exception) else False
+    discord_sent = results[1] if not isinstance(results[1], Exception) else False
 
-    # Fallback to Home Assistant
-    logger.info("Falling back to Home Assistant notification...")
-    sent = await send_ha_notification(title, message)
-    if not sent:
-        logger.error("All notification methods failed!")
+    if not ntfy_sent:
+        logger.info("NTFY failed — falling back to Home Assistant notification...")
+        ha_sent = await send_ha_notification(title, message)
+        if not ha_sent:
+            logger.error("All notification methods failed!")
+
+    if not discord_sent:
+        logger.warning("Discord digest delivery failed (non-fatal)")
 
 
 def main() -> None:

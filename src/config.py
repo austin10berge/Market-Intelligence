@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     # ── LLM ──────────────────────────────────────────────
     gemini_api_key: str = Field(default="", description="Gemini API key (free tier)")
+    llm_provider: str = Field(default="gemini", description="LLM provider for synthesis: 'gemini' or 'claude'")
 
     # ── FRED API ─────────────────────────────────────────
     fred_api_key: str = Field(default="", description="FRED API key for liquidity/credit spreads")
@@ -23,6 +24,7 @@ class Settings(BaseSettings):
 
     # ── Finnhub ───────────────────────────────────────────
     finnhub_api_key: str = Field(default="", description="Finnhub API key for insider transactions")
+    alpha_vantage_api_key: str = Field(default="", description="Alpha Vantage API key for news sentiment")
 
     # ── Notifications: NTFY.sh (primary) ─────────────────
     ntfy_topic: str = Field(default="market-intelligence", description="NTFY topic name")
@@ -55,6 +57,7 @@ class Settings(BaseSettings):
     discord_bot_secret: str = Field(default="", description="Shared secret for Discord bot auth")
     discord_bot_token: str = Field(default="", description="Discord bot token")
     discord_channel_id: str = Field(default="", description="Default Discord channel ID for scan results")
+    discord_digest_webhook_url: str = Field(default="", description="Discord webhook URL for nightly digest delivery")
 
     # ── Logging ──────────────────────────────────────────
     log_level: str = Field(default="INFO", description="Logging level")
