@@ -39,4 +39,7 @@ services:
     volumes: *worktree-src
 
   pipeline:
-    volumes: *worktree-src
+    volumes:
+      - /home/dev/workspace/Market-Intelligence/src:/app/src
+      - ~/.claude:/root/.claude:ro
+      - /usr/local/bin/claude:/usr/local/bin/claude:ro
