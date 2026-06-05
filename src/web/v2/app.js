@@ -341,7 +341,7 @@ function renderTickersContent() {
 
 function renderCspContent() {
     document.getElementById('watchlist-content').innerHTML = `
-        <div class="col-header-row" style="grid-template-columns:1fr auto auto auto; padding: 4px 14px 6px">
+        <div class="col-header-row" style="grid-template-columns:1fr auto auto auto; gap: 0 16px; padding: 4px 14px 6px">
             <div></div>
             <div class="ch-col${cspSort.column === 'roc_percent' ? ' sorted' : ''}" onclick="sortCspBy('roc_percent')">ROC${cspSort.column === 'roc_percent' ? ` <span class="sort-dir">${cspSort.asc ? '↑' : '↓'}</span>` : ''}</div>
             <div class="ch-col${cspSort.column === 'annualized_roc' ? ' sorted' : ''}" onclick="sortCspBy('annualized_roc')">Yield${cspSort.column === 'annualized_roc' ? ` <span class="sort-dir">${cspSort.asc ? '↑' : '↓'}</span>` : ''}</div>
@@ -400,7 +400,7 @@ function renderCspPage() {
                 <span class="oc-highlight">${roc.toFixed(2)}% ROC</span>
             </div>
             <div class="oc-row2">
-                <span class="oc-name">${escHtml(c.name)} · $${c.current_price.toFixed(2)}</span>
+                <span class="oc-name">$${c.current_price.toFixed(2)} · IV ${c.impliedVolatility != null ? c.impliedVolatility.toFixed(1) + '%' : '—'} · ${c.expiration}</span>
                 <span class="oc-metrics">$${c.premium.toFixed(2)} prem · ${yld} · ${c.otm_percent}% OTM</span>
             </div>
         </div>`;
@@ -424,7 +424,7 @@ function stepCspPage(dir) {
 
 function renderLeapsContent() {
     document.getElementById('watchlist-content').innerHTML = `
-        <div class="col-header-row" style="grid-template-columns:1fr auto auto auto; padding: 4px 14px 6px">
+        <div class="col-header-row" style="grid-template-columns:1fr auto auto auto; gap: 0 16px; padding: 4px 14px 6px">
             <div></div>
             <div class="ch-col${leapsSort.column === 'premium_markup_percent' ? ' sorted' : ''}" onclick="sortLeapsBy('premium_markup_percent')">Markup${leapsSort.column === 'premium_markup_percent' ? ` <span class="sort-dir">${leapsSort.asc ? '↑' : '↓'}</span>` : ''}</div>
             <div class="ch-col${leapsSort.column === 'premium' ? ' sorted' : ''}" onclick="sortLeapsBy('premium')">Premium${leapsSort.column === 'premium' ? ` <span class="sort-dir">${leapsSort.asc ? '↑' : '↓'}</span>` : ''}</div>
@@ -483,7 +483,7 @@ function renderLeapsPage() {
                 <span class="oc-highlight">${c.premium_markup_percent.toFixed(1)}% mkup</span>
             </div>
             <div class="oc-row2">
-                <span class="oc-name">${escHtml(c.name)} · $${c.current_price.toFixed(2)}</span>
+                <span class="oc-name">$${c.current_price.toFixed(2)} · vol ${c.volume ?? '—'}</span>
                 <span class="oc-metrics">$${c.premium.toFixed(2)} prem · BE $${c.break_even.toFixed(2)}</span>
             </div>
         </div>`
