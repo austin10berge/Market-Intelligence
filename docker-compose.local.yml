@@ -43,3 +43,7 @@ services:
       - /home/dev/workspace/Market-Intelligence/src:/app/src
       - ~/.claude:/root/.claude:ro
       - /usr/local/bin/claude:/usr/local/bin/claude:ro
+
+  market-data-refresh:
+    volumes:
+      - /home/dev/workspace/Market-Intelligence/src:/app/src
