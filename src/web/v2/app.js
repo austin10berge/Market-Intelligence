@@ -581,6 +581,65 @@ function showEditStatus(el, msg, cls) {
     setTimeout(() => { if (el.textContent === msg) { el.textContent = ''; el.className = 'edit-status'; } }, 4000);
 }
 
+function initChipEditor(containerEl, initialValues, opts = {}) {
+    let values = [...initialValues];
+    const chipsEl = containerEl.querySelector('.edit-chips');
+    const inputEl = containerEl.querySelector('.edit-chip-input');
+
+    function renderChips() {
+        if (!chipsEl) return;
+        chipsEl.innerHTML = values.map((v, i) => {
+            const label = opts.urlMode ? extractYouTubeHandle(v) : v;
+            return `<span class="edit-chip">
+                <span class="edit-chip-label">${escHtml(label)}</span>
+                <button class="edit-chip-remove" data-idx="${i}" type="button">×</button>
+            </span>`;
+        }).join('');
+        chipsEl.querySelectorAll('.edit-chip-remove').forEach(btn => {
+            btn.addEventListener('click', () => {
+                values.splice(parseInt(btn.dataset.idx), 1);
+                renderChips();
+            });
+        });
+    }
+
+    if (inputEl) {
+        inputEl.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                const raw = inputEl.value.replace(/,/g, '').trim();
+                if (!raw) return;
+                const val = opts.urlMode ? raw : raw.toUpperCase();
+                if (opts.urlMode && !val.includes('youtube.com/')) {
+                    inputEl.classList.add('shake');
+                    setTimeout(() => inputEl.classList.remove('shake'), 500);
+                    return;
+                }
+                if (!values.includes(val)) values.push(val);
+                inputEl.value = '';
+                renderChips();
+            } else if (e.key === 'Escape') {
+                inputEl.value = '';
+            }
+        });
+    }
+
+    renderChips();
+    return { getValues: () => [...values] };
+}
+
+function extractYouTubeHandle(url) {
+    try {
+        const match = url.match(/youtube\.com\/@?([\w.-]+)/);
+        if (match) return `@${match[1]}`;
+        const u = new URL(url);
+        const part = u.pathname.replace(/^\//, '').split('/')[0];
+        return part || url;
+    } catch {
+        return url;
+    }
+}
+
 // ── Market Overview view ──────────────────────────────────────────────────────
 
 function renderOverviewView() {
