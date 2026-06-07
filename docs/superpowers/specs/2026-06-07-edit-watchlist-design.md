@@ -34,7 +34,7 @@ renderEditWatchlistView()
     └── renderEditSettingsTab()
 ```
 
-State: `activeEditTab` string (`'watchlists' | 'channels' | 'settings'`), defaulting to `'watchlists'`.
+State: `activeEditTab` string (`'watchlists' | 'channels' | 'settings'`). Resets to `'watchlists'` each time `renderEditWatchlistView()` is called (no memory between visits).
 
 ---
 
@@ -104,10 +104,10 @@ Fields (label left, input right using `.scn-field` / `.scn-field-input`):
 - RSI Quality weight
 - ADX Trend weight
 
-Below the five weight inputs: a live **weight-sum badge** (monospace, small):
-- Green (`--tv-green`) when sum `= 1.00` (within ±0.001)
-- Yellow (`--tv-yellow`) when `0.95 ≤ sum ≤ 1.05` (outside tolerance but close)
-- Red (`--tv-red`) otherwise
+Below the five weight inputs: a live **weight-sum badge** (monospace, small). Precedence top-down:
+1. Green (`--tv-green`) when `|sum − 1.00| ≤ 0.001` — valid, save enabled
+2. Yellow (`--tv-yellow`) when `0.95 ≤ sum ≤ 1.05` but outside ±0.001 — close, save disabled
+3. Red (`--tv-red`) otherwise — invalid, save disabled
 
 ### Save behavior
 
