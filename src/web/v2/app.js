@@ -782,6 +782,178 @@ async function saveChannelsEdit() {
     }
 }
 
+function renderEditSettingsTab() {
+    document.getElementById('edit-content').innerHTML = `
+        <div style="padding: 8px 14px 0">
+            <div class="overview-card" style="margin-bottom:10px">
+                <div class="scn-sheet-section-title">Contract Filters</div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min DTE</span>
+                    <input type="number" id="csp-min-dte" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max DTE</span>
+                    <input type="number" id="csp-max-dte" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min Delta</span>
+                    <input type="number" id="csp-min-delta" step="0.01" min="0" max="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max Delta</span>
+                    <input type="number" id="csp-max-delta" step="0.01" min="0" max="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min Capital ROC %</span>
+                    <input type="number" id="csp-min-roc" step="0.1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max Spread %</span>
+                    <input type="number" id="csp-max-spread" step="0.1" class="scn-field-input" />
+                </div>
+            </div>
+            <div class="overview-card" style="margin-bottom:10px">
+                <div class="scn-sheet-section-title">Technical Filters</div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min IV %</span>
+                    <input type="number" id="csp-min-iv" step="0.5" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min RSI</span>
+                    <input type="number" id="csp-min-rsi" step="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max RSI</span>
+                    <input type="number" id="csp-max-rsi" step="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min ADX</span>
+                    <input type="number" id="csp-min-adx" step="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max ADX</span>
+                    <input type="number" id="csp-max-adx" step="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Pullback Mode</span>
+                    <label class="edit-toggle-wrapper">
+                        <input type="checkbox" id="csp-pullback" class="edit-toggle-input" />
+                        <span class="edit-toggle-track"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="overview-card" style="margin-bottom:10px">
+                <div class="scn-sheet-section-title">Score Weights</div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Annualized Yield</span>
+                    <input type="number" id="csp-w-ay" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">PoP Proxy</span>
+                    <input type="number" id="csp-w-pop" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">IV Percentile</span>
+                    <input type="number" id="csp-w-iv" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">RSI Quality</span>
+                    <input type="number" id="csp-w-rsi" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">ADX Trend</span>
+                    <input type="number" id="csp-w-adx" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div id="weight-sum-badge" class="edit-weight-sum-badge invalid">Sum: —</div>
+                <button class="scn-sheet-apply" id="save-settings-btn" onclick="saveCspSettingsEdit()"
+                    style="width:100%;margin-top:10px" disabled>Save &amp; Re-scan</button>
+                <div class="edit-status" id="settings-edit-status"></div>
+            </div>
+        </div>`;
+
+    fetch(`${API_BASE}/settings/csp`)
+        .then(r => r.json())
+        .then(data => {
+            const s = data.settings;
+            document.getElementById('csp-min-dte').value    = s.min_dte         ?? 30;
+            document.getElementById('csp-max-dte').value    = s.max_dte         ?? 45;
+            document.getElementById('csp-min-delta').value  = s.min_delta       ?? 0.15;
+            document.getElementById('csp-max-delta').value  = s.max_delta       ?? 0.40;
+            document.getElementById('csp-min-roc').value    = s.min_roc         ?? 1.0;
+            document.getElementById('csp-max-spread').value = s.max_spread_pct  ?? 25.0;
+            document.getElementById('csp-min-iv').value     = s.min_iv          ?? 25.0;
+            document.getElementById('csp-min-rsi').value    = s.min_rsi         ?? 38.0;
+            document.getElementById('csp-max-rsi').value    = s.max_rsi         ?? 65.0;
+            document.getElementById('csp-min-adx').value    = s.min_adx         ?? 15.0;
+            document.getElementById('csp-max-adx').value    = s.max_adx         ?? 40.0;
+            document.getElementById('csp-pullback').checked = s.pullback_mode   ?? false;
+            document.getElementById('csp-w-ay').value       = s.score_weight_ay      ?? 0.35;
+            document.getElementById('csp-w-pop').value      = s.score_weight_pop     ?? 0.20;
+            document.getElementById('csp-w-iv').value       = s.score_weight_iv_pct  ?? 0.20;
+            document.getElementById('csp-w-rsi').value      = s.score_weight_rsi     ?? 0.15;
+            document.getElementById('csp-w-adx').value      = s.score_weight_adx     ?? 0.10;
+            updateWeightSum();
+        })
+        .catch(() => {
+            showEditStatus(document.getElementById('settings-edit-status'), '✗ Failed to load settings', 'error');
+        });
+}
+
+function updateWeightSum() {
+    const ids = ['csp-w-ay', 'csp-w-pop', 'csp-w-iv', 'csp-w-rsi', 'csp-w-adx'];
+    const sum = ids.reduce((acc, id) => acc + (parseFloat(document.getElementById(id)?.value) || 0), 0);
+    const badge = document.getElementById('weight-sum-badge');
+    const btn   = document.getElementById('save-settings-btn');
+    if (!badge) return;
+
+    const valid = Math.abs(sum - 1.0) <= 0.001;
+    const close = !valid && sum >= 0.95 && sum <= 1.05;
+
+    badge.textContent = `Sum: ${sum.toFixed(2)}`;
+    badge.className   = `edit-weight-sum-badge ${valid ? 'valid' : close ? 'close' : 'invalid'}`;
+    if (btn) btn.disabled = !valid;
+}
+
+async function saveCspSettingsEdit() {
+    const btn = document.getElementById('save-settings-btn');
+    const statusEl = document.getElementById('settings-edit-status');
+    btn.disabled = true;
+    try {
+        const payload = {
+            min_dte:             parseInt(document.getElementById('csp-min-dte').value),
+            max_dte:             parseInt(document.getElementById('csp-max-dte').value),
+            min_delta:           parseFloat(document.getElementById('csp-min-delta').value),
+            max_delta:           parseFloat(document.getElementById('csp-max-delta').value),
+            min_roc:             parseFloat(document.getElementById('csp-min-roc').value),
+            max_spread_pct:      parseFloat(document.getElementById('csp-max-spread').value),
+            min_iv:              parseFloat(document.getElementById('csp-min-iv').value),
+            min_rsi:             parseFloat(document.getElementById('csp-min-rsi').value),
+            max_rsi:             parseFloat(document.getElementById('csp-max-rsi').value),
+            min_adx:             parseFloat(document.getElementById('csp-min-adx').value),
+            max_adx:             parseFloat(document.getElementById('csp-max-adx').value),
+            pullback_mode:       document.getElementById('csp-pullback').checked,
+            score_weight_ay:     parseFloat(document.getElementById('csp-w-ay').value),
+            score_weight_pop:    parseFloat(document.getElementById('csp-w-pop').value),
+            score_weight_iv_pct: parseFloat(document.getElementById('csp-w-iv').value),
+            score_weight_rsi:    parseFloat(document.getElementById('csp-w-rsi').value),
+            score_weight_adx:    parseFloat(document.getElementById('csp-w-adx').value),
+        };
+        const res = await fetch(`${API_BASE}/settings/csp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error();
+        showEditStatus(statusEl, '✓ Saved — re-scan running (~30–60s)', 'success');
+        watchlistFetched.csp = false;
+        watchlistFetched.leaps = false;
+    } catch {
+        showEditStatus(statusEl, '✗ Failed to save', 'error');
+    } finally {
+        updateWeightSum();
+    }
+}
+
 // ── Market Overview view ──────────────────────────────────────────────────────
 
 function renderOverviewView() {
