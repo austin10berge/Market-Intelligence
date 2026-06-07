@@ -90,6 +90,13 @@ let cachedPostureData = null;
 let cachedOverviewData = null;
 let overviewFetched = false;
 
+// ── Edit Watchlist state ──────────────────────────────────────────────────────
+
+let activeEditTab = 'watchlists';
+let stockChipEditor = null;
+let cspWlChipEditor = null;
+let channelsChipEditor = null;
+
 // ── Column group definitions ──────────────────────────────────────────────────
 
 const COL_GROUPS = [
@@ -292,7 +299,12 @@ function renderWatchlistView() {
     document.getElementById('main-content').innerHTML = `
         <div class="section-header" style="padding-bottom:8px">
             <div class="watchlist-sub-tabs" id="watchlist-sub-tabs"></div>
-            <span class="cache-badge" id="cache-status-active"></span>
+            <div style="display:flex;align-items:center;gap:6px">
+                <span class="cache-badge" id="cache-status-active"></span>
+                <button class="edit-pencil-btn" onclick="renderEditWatchlistView()" title="Edit watchlists">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="m18.5 2.5 3 3L12 15H9v-3L18.5 2.5z"/></svg>
+                </button>
+            </div>
         </div>
         <div id="watchlist-content"></div>`;
     renderWatchlistSubTabs();
@@ -514,6 +526,59 @@ function renderLeapsPage() {
 function stepLeapsPage(dir) {
     leapsPage += dir;
     renderLeapsPage();
+}
+
+// ── Edit Watchlist view ───────────────────────────────────────────────────────
+
+function renderEditWatchlistView() {
+    activeEditTab = 'watchlists';
+    stockChipEditor = null;
+    cspWlChipEditor = null;
+    channelsChipEditor = null;
+    document.getElementById('main-content').innerHTML = `
+        <div class="section-header" style="padding-bottom:8px">
+            <button class="edit-back-btn" onclick="backToWatchlist()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><polyline points="15 18 9 12 15 6"/></svg>
+                WATCHLIST
+            </button>
+            <span class="section-title">Edit Watchlist</span>
+        </div>
+        <div class="watchlist-sub-tabs" id="edit-sub-tabs" style="padding: 0 16px 8px"></div>
+        <div id="edit-content"></div>`;
+    renderEditSubTabs();
+    switchEditTab('watchlists');
+}
+
+function renderEditSubTabs() {
+    const tabs = [
+        { id: 'watchlists', label: 'Watchlists' },
+        { id: 'channels',   label: 'Channels' },
+        { id: 'settings',   label: 'Settings' },
+    ];
+    document.getElementById('edit-sub-tabs').innerHTML = tabs.map(t =>
+        `<button class="sub-tab${t.id === activeEditTab ? ' active' : ''}" onclick="switchEditTab('${t.id}')">${t.label}</button>`
+    ).join('');
+}
+
+function switchEditTab(tab) {
+    activeEditTab = tab;
+    renderEditSubTabs();
+    switch (tab) {
+        case 'watchlists': renderEditWatchlistsTab(); break;
+        case 'channels':   renderEditChannelsTab();   break;
+        case 'settings':   renderEditSettingsTab();   break;
+    }
+}
+
+function backToWatchlist() {
+    renderWatchlistView();
+}
+
+function showEditStatus(el, msg, cls) {
+    if (!el) return;
+    el.textContent = msg;
+    el.className = `edit-status ${cls}`;
+    setTimeout(() => { if (el.textContent === msg) { el.textContent = ''; el.className = 'edit-status'; } }, 4000);
 }
 
 // ── Market Overview view ──────────────────────────────────────────────────────
