@@ -640,6 +640,100 @@ function extractYouTubeHandle(url) {
     }
 }
 
+function renderEditWatchlistsTab() {
+    document.getElementById('edit-content').innerHTML = `
+        <div style="padding: 8px 14px 0">
+            <div class="overview-card" style="margin-bottom:10px">
+                <div class="overview-card-title">Stock Watchlist</div>
+                <div id="stock-chips-wrap">
+                    <div class="list-message loading" style="padding:12px 0;font-size:14px">Loading…</div>
+                </div>
+                <button class="scn-sheet-apply" id="save-stock-btn" onclick="saveStockWatchlistEdit()"
+                    style="width:100%;margin-top:10px">Save</button>
+                <div class="edit-status" id="stock-edit-status"></div>
+            </div>
+            <div class="overview-card">
+                <div class="overview-card-title">CSP Watchlist</div>
+                <div id="csp-wl-chips-wrap">
+                    <div class="list-message loading" style="padding:12px 0;font-size:14px">Loading…</div>
+                </div>
+                <button class="scn-sheet-apply" id="save-csp-wl-btn" onclick="saveCspWatchlistEdit()"
+                    style="width:100%;margin-top:10px">Save</button>
+                <div class="edit-status" id="csp-wl-edit-status"></div>
+            </div>
+        </div>`;
+
+    Promise.all([
+        fetch(`${API_BASE}/watchlist/stock`).then(r => r.json()),
+        fetch(`${API_BASE}/watchlist`).then(r => r.json()),
+    ]).then(([stockData, cspData]) => {
+        const stockWrap = document.getElementById('stock-chips-wrap');
+        const cspWrap   = document.getElementById('csp-wl-chips-wrap');
+        if (stockWrap) {
+            stockWrap.innerHTML = `<div class="edit-chip-editor"><div class="edit-chips"></div><input class="edit-chip-input" placeholder="+ ADD TICKER" /></div>`;
+            stockChipEditor = initChipEditor(stockWrap, stockData.watchlist || []);
+        }
+        if (cspWrap) {
+            cspWrap.innerHTML = `<div class="edit-chip-editor"><div class="edit-chips"></div><input class="edit-chip-input" placeholder="+ ADD TICKER" /></div>`;
+            cspWlChipEditor = initChipEditor(cspWrap, cspData.watchlist || []);
+        }
+    }).catch(() => {
+        const stockWrap = document.getElementById('stock-chips-wrap');
+        const cspWrap   = document.getElementById('csp-wl-chips-wrap');
+        if (stockWrap) stockWrap.innerHTML = '<div class="edit-status error" style="padding:8px 0">Failed to load</div>';
+        if (cspWrap)   cspWrap.innerHTML   = '<div class="edit-status error" style="padding:8px 0">Failed to load</div>';
+    });
+}
+
+async function saveStockWatchlistEdit() {
+    if (!stockChipEditor) return;
+    const btn = document.getElementById('save-stock-btn');
+    const statusEl = document.getElementById('stock-edit-status');
+    btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/watchlist/stock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tickers: stockChipEditor.getValues() }),
+        });
+        if (!res.ok) throw new Error();
+        showEditStatus(statusEl, '✓ Saved', 'success');
+        watchlistFetched.tickers = false;
+        allStockCandidates = [];
+        lastStocksResponse = null;
+    } catch {
+        showEditStatus(statusEl, '✗ Failed', 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function saveCspWatchlistEdit() {
+    if (!cspWlChipEditor) return;
+    const btn = document.getElementById('save-csp-wl-btn');
+    const statusEl = document.getElementById('csp-wl-edit-status');
+    btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/watchlist`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tickers: cspWlChipEditor.getValues() }),
+        });
+        if (!res.ok) throw new Error();
+        showEditStatus(statusEl, '✓ Saved — re-scan started', 'success');
+        watchlistFetched.csp = false;
+        watchlistFetched.leaps = false;
+        allCspCandidates = [];
+        allLeapsCandidates = [];
+        lastCspResponse = null;
+        lastLeapsResponse = null;
+    } catch {
+        showEditStatus(statusEl, '✗ Failed', 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 // ── Market Overview view ──────────────────────────────────────────────────────
 
 function renderOverviewView() {
