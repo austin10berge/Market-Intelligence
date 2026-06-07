@@ -734,6 +734,54 @@ async function saveCspWatchlistEdit() {
     }
 }
 
+function renderEditChannelsTab() {
+    document.getElementById('edit-content').innerHTML = `
+        <div style="padding: 8px 14px 0">
+            <div class="overview-card">
+                <div class="overview-card-title">YouTube Channels</div>
+                <div id="channels-chips-wrap">
+                    <div class="list-message loading" style="padding:12px 0;font-size:14px">Loading…</div>
+                </div>
+                <button class="scn-sheet-apply" id="save-channels-btn" onclick="saveChannelsEdit()"
+                    style="width:100%;margin-top:10px">Save</button>
+                <div class="edit-status" id="channels-edit-status"></div>
+            </div>
+        </div>`;
+
+    fetch(`${API_BASE}/youtube-channels`)
+        .then(r => r.json())
+        .then(data => {
+            const wrap = document.getElementById('channels-chips-wrap');
+            if (!wrap) return;
+            wrap.innerHTML = `<div class="edit-chip-editor"><div class="edit-chips"></div><input class="edit-chip-input" placeholder="+ ADD URL" /></div>`;
+            channelsChipEditor = initChipEditor(wrap, data.channels || [], { urlMode: true });
+        })
+        .catch(() => {
+            const wrap = document.getElementById('channels-chips-wrap');
+            if (wrap) wrap.innerHTML = '<div class="edit-status error" style="padding:8px 0">Failed to load</div>';
+        });
+}
+
+async function saveChannelsEdit() {
+    if (!channelsChipEditor) return;
+    const btn = document.getElementById('save-channels-btn');
+    const statusEl = document.getElementById('channels-edit-status');
+    btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/youtube-channels`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channels: channelsChipEditor.getValues() }),
+        });
+        if (!res.ok) throw new Error();
+        showEditStatus(statusEl, '✓ Saved', 'success');
+    } catch {
+        showEditStatus(statusEl, '✗ Failed', 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 // ── Market Overview view ──────────────────────────────────────────────────────
 
 function renderOverviewView() {
