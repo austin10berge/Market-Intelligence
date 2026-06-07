@@ -9,45 +9,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Environment
 
-- **Python**: 3.12 (installed in `.venv`)
-- **Virtual environment**: `.venv/` (note the dot — there is also a `venv/` dir but it does **not** contain pytest or the project deps)
-- **Always use `.venv` for local commands**: `.venv/bin/pytest`, `.venv/bin/python`, etc.
-- `test_stock_screener.py` has a pre-existing collection error — exclude it with `--ignore=tests/test_stock_screener.py` when running the full suite locally
+- **Python**: 3.12, but there is **no local virtualenv**. All Python deps live inside the Docker images — run tests, the pipeline, and data refreshes through `docker compose` (see Commands). Bare `python -m ...` on the host will fail because the deps aren't installed there.
+- **ruff** is installed standalone at `~/.local/bin/ruff` for local lint/format (add `~/.local/bin` to PATH). A `PostToolUse` hook (`scripts/ruff-format-hook.sh`) auto-formats every `.py` file edited in a Claude Code session — no manual format step needed.
+- `test_stock_screener.py` has a pre-existing collection error — exclude it with `--ignore=tests/test_stock_screener.py` when running the full suite.
 
 ## Commands
 
 ```bash
-# Install dependencies (dev includes pytest, ruff, respx)
-.venv/bin/pip install -e ".[dev]"
-# or with uv (preferred):
-uv pip install -e ".[dev]"
-
-# Run all tests (use .venv — not bare pytest)
-.venv/bin/pytest
-
-# Run a single test file
-.venv/bin/pytest tests/test_csp_scanner_conditions.py -v
-
-# Run full suite (excluding pre-existing broken test)
-.venv/bin/pytest --ignore=tests/test_stock_screener.py
-
-# Lint / format
-.venv/bin/ruff check src/ tests/
-.venv/bin/ruff format src/ tests/
-
-# Run the nightly pipeline locally
-python -m src.main
+# Lint / format (standalone ruff — not in a venv)
+ruff check src/ tests/
+ruff format src/ tests/
 
 # Docker — run all always-on services (api, dashboard, discord-bot, redis)
 docker compose up --build
 
-# Run pipeline once via Docker
-docker compose run --rm pipeline
-
-# Run tests via Docker
+# Run all tests via Docker
 docker compose run --rm test
-# Run a specific test file in Docker
+# Run full suite excluding the pre-existing broken test
+docker compose run --rm test python3 -m pytest tests/ --ignore=tests/test_stock_screener.py
+# Run a single test file
 docker compose run --rm test python3 -m pytest tests/test_market_data_store.py -v
+
+# Run the nightly pipeline once via Docker
+docker compose run --rm pipeline
 
 # Market data refresh (incremental — last 5 trading days)
 docker compose run --rm market-data-refresh
@@ -76,6 +60,15 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-buil
 ```
 
 After the pipeline run, the dashboard's AI summary and `/api/market-posture` will reflect the new digest. Pure Python changes need no rebuild — only pyproject.toml dependency changes require `build`.
+
+## Browser Testing
+
+The frontend (`src/web/`) is JS-rendered, so verify UI changes against a real browser, not `curl`/`WebFetch` (those don't execute the client-side fetch calls). Use the **Playwright MCP** (`mcp__playwright__browser_*`) — registered locally for this project (`claude mcp list` → `playwright`). It drives a headless Chromium already on the box; tools include `browser_navigate`, `browser_snapshot` (accessibility tree — prefer this for asserting state), `browser_click`, `browser_type`, `browser_take_screenshot`, and console message capture.
+
+- Test against **dev** (`https://dev-mi.austin10berge.com`) — it's public, no auth needed.
+- Drive the real interactions (set filters, click **Run Scan**, wait for results) — a bare page load shows only the empty form.
+- Still use `curl` against `/api/...` for backend-only verification; reserve the browser for rendered-DOM and interaction checks.
+- MCP tools load at session start. If they're absent, the server was added mid-session — start a fresh session.
 
 ## Architecture
 

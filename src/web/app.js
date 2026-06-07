@@ -304,7 +304,7 @@ function renderVix(vix) {
       &nbsp;&nbsp;1W: ${fmtVixPct(vix.pct_1w)}
     </div>
     <div class="vix-term ${tsClass}">
-      ${escHtml(vix.term_structure)} — ${escHtml(vix.stress_note)}
+      Structure: ${escHtml(vix.term_structure)} — ${escHtml(vix.stress_note)}
       <span style="opacity:0.7">(spread ${vix.spread >= 0 ? '+' : ''}${vix.spread.toFixed(2)})</span>
     </div>
   `;

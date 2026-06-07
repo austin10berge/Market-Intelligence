@@ -144,10 +144,10 @@ async def _fetch_vix() -> dict:
     vix3m_val = round(float(vix3m_closes.iloc[-1]), 2)
     spread = round(float(vix3m_closes.iloc[-1]) - float(vix_closes.iloc[-1]), 2)
 
-    if spread > 0.5:
+    if spread > 0.25:
         term_structure = "Contango"
         stress_note = "normal, calm"
-    elif spread < -0.5:
+    elif spread < -0.25:
         term_structure = "Backwardation"
         stress_note = "elevated stress"
     else:

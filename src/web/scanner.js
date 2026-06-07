@@ -632,7 +632,7 @@ function _handleScanResult(data) {
     sortAndRenderCsp();
 
     // ── Render stock table (async fetch for rich data) ────────────────────────
-    const uniqueTickers = [...new Set((data.fundamental_data || candidates).map(r => r.symbol))];
+    const uniqueTickers = [...new Set(candidates.map(c => c.symbol))];
     document.getElementById('stocks-section').style.display = '';
     const stocksList = document.getElementById('stocks-list');
     stocksList.innerHTML = "<div class='trade-item' style='justify-content:center'>Loading stock data…</div>";

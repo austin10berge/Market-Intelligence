@@ -43,13 +43,18 @@ function renderBottomNav() {
 }
 
 function switchTab(tab) {
+    // Tear down the scanner's poll timer when navigating away from it.
+    if (activeTab === 'scanner' && tab !== 'scanner' && window.ScannerView) {
+        window.ScannerView.teardown();
+    }
     activeTab = tab;
     renderBottomNav();
+    const mainContent = document.getElementById('main-content');
     switch (tab) {
         case 'overview':   renderOverviewView();  break;
         case 'watchlist':  renderWatchlistView(); break;
-        case 'scanner':    renderHandoffView('Scanner',    '/scanner.html',  'Universe and watchlist CSP scanning with custom parameters.'); break;
-        case 'backtester': renderHandoffView('Backtester', '/backtest.html', 'Backtest CSP strategies against historical price data.');        break;
+        case 'scanner':    window.ScannerView.render(mainContent); break;
+        case 'backtester': renderHandoffView('Backtester', '/backtest.html', 'Backtest CSP strategies against historical price data.'); break;
     }
 }
 
@@ -91,7 +96,7 @@ const COL_GROUPS = [
     {
         label: 'Price',
         cols: [
-            { h: 'Price', key: 'price',   fmt: c => c.price > 0 ? `$${c.price.toFixed(2)}` : '—', pill: false, cls: () => 'primary' },
+            { h: 'Price', key: 'price',   fmt: c => c.price > 0 ? `$${c.price.toFixed(2)}` : '—', pill: false, cls: c => `primary ${pctCls(c.pct_1d)}` },
             { h: '1D %',  key: 'pct_1d',  fmt: c => fmtPct(c.pct_1d),                              pill: true,  cls: c => pctCls(c.pct_1d) },
             { h: '1W %',  key: 'pct_1w',  fmt: c => fmtPct(c.pct_1w),                              pill: true,  cls: c => pctCls(c.pct_1w) },
         ],
@@ -188,6 +193,11 @@ function buildSparklineSVG(prices, isUp) {
         <circle cx="${last.x}" cy="${last.y}" r="1.8" fill="${color}"/>
     </svg>`;
 }
+
+// Shared with the v2 scanner's Stock Performance table (src/web/v2/scanner.js) so the
+// column definitions, formatting, and sparkline stay single-source. COL_GROUPS' col
+// fmt/cls closures carry their own helpers, so consumers only need these two.
+window.MITickers = { COL_GROUPS, buildSparklineSVG };
 
 // ── Column group UI ───────────────────────────────────────────────────────────
 
@@ -392,16 +402,17 @@ function renderCspPage() {
 
     listEl.innerHTML = slice.map((c, i) => {
         const roc = parseFloat(c.roc_percent) || 0;
-        const yld = c.annualized_roc ? `${c.annualized_roc}% yield` : '—';
-        return `<div class="option-card" style="--row-delay:${i * 20}ms" onclick="openTradingView('${escHtml(c.symbol)}')">
+        const yld = c.annualized_roc ? `${parseFloat(c.annualized_roc).toFixed(1)}%y` : '—';
+        const tierCls = roc >= 3 ? 'up' : roc >= 1.5 ? 'tier-mid' : '';
+        return `<div class="option-card ${tierCls}" style="--row-delay:${i * 20}ms" onclick="openTradingView('${escHtml(c.symbol)}')">
             <div class="oc-row1">
                 <span class="oc-symbol">${escHtml(c.symbol)}</span>
-                <span class="oc-meta">$${c.strike.toFixed(2)} · ${c.dte ?? '—'}d · Δ${c.delta != null ? c.delta.toFixed(2) : '—'}</span>
+                <span class="oc-meta"><span style="color:#fff">$${c.strike.toFixed(2)}</span> · ${c.dte ?? '—'}d · Δ${c.delta != null ? c.delta.toFixed(2) : '—'}</span>
                 <span class="oc-highlight">${roc.toFixed(2)}% ROC</span>
             </div>
             <div class="oc-row2">
-                <span class="oc-name">$${c.current_price.toFixed(2)} · IV ${c.impliedVolatility != null ? c.impliedVolatility.toFixed(1) + '%' : '—'} · ${c.expiration}</span>
-                <span class="oc-metrics">$${c.premium.toFixed(2)} prem · ${yld} · ${c.otm_percent}% OTM</span>
+                <span class="oc-name">$${c.current_price.toFixed(2)} · IV ${c.impliedVolatility != null ? c.impliedVolatility.toFixed(1) + '%' : '—'}</span>
+                <span class="oc-metrics"><span class="oc-prem">$${c.premium.toFixed(2)}</span> · <span class="oc-yield">${yld}</span> · ${c.otm_percent}% OTM</span>
             </div>
         </div>`;
     }).join('');
@@ -475,19 +486,21 @@ function renderLeapsPage() {
         return;
     }
 
-    listEl.innerHTML = slice.map((c, i) =>
-        `<div class="option-card" style="--row-delay:${i * 20}ms" onclick="openTradingView('${escHtml(c.symbol)}')">
+    listEl.innerHTML = slice.map((c, i) => {
+        const mkup = parseFloat(c.premium_markup_percent) || 0;
+        const tierCls = mkup <= 5 ? 'up' : mkup <= 15 ? 'tier-mid' : '';
+        return `<div class="option-card ${tierCls}" style="--row-delay:${i * 20}ms" onclick="openTradingView('${escHtml(c.symbol)}')">
             <div class="oc-row1">
                 <span class="oc-symbol">${escHtml(c.symbol)}</span>
-                <span class="oc-meta">$${c.strike.toFixed(2)} · ${c.expiration}</span>
-                <span class="oc-highlight">${c.premium_markup_percent.toFixed(1)}% mkup</span>
+                <span class="oc-meta"><span style="color:#fff">$${c.strike.toFixed(2)}</span> · ${c.expiration}</span>
+                <span class="oc-highlight">${mkup.toFixed(1)}% mkup</span>
             </div>
             <div class="oc-row2">
                 <span class="oc-name">$${c.current_price.toFixed(2)} · vol ${c.volume ?? '—'}</span>
-                <span class="oc-metrics">$${c.premium.toFixed(2)} prem · BE $${c.break_even.toFixed(2)}</span>
+                <span class="oc-metrics"><span class="oc-prem">$${c.premium.toFixed(2)}</span> · BE $${c.break_even.toFixed(2)}</span>
             </div>
-        </div>`
-    ).join('');
+        </div>`;
+    }).join('');
 
     if (pagEl) {
         pagEl.style.display = totalPages > 1 ? 'flex' : 'none';
@@ -680,14 +693,14 @@ async function fetchMarketOverview() {
         console.error('fetchMarketOverview failed:', err);
         ['sector-bars', 'vix-content', 'gex-content', 'breadth-content'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.innerHTML = '<span style="color:var(--tv-muted);font-size:11px">Unavailable</span>';
+            if (el) el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>';
         });
     }
 }
 
 function renderSectors(sectors) {
     const el = document.getElementById('sector-bars');
-    if (!el || !sectors) { if (el) el.innerHTML = '<span style="color:var(--tv-muted);font-size:11px">Unavailable</span>'; return; }
+    if (!el || !sectors) { if (el) el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
     const sorted = Object.entries(sectors).sort(([, a], [, b]) => (b.pct_1d ?? -Infinity) - (a.pct_1d ?? -Infinity));
     const vals1d = sorted.map(([, s]) => s.pct_1d).filter(v => v != null);
     const vals1w = sorted.map(([, s]) => s.pct_1w).filter(v => v != null);
@@ -715,7 +728,7 @@ function renderSectors(sectors) {
 function renderVix(vix) {
     const el = document.getElementById('vix-content');
     if (!el) return;
-    if (!vix || vix.spot == null) { el.innerHTML = '<span style="color:var(--tv-muted);font-size:11px">Unavailable</span>'; return; }
+    if (!vix || vix.spot == null) { el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
     const fmtChg = pct => {
         if (pct == null) return '<span style="color:var(--tv-muted)">—</span>';
         const color = pct >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
@@ -725,13 +738,13 @@ function renderVix(vix) {
     el.innerHTML = `
         <div class="vix-spot">${vix.spot.toFixed(2)}</div>
         <div class="vix-changes">1D: ${fmtChg(vix.pct_1d)} &nbsp; 1W: ${fmtChg(vix.pct_1w)}</div>
-        <div class="vix-term ${tsClass}">${escHtml(vix.term_structure)} — ${escHtml(vix.stress_note)} (spread ${vix.spread >= 0 ? '+' : ''}${vix.spread.toFixed(2)})</div>`;
+        <div class="vix-term ${tsClass}">Structure: ${escHtml(vix.term_structure)} — ${escHtml(vix.stress_note)} (spread ${vix.spread >= 0 ? '+' : ''}${vix.spread.toFixed(2)})</div>`;
 }
 
 function renderGex(gex) {
     const el = document.getElementById('gex-content');
     if (!el) return;
-    if (!gex || gex.value_b == null) { el.innerHTML = '<span style="color:var(--tv-muted);font-size:11px">Unavailable</span>'; return; }
+    if (!gex || gex.value_b == null) { el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
     const arrow = gex.trend === 'Rising' ? '↑' : gex.trend === 'Falling' ? '↓' : '→';
     el.innerHTML = `
         <div class="gex-value">$${gex.value_b.toFixed(1)}B</div>
@@ -742,7 +755,7 @@ function renderGex(gex) {
 function renderBreadth(breadth) {
     const el = document.getElementById('breadth-content');
     if (!el) return;
-    if (!breadth) { el.innerHTML = '<span style="color:var(--tv-muted);font-size:11px">Unavailable</span>'; return; }
+    if (!breadth) { el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
     const pct = breadth.pct_above_200ma ?? 0;
     const maColor = pct >= 60 ? 'green' : pct >= 40 ? 'yellow' : 'red';
     el.innerHTML = `

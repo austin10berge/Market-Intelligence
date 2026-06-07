@@ -52,6 +52,7 @@ COPY src/web/backtest.js /usr/share/nginx/html/backtest.js
 COPY src/web/technical-analysis.js /usr/share/nginx/html/technical-analysis.js
 COPY src/web/technical-analysis-helpers.js /usr/share/nginx/html/technical-analysis-helpers.js
 COPY src/web/scanner.js /usr/share/nginx/html/scanner.js
+COPY src/web/v2/ /usr/share/nginx/html/v2/
 COPY src/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY src/web/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
