@@ -310,14 +310,25 @@ class TestVix:
 
     @patch("src.fetchers.market_overview.yf.download")
     async def test_vix_term_structure_flat(self, mock_dl):
-        # spread = 0.3 (between -0.5 and 0.5) → Flat
+        # spread = 0.2 (within ±0.25) → Flat
         vix_df = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.0)
-        vix3m_df = _make_yf_df(["^VIX3M"], n_days=5, base=18.3, step=0.0)
+        vix3m_df = _make_yf_df(["^VIX3M"], n_days=5, base=18.2, step=0.0)
         combined = pd.concat([vix_df, vix3m_df], axis=1)
         mock_dl.return_value = combined
         result = await _fetch_vix()
         assert result["term_structure"] == "Flat"
         assert result["stress_note"] == "transitioning"
+
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_vix_term_structure_contango_near_threshold(self, mock_dl):
+        # spread = 0.3 → just past the tightened ±0.25 band → Contango (not Flat)
+        vix_df = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.0)
+        vix3m_df = _make_yf_df(["^VIX3M"], n_days=5, base=18.3, step=0.0)
+        combined = pd.concat([vix_df, vix3m_df], axis=1)
+        mock_dl.return_value = combined
+        result = await _fetch_vix()
+        assert result["term_structure"] == "Contango"
+        assert result["spread"] == pytest.approx(0.3, abs=0.01)
 
     @patch("src.fetchers.market_overview.yf.download")
     async def test_vix_pct_1w_none_with_few_rows(self, mock_dl):
