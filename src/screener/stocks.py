@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 
 import httpx
 import pandas as pd
+import pandas_ta as ta
 import yfinance as yf
 
 from ..config import settings
@@ -633,8 +634,8 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 ticker = yf.Ticker(symbol)
                 info = ticker.info
 
-                # 3 months gives enough history for 20-day realized vol and 1M returns.
-                hist = ticker.history(period="3mo")
+                # 1 year gives enough history for 200 SMA (needs ~200 trading days).
+                hist = ticker.history(period="1y")
                 if hist.empty:
                     continue
 
@@ -697,6 +698,30 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 if len(history_slice) > 0:
                     price_history_1m = [round(float(p), 2) for p in history_slice.tolist() if not pd.isna(p)]
 
+                # Technical indicators for TA annotation pills
+                sma_200_val: float | None = None
+                bb_upper_val: float | None = None
+                bb_mid_val: float | None = None
+                bb_lower_val: float | None = None
+                try:
+                    close = hist["Close"]
+                    if len(close) >= 200:
+                        sma_200_val = round(float(ta.sma(close, length=200).iloc[-1]), 2)
+                    if len(close) >= 20:
+                        bbands = ta.bbands(close, length=20, std=2)
+                        if bbands is not None and not bbands.empty:
+                            upper_col = next((c for c in bbands.columns if "BBU" in c), None)
+                            mid_col   = next((c for c in bbands.columns if "BBM" in c), None)
+                            lower_col = next((c for c in bbands.columns if "BBL" in c), None)
+                            if upper_col:
+                                bb_upper_val = round(float(bbands[upper_col].iloc[-1]), 2)
+                            if mid_col:
+                                bb_mid_val = round(float(bbands[mid_col].iloc[-1]), 2)
+                            if lower_col:
+                                bb_lower_val = round(float(bbands[lower_col].iloc[-1]), 2)
+                except Exception as exc:
+                    logger.debug("TA indicators failed for %s: %s", symbol, exc)
+
                 candidates.append(
                     {
                         "symbol": symbol,
@@ -724,6 +749,10 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                         else "N/A",
                         "iv_percentile": round(iv_percentile_val, 2) if iv_percentile_val is not None else "N/A",
                         "iv_history_points": len(iv_history),
+                        "sma_200":  sma_200_val,
+                        "bb_upper": bb_upper_val,
+                        "bb_mid":   bb_mid_val,
+                        "bb_lower": bb_lower_val,
                     }
                 )
 

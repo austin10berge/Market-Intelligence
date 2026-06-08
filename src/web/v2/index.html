@@ -21,7 +21,7 @@
             --col-spark: 44px;
             --col-a:     76px;
             --col-b:     68px;
-            --col-c:     68px;
+            --col-c:     96px;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -283,6 +283,39 @@
             justify-content: flex-end;
             align-items: center;
         }
+
+        /* ── TA annotation pills ── */
+        .tr-ta-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .tr-ta-col {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            padding-left: 4px;
+        }
+        .tr-ta-col .tr-ta-pills {
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 3px;
+        }
+        .tr-ta-pill {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 9.5px;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            padding: 1px 5px;
+            border-radius: 3px;
+            white-space: nowrap;
+            text-transform: lowercase;
+        }
+        .tr-ta-pill.ta-green  { background: rgba(8,153,129,0.15);  color: #089981; border: 1px solid rgba(8,153,129,0.25); }
+        .tr-ta-pill.ta-red    { background: rgba(242,54,69,0.15);  color: #F23645; border: 1px solid rgba(242,54,69,0.25); }
+        .tr-ta-pill.ta-amber  { background: rgba(247,201,72,0.13); color: #F7C948; border: 1px solid rgba(247,201,72,0.22); }
+        .tr-ta-pill.ta-muted  { background: rgba(120,123,134,0.13); color: var(--tv-muted); border: 1px solid rgba(120,123,134,0.22); }
+        .tr-ta-pill.ta-blue   { background: rgba(41,98,255,0.13);  color: #5C8AFF; border: 1px solid rgba(41,98,255,0.25); }
 
         /* ── Empty / loading states ── */
         .list-message {

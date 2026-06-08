@@ -103,9 +103,9 @@ const COL_GROUPS = [
     {
         label: 'Price',
         cols: [
-            { h: 'Price', key: 'price',   fmt: c => c.price > 0 ? `$${c.price.toFixed(2)}` : '—', pill: false, cls: c => `primary ${pctCls(c.pct_1d)}` },
-            { h: '1D %',  key: 'pct_1d',  fmt: c => fmtPct(c.pct_1d),                              pill: true,  cls: c => pctCls(c.pct_1d) },
-            { h: '1W %',  key: 'pct_1w',  fmt: c => fmtPct(c.pct_1w),                              pill: true,  cls: c => pctCls(c.pct_1w) },
+            { h: 'Price', key: 'price',  fmt: c => c.price > 0 ? `$${c.price.toFixed(2)}` : '—', pill: false, cls: c => `primary ${pctCls(c.pct_1d)}` },
+            { h: '1D %',  key: 'pct_1d', fmt: c => fmtPct(c.pct_1d),                              pill: true,  cls: c => pctCls(c.pct_1d) },
+            { h: 'TA',    render: c => `<div class="tr-ta-col">${buildTaAnnotations(c)}</div>` },
         ],
     },
     {
@@ -258,6 +258,36 @@ function sortedCandidates() {
     });
 }
 
+// ── TA annotation pills ───────────────────────────────────────────────────────
+
+function buildTaAnnotations(c) {
+    const pills = [];
+    const price = c.price;
+
+    if (c.sma_200 != null) {
+        if (price >= c.sma_200) {
+            pills.push('<span class="tr-ta-pill ta-green">above 200 sma</span>');
+        } else {
+            pills.push('<span class="tr-ta-pill ta-red">below 200 sma</span>');
+        }
+    }
+
+    if (c.bb_upper != null && c.bb_mid != null && c.bb_lower != null) {
+        if (price > c.bb_upper) {
+            pills.push('<span class="tr-ta-pill ta-green">above bb upper</span>');
+        } else if (price >= c.bb_mid) {
+            pills.push('<span class="tr-ta-pill ta-blue">above bb mid</span>');
+        } else if (price >= c.bb_lower) {
+            pills.push('<span class="tr-ta-pill ta-amber">below bb mid</span>');
+        } else {
+            pills.push('<span class="tr-ta-pill ta-red">below bb lower</span>');
+        }
+    }
+
+    if (pills.length === 0) return '';
+    return `<div class="tr-ta-pills">${pills.join('')}</div>`;
+}
+
 // ── Render ticker rows ────────────────────────────────────────────────────────
 
 function renderStockCandidates(candidates) {
@@ -274,6 +304,7 @@ function renderStockCandidates(candidates) {
         const sym = escHtml(c.symbol);
 
         const colCells = group.cols.map(col => {
+            if (col.render) return col.render(c);
             const cls = col.cls(c);
             const val = col.fmt(c);
             if (col.pill) {
