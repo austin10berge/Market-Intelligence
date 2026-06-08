@@ -327,9 +327,9 @@
             host.style.display = '';
             host.innerHTML = `
           <button class="scn-perf-toggle" onclick="ScannerView._togglePerf()">
-            <span>Stock Performance (${rows.length})</span><span class="scn-perf-caret">▾</span>
+            <span>Stock Performance (${rows.length})</span><span class="scn-perf-caret">▴</span>
           </button>
-          <div class="scn-perf-body" id="scn-perf-body" style="display:none">
+          <div class="scn-perf-body" id="scn-perf-body">
             <div class="col-tabs" id="scn-perf-coltabs"></div>
             <div class="col-header-row" id="scn-perf-colheader"></div>
             <div class="ticker-list" id="scn-perf-list"></div>

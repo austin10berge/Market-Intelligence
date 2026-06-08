@@ -90,15 +90,22 @@ let cachedPostureData = null;
 let cachedOverviewData = null;
 let overviewFetched = false;
 
+// ── Edit Watchlist state ──────────────────────────────────────────────────────
+
+let activeEditTab = 'watchlists';
+let stockChipEditor = null;
+let cspWlChipEditor = null;
+let channelsChipEditor = null;
+
 // ── Column group definitions ──────────────────────────────────────────────────
 
 const COL_GROUPS = [
     {
         label: 'Price',
         cols: [
-            { h: 'Price', key: 'price',   fmt: c => c.price > 0 ? `$${c.price.toFixed(2)}` : '—', pill: false, cls: c => `primary ${pctCls(c.pct_1d)}` },
-            { h: '1D %',  key: 'pct_1d',  fmt: c => fmtPct(c.pct_1d),                              pill: true,  cls: c => pctCls(c.pct_1d) },
-            { h: '1W %',  key: 'pct_1w',  fmt: c => fmtPct(c.pct_1w),                              pill: true,  cls: c => pctCls(c.pct_1w) },
+            { h: 'Price', key: 'price',  fmt: c => c.price > 0 ? `$${c.price.toFixed(2)}` : '—', pill: false, cls: c => `primary ${pctCls(c.pct_1d)}` },
+            { h: '1D %',  key: 'pct_1d', fmt: c => fmtPct(c.pct_1d),                              pill: true,  cls: c => pctCls(c.pct_1d) },
+            { h: 'TA',    render: c => `<div class="tr-ta-col">${buildTaAnnotations(c)}</div>` },
         ],
     },
     {
@@ -251,6 +258,36 @@ function sortedCandidates() {
     });
 }
 
+// ── TA annotation pills ───────────────────────────────────────────────────────
+
+function buildTaAnnotations(c) {
+    const pills = [];
+    const price = c.price;
+
+    if (c.sma_200 != null) {
+        if (price >= c.sma_200) {
+            pills.push('<span class="tr-ta-pill ta-green">above 200 sma</span>');
+        } else {
+            pills.push('<span class="tr-ta-pill ta-red">below 200 sma</span>');
+        }
+    }
+
+    if (c.bb_upper != null && c.bb_mid != null && c.bb_lower != null) {
+        if (price > c.bb_upper) {
+            pills.push('<span class="tr-ta-pill ta-green">above bb upper</span>');
+        } else if (price >= c.bb_mid) {
+            pills.push('<span class="tr-ta-pill ta-blue">above bb mid</span>');
+        } else if (price >= c.bb_lower) {
+            pills.push('<span class="tr-ta-pill ta-amber">below bb mid</span>');
+        } else {
+            pills.push('<span class="tr-ta-pill ta-red">below bb lower</span>');
+        }
+    }
+
+    if (pills.length === 0) return '';
+    return `<div class="tr-ta-pills">${pills.join('')}</div>`;
+}
+
 // ── Render ticker rows ────────────────────────────────────────────────────────
 
 function renderStockCandidates(candidates) {
@@ -267,6 +304,7 @@ function renderStockCandidates(candidates) {
         const sym = escHtml(c.symbol);
 
         const colCells = group.cols.map(col => {
+            if (col.render) return col.render(c);
             const cls = col.cls(c);
             const val = col.fmt(c);
             if (col.pill) {
@@ -292,7 +330,12 @@ function renderWatchlistView() {
     document.getElementById('main-content').innerHTML = `
         <div class="section-header" style="padding-bottom:8px">
             <div class="watchlist-sub-tabs" id="watchlist-sub-tabs"></div>
-            <span class="cache-badge" id="cache-status-active"></span>
+            <div style="display:flex;align-items:center;gap:6px">
+                <span class="cache-badge" id="cache-status-active"></span>
+                <button class="edit-pencil-btn" onclick="renderEditWatchlistView()" title="Edit watchlists">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="m18.5 2.5 3 3L12 15H9v-3L18.5 2.5z"/></svg>
+                </button>
+            </div>
         </div>
         <div id="watchlist-content"></div>`;
     renderWatchlistSubTabs();
@@ -514,6 +557,445 @@ function renderLeapsPage() {
 function stepLeapsPage(dir) {
     leapsPage += dir;
     renderLeapsPage();
+}
+
+// ── Edit Watchlist view ───────────────────────────────────────────────────────
+
+function renderEditWatchlistView() {
+    activeEditTab = 'watchlists';
+    stockChipEditor = null;
+    cspWlChipEditor = null;
+    channelsChipEditor = null;
+    document.getElementById('main-content').innerHTML = `
+        <div class="section-header" style="padding-bottom:8px">
+            <button class="edit-back-btn" onclick="backToWatchlist()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><polyline points="15 18 9 12 15 6"/></svg>
+                WATCHLIST
+            </button>
+            <span class="section-title">Edit Watchlist</span>
+        </div>
+        <div class="watchlist-sub-tabs" id="edit-sub-tabs" style="padding: 0 16px 8px"></div>
+        <div id="edit-content"></div>`;
+    renderEditSubTabs();
+    switchEditTab('watchlists');
+}
+
+function renderEditSubTabs() {
+    const tabs = [
+        { id: 'watchlists', label: 'Watchlists' },
+        { id: 'channels',   label: 'Channels' },
+        { id: 'settings',   label: 'Settings' },
+    ];
+    document.getElementById('edit-sub-tabs').innerHTML = tabs.map(t =>
+        `<button class="sub-tab${t.id === activeEditTab ? ' active' : ''}" onclick="switchEditTab('${t.id}')">${t.label}</button>`
+    ).join('');
+}
+
+function switchEditTab(tab) {
+    activeEditTab = tab;
+    renderEditSubTabs();
+    switch (tab) {
+        case 'watchlists': renderEditWatchlistsTab(); break;
+        case 'channels':   renderEditChannelsTab();   break;
+        case 'settings':   renderEditSettingsTab();   break;
+    }
+}
+
+function backToWatchlist() {
+    renderWatchlistView();
+}
+
+function showEditStatus(el, msg, cls) {
+    if (!el) return;
+    el.textContent = msg;
+    el.className = `edit-status ${cls}`;
+    setTimeout(() => { if (el.textContent === msg) { el.textContent = ''; el.className = 'edit-status'; } }, 4000);
+}
+
+function initChipEditor(containerEl, initialValues, opts = {}) {
+    let values = [...initialValues];
+    const chipsEl = containerEl.querySelector('.edit-chips');
+    const inputEl = containerEl.querySelector('.edit-chip-input');
+
+    function renderChips() {
+        if (!chipsEl) return;
+        chipsEl.innerHTML = values.map((v, i) => {
+            const label = opts.urlMode ? extractYouTubeHandle(v) : v;
+            return `<span class="edit-chip">
+                <span class="edit-chip-label">${escHtml(label)}</span>
+                <button class="edit-chip-remove" data-idx="${i}" type="button">×</button>
+            </span>`;
+        }).join('');
+        chipsEl.querySelectorAll('.edit-chip-remove').forEach(btn => {
+            btn.addEventListener('click', () => {
+                values.splice(parseInt(btn.dataset.idx), 1);
+                renderChips();
+            });
+        });
+    }
+
+    if (inputEl) {
+        inputEl.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                const raw = inputEl.value.replace(/,/g, '').trim();
+                if (!raw) return;
+                let val = opts.urlMode ? raw : raw.toUpperCase();
+                if (opts.urlMode) {
+                    if (/^@[\w.-]+$/.test(val)) {
+                        val = `https://www.youtube.com/${val}`;
+                    } else if (!val.includes('youtube.com/')) {
+                        inputEl.classList.add('shake');
+                        setTimeout(() => inputEl.classList.remove('shake'), 500);
+                        return;
+                    }
+                }
+                if (!values.includes(val)) values.push(val);
+                inputEl.value = '';
+                renderChips();
+            } else if (e.key === 'Escape') {
+                inputEl.value = '';
+            }
+        });
+    }
+
+    renderChips();
+    return { getValues: () => [...values] };
+}
+
+function extractYouTubeHandle(url) {
+    if (/^@[\w.-]+$/.test(url)) return url;
+    try {
+        // /@handle
+        const atMatch = url.match(/youtube\.com\/@([\w.-]+)/);
+        if (atMatch) return `@${atMatch[1]}`;
+        // /c/name or /user/name
+        const legacyMatch = url.match(/youtube\.com\/(?:c|user)\/([\w.-]+)/);
+        if (legacyMatch) return legacyMatch[1];
+        // /channel/UCID — truncate the opaque ID
+        const channelMatch = url.match(/youtube\.com\/channel\/([\w-]+)/);
+        if (channelMatch) return `${channelMatch[1].slice(0, 11)}…`;
+        // bare /Name (no prefix segment)
+        const u = new URL(url);
+        const parts = u.pathname.replace(/^\//, '').split('/').filter(Boolean);
+        return parts[0] || url;
+    } catch {
+        return url;
+    }
+}
+
+function renderEditWatchlistsTab() {
+    document.getElementById('edit-content').innerHTML = `
+        <div style="padding: 8px 14px 0">
+            <div class="overview-card" style="margin-bottom:10px">
+                <div class="overview-card-title">Stock Watchlist</div>
+                <div id="stock-chips-wrap">
+                    <div class="list-message loading" style="padding:12px 0;font-size:14px">Loading…</div>
+                </div>
+                <button class="scn-sheet-apply" id="save-stock-btn" onclick="saveStockWatchlistEdit()"
+                    style="width:100%;margin-top:10px">Save</button>
+                <div class="edit-status" id="stock-edit-status"></div>
+            </div>
+            <div class="overview-card">
+                <div class="overview-card-title">CSP Watchlist</div>
+                <div id="csp-wl-chips-wrap">
+                    <div class="list-message loading" style="padding:12px 0;font-size:14px">Loading…</div>
+                </div>
+                <button class="scn-sheet-apply" id="save-csp-wl-btn" onclick="saveCspWatchlistEdit()"
+                    style="width:100%;margin-top:10px">Save</button>
+                <div class="edit-status" id="csp-wl-edit-status"></div>
+            </div>
+        </div>`;
+
+    Promise.all([
+        fetch(`${API_BASE}/watchlist/stock`).then(r => r.json()),
+        fetch(`${API_BASE}/watchlist`).then(r => r.json()),
+    ]).then(([stockData, cspData]) => {
+        const stockWrap = document.getElementById('stock-chips-wrap');
+        const cspWrap   = document.getElementById('csp-wl-chips-wrap');
+        if (stockWrap) {
+            stockWrap.innerHTML = `<div class="edit-chip-editor"><div class="edit-chips"></div><input class="edit-chip-input" placeholder="+ ADD TICKER" /></div>`;
+            stockChipEditor = initChipEditor(stockWrap, stockData.watchlist || []);
+        }
+        if (cspWrap) {
+            cspWrap.innerHTML = `<div class="edit-chip-editor"><div class="edit-chips"></div><input class="edit-chip-input" placeholder="+ ADD TICKER" /></div>`;
+            cspWlChipEditor = initChipEditor(cspWrap, cspData.watchlist || []);
+        }
+    }).catch(() => {
+        const stockWrap = document.getElementById('stock-chips-wrap');
+        const cspWrap   = document.getElementById('csp-wl-chips-wrap');
+        if (stockWrap) stockWrap.innerHTML = '<div class="edit-status error" style="padding:8px 0">Failed to load</div>';
+        if (cspWrap)   cspWrap.innerHTML   = '<div class="edit-status error" style="padding:8px 0">Failed to load</div>';
+    });
+}
+
+async function saveStockWatchlistEdit() {
+    if (!stockChipEditor) return;
+    const btn = document.getElementById('save-stock-btn');
+    const statusEl = document.getElementById('stock-edit-status');
+    btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/watchlist/stock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tickers: stockChipEditor.getValues() }),
+        });
+        if (!res.ok) throw new Error();
+        showEditStatus(statusEl, '✓ Saved', 'success');
+        watchlistFetched.tickers = false;
+        allStockCandidates = [];
+        lastStocksResponse = null;
+    } catch {
+        showEditStatus(statusEl, '✗ Failed', 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function saveCspWatchlistEdit() {
+    if (!cspWlChipEditor) return;
+    const btn = document.getElementById('save-csp-wl-btn');
+    const statusEl = document.getElementById('csp-wl-edit-status');
+    btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/watchlist`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tickers: cspWlChipEditor.getValues() }),
+        });
+        if (!res.ok) throw new Error();
+        showEditStatus(statusEl, '✓ Saved — re-scan started', 'success');
+        watchlistFetched.csp = false;
+        watchlistFetched.leaps = false;
+        allCspCandidates = [];
+        allLeapsCandidates = [];
+        lastCspResponse = null;
+        lastLeapsResponse = null;
+    } catch {
+        showEditStatus(statusEl, '✗ Failed', 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function renderEditChannelsTab() {
+    document.getElementById('edit-content').innerHTML = `
+        <div style="padding: 8px 14px 0">
+            <div class="overview-card">
+                <div class="overview-card-title">YouTube Channels</div>
+                <div id="channels-chips-wrap">
+                    <div class="list-message loading" style="padding:12px 0;font-size:14px">Loading…</div>
+                </div>
+                <button class="scn-sheet-apply" id="save-channels-btn" onclick="saveChannelsEdit()"
+                    style="width:100%;margin-top:10px">Save</button>
+                <div class="edit-status" id="channels-edit-status"></div>
+            </div>
+        </div>`;
+
+    fetch(`${API_BASE}/youtube-channels`)
+        .then(r => r.json())
+        .then(data => {
+            const wrap = document.getElementById('channels-chips-wrap');
+            if (!wrap) return;
+            wrap.innerHTML = `<div class="edit-chip-editor"><div class="edit-chips"></div><input class="edit-chip-input" placeholder="+ ADD URL" /></div>`;
+            channelsChipEditor = initChipEditor(wrap, data.channels || [], { urlMode: true });
+        })
+        .catch(() => {
+            const wrap = document.getElementById('channels-chips-wrap');
+            if (wrap) wrap.innerHTML = '<div class="edit-status error" style="padding:8px 0">Failed to load</div>';
+        });
+}
+
+async function saveChannelsEdit() {
+    if (!channelsChipEditor) return;
+    const btn = document.getElementById('save-channels-btn');
+    const statusEl = document.getElementById('channels-edit-status');
+    btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/youtube-channels`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channels: channelsChipEditor.getValues() }),
+        });
+        if (!res.ok) throw new Error();
+        showEditStatus(statusEl, '✓ Saved', 'success');
+    } catch {
+        showEditStatus(statusEl, '✗ Failed', 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function renderEditSettingsTab() {
+    document.getElementById('edit-content').innerHTML = `
+        <div style="padding: 8px 14px 0">
+            <div class="overview-card" style="margin-bottom:10px">
+                <div class="scn-sheet-section-title">Contract Filters</div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min DTE</span>
+                    <input type="number" id="csp-min-dte" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max DTE</span>
+                    <input type="number" id="csp-max-dte" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min Delta</span>
+                    <input type="number" id="csp-min-delta" step="0.01" min="0" max="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max Delta</span>
+                    <input type="number" id="csp-max-delta" step="0.01" min="0" max="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min Capital ROC %</span>
+                    <input type="number" id="csp-min-roc" step="0.1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max Spread %</span>
+                    <input type="number" id="csp-max-spread" step="0.1" class="scn-field-input" />
+                </div>
+            </div>
+            <div class="overview-card" style="margin-bottom:10px">
+                <div class="scn-sheet-section-title">Technical Filters</div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min IV %</span>
+                    <input type="number" id="csp-min-iv" step="0.5" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min RSI</span>
+                    <input type="number" id="csp-min-rsi" step="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max RSI</span>
+                    <input type="number" id="csp-max-rsi" step="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Min ADX</span>
+                    <input type="number" id="csp-min-adx" step="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Max ADX</span>
+                    <input type="number" id="csp-max-adx" step="1" class="scn-field-input" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Pullback Mode</span>
+                    <label class="edit-toggle-wrapper">
+                        <input type="checkbox" id="csp-pullback" class="edit-toggle-input" />
+                        <span class="edit-toggle-track"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="overview-card" style="margin-bottom:10px">
+                <div class="scn-sheet-section-title">Score Weights</div>
+                <div class="scn-field">
+                    <span class="scn-field-label">Annualized Yield</span>
+                    <input type="number" id="csp-w-ay" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">PoP Proxy</span>
+                    <input type="number" id="csp-w-pop" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">IV Percentile</span>
+                    <input type="number" id="csp-w-iv" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">RSI Quality</span>
+                    <input type="number" id="csp-w-rsi" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div class="scn-field">
+                    <span class="scn-field-label">ADX Trend</span>
+                    <input type="number" id="csp-w-adx" step="0.05" min="0" max="1" class="scn-field-input" oninput="updateWeightSum()" />
+                </div>
+                <div id="weight-sum-badge" class="edit-weight-sum-badge invalid">Sum: —</div>
+                <button class="scn-sheet-apply" id="save-settings-btn" onclick="saveCspSettingsEdit()"
+                    style="width:100%;margin-top:10px" disabled>Save &amp; Re-scan</button>
+                <div class="edit-status" id="settings-edit-status"></div>
+            </div>
+        </div>`;
+
+    fetch(`${API_BASE}/settings/csp`)
+        .then(r => r.json())
+        .then(data => {
+            const s = data.settings;
+            document.getElementById('csp-min-dte').value    = s.min_dte         ?? 30;
+            document.getElementById('csp-max-dte').value    = s.max_dte         ?? 45;
+            document.getElementById('csp-min-delta').value  = s.min_delta       ?? 0.15;
+            document.getElementById('csp-max-delta').value  = s.max_delta       ?? 0.40;
+            document.getElementById('csp-min-roc').value    = s.min_roc         ?? 1.0;
+            document.getElementById('csp-max-spread').value = s.max_spread_pct  ?? 25.0;
+            document.getElementById('csp-min-iv').value     = s.min_iv          ?? 25.0;
+            document.getElementById('csp-min-rsi').value    = s.min_rsi         ?? 38.0;
+            document.getElementById('csp-max-rsi').value    = s.max_rsi         ?? 65.0;
+            document.getElementById('csp-min-adx').value    = s.min_adx         ?? 15.0;
+            document.getElementById('csp-max-adx').value    = s.max_adx         ?? 40.0;
+            document.getElementById('csp-pullback').checked = s.pullback_mode   ?? false;
+            document.getElementById('csp-w-ay').value       = s.score_weight_ay      ?? 0.35;
+            document.getElementById('csp-w-pop').value      = s.score_weight_pop     ?? 0.20;
+            document.getElementById('csp-w-iv').value       = s.score_weight_iv_pct  ?? 0.20;
+            document.getElementById('csp-w-rsi').value      = s.score_weight_rsi     ?? 0.15;
+            document.getElementById('csp-w-adx').value      = s.score_weight_adx     ?? 0.10;
+            updateWeightSum();
+        })
+        .catch(() => {
+            showEditStatus(document.getElementById('settings-edit-status'), '✗ Failed to load settings', 'error');
+        });
+}
+
+function updateWeightSum() {
+    const ids = ['csp-w-ay', 'csp-w-pop', 'csp-w-iv', 'csp-w-rsi', 'csp-w-adx'];
+    const sum = ids.reduce((acc, id) => acc + (parseFloat(document.getElementById(id)?.value) || 0), 0);
+    const badge = document.getElementById('weight-sum-badge');
+    const btn   = document.getElementById('save-settings-btn');
+    if (!badge) return;
+
+    const valid = Math.abs(sum - 1.0) <= 0.001;
+    const close = !valid && sum >= 0.95 && sum <= 1.05;
+
+    badge.textContent = `Sum: ${sum.toFixed(2)}`;
+    badge.className   = `edit-weight-sum-badge ${valid ? 'valid' : close ? 'close' : 'invalid'}`;
+    if (btn) btn.disabled = !valid;
+}
+
+async function saveCspSettingsEdit() {
+    const btn = document.getElementById('save-settings-btn');
+    const statusEl = document.getElementById('settings-edit-status');
+    btn.disabled = true;
+    try {
+        const payload = {
+            min_dte:             parseInt(document.getElementById('csp-min-dte').value),
+            max_dte:             parseInt(document.getElementById('csp-max-dte').value),
+            min_delta:           parseFloat(document.getElementById('csp-min-delta').value),
+            max_delta:           parseFloat(document.getElementById('csp-max-delta').value),
+            min_roc:             parseFloat(document.getElementById('csp-min-roc').value),
+            max_spread_pct:      parseFloat(document.getElementById('csp-max-spread').value),
+            min_iv:              parseFloat(document.getElementById('csp-min-iv').value),
+            min_rsi:             parseFloat(document.getElementById('csp-min-rsi').value),
+            max_rsi:             parseFloat(document.getElementById('csp-max-rsi').value),
+            min_adx:             parseFloat(document.getElementById('csp-min-adx').value),
+            max_adx:             parseFloat(document.getElementById('csp-max-adx').value),
+            pullback_mode:       document.getElementById('csp-pullback').checked,
+            score_weight_ay:     parseFloat(document.getElementById('csp-w-ay').value),
+            score_weight_pop:    parseFloat(document.getElementById('csp-w-pop').value),
+            score_weight_iv_pct: parseFloat(document.getElementById('csp-w-iv').value),
+            score_weight_rsi:    parseFloat(document.getElementById('csp-w-rsi').value),
+            score_weight_adx:    parseFloat(document.getElementById('csp-w-adx').value),
+        };
+        const res = await fetch(`${API_BASE}/settings/csp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error();
+        showEditStatus(statusEl, '✓ Saved — re-scan running (~30–60s)', 'success');
+        watchlistFetched.csp = false;
+        watchlistFetched.leaps = false;
+    } catch {
+        showEditStatus(statusEl, '✗ Failed to save', 'error');
+    } finally {
+        updateWeightSum();
+    }
 }
 
 // ── Market Overview view ──────────────────────────────────────────────────────
