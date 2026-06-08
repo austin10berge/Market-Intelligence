@@ -609,11 +609,15 @@ function initChipEditor(containerEl, initialValues, opts = {}) {
                 e.preventDefault();
                 const raw = inputEl.value.replace(/,/g, '').trim();
                 if (!raw) return;
-                const val = opts.urlMode ? raw : raw.toUpperCase();
-                if (opts.urlMode && !val.includes('youtube.com/')) {
-                    inputEl.classList.add('shake');
-                    setTimeout(() => inputEl.classList.remove('shake'), 500);
-                    return;
+                let val = opts.urlMode ? raw : raw.toUpperCase();
+                if (opts.urlMode) {
+                    if (/^@[\w.-]+$/.test(val)) {
+                        val = `https://www.youtube.com/${val}`;
+                    } else if (!val.includes('youtube.com/')) {
+                        inputEl.classList.add('shake');
+                        setTimeout(() => inputEl.classList.remove('shake'), 500);
+                        return;
+                    }
                 }
                 if (!values.includes(val)) values.push(val);
                 inputEl.value = '';
@@ -629,6 +633,7 @@ function initChipEditor(containerEl, initialValues, opts = {}) {
 }
 
 function extractYouTubeHandle(url) {
+    if (/^@[\w.-]+$/.test(url)) return url;
     try {
         // /@handle
         const atMatch = url.match(/youtube\.com\/@([\w.-]+)/);
