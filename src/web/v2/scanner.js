@@ -372,6 +372,7 @@
             const rowDir = c.pct_1d > 0 ? 'up' : c.pct_1d < 0 ? 'down' : '';
             const sym = _escapeHtml(c.symbol);
             const colCells = group.cols.map(col => {
+                if (col.render) return col.render(c);
                 const cls = col.cls(c);
                 const val = col.fmt(c);
                 return col.pill
