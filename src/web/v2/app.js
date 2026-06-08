@@ -630,11 +630,19 @@ function initChipEditor(containerEl, initialValues, opts = {}) {
 
 function extractYouTubeHandle(url) {
     try {
-        const match = url.match(/youtube\.com\/@?([\w.-]+)/);
-        if (match) return `@${match[1]}`;
+        // /@handle
+        const atMatch = url.match(/youtube\.com\/@([\w.-]+)/);
+        if (atMatch) return `@${atMatch[1]}`;
+        // /c/name or /user/name
+        const legacyMatch = url.match(/youtube\.com\/(?:c|user)\/([\w.-]+)/);
+        if (legacyMatch) return legacyMatch[1];
+        // /channel/UCID — truncate the opaque ID
+        const channelMatch = url.match(/youtube\.com\/channel\/([\w-]+)/);
+        if (channelMatch) return `${channelMatch[1].slice(0, 11)}…`;
+        // bare /Name (no prefix segment)
         const u = new URL(url);
-        const part = u.pathname.replace(/^\//, '').split('/')[0];
-        return part || url;
+        const parts = u.pathname.replace(/^\//, '').split('/').filter(Boolean);
+        return parts[0] || url;
     } catch {
         return url;
     }
