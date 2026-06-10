@@ -30,6 +30,11 @@ class SignalSource(str, Enum):
     CONGRESSIONAL_TRADES = "congressional_trades"
     UNUSUAL_VOLUME = "unusual_volume"
     NEWS = "news"
+    THEMATIC_ETF = "thematic_etf"
+    TREASURY_YIELDS = "treasury_yields"
+    CME_FEDWATCH = "cme_fedwatch"
+    POLICY_NEWS = "policy_news"
+    EARNINGS_CALENDAR = "earnings_calendar"
 
 
 class Signal(BaseModel):

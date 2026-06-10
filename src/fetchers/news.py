@@ -16,7 +16,7 @@ from .base import BaseFetcher, get_http_client
 logger = logging.getLogger(__name__)
 
 _AV_BASE = "https://www.alphavantage.co/query"
-_AV_TOPICS = "financial_markets,economy_monetary,economy_macro,technology,earnings"
+_AV_TOPICS = "financial_markets,economy_monetary,economy_macro,economy_fiscal,technology,earnings"
 
 # Topics considered relevant enough to keep an article
 _RELEVANT_TOPICS = {

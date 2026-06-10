@@ -21,6 +21,11 @@ from .fetchers.insider_trading import InsiderTradingFetcher
 from .fetchers.congressional_trades import CongressionalTradesFetcher
 from .fetchers.unusual_volume import UnusualVolumeFetcher
 from .fetchers.news import NewsFetcher
+from .fetchers.thematic_etf import ThematicEtfFetcher
+from .fetchers.treasury_yields import TreasuryYieldsFetcher
+from .fetchers.cme_fedwatch import CmeFedWatchFetcher
+from .fetchers.policy_news import PolicyNewsFetcher
+from .fetchers.earnings_calendar import EarningsCalendarFetcher
 from .models import ScoredSignal, Signal
 from .notify.discord import send_discord_digest
 from .notify.home_assistant import send_ha_notification
@@ -66,6 +71,11 @@ FETCHERS = [
     CongressionalTradesFetcher(),
     UnusualVolumeFetcher(),
     NewsFetcher(),
+    ThematicEtfFetcher(),
+    TreasuryYieldsFetcher(),
+    CmeFedWatchFetcher(),
+    PolicyNewsFetcher(),
+    EarningsCalendarFetcher(),
 ]
 
 
@@ -170,6 +180,40 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
         )
         news_headlines = news_signal.signal.metadata.get("headlines", []) if news_signal else []
 
+        thematic_signal = next(
+            (ss for ss in scored_signals if ss.signal.source.value == "thematic_etf"),
+            None
+        )
+        thematic_metadata = thematic_signal.signal.metadata if thematic_signal else None
+
+        treasury_signal = next(
+            (ss for ss in scored_signals if ss.signal.source.value == "treasury_yields"),
+            None
+        )
+        treasury_metadata = treasury_signal.signal.metadata if treasury_signal else None
+
+        fedwatch_signal = next(
+            (ss for ss in scored_signals if ss.signal.source.value == "cme_fedwatch"),
+            None
+        )
+        fedwatch_metadata = fedwatch_signal.signal.metadata if fedwatch_signal else None
+
+        policy_signal = next(
+            (ss for ss in scored_signals if ss.signal.source.value == "policy_news"),
+            None
+        )
+        policy_headlines = (
+            policy_signal.signal.metadata.get("headlines", []) if policy_signal else []
+        )
+
+        earnings_signal = next(
+            (ss for ss in scored_signals if ss.signal.source.value == "earnings_calendar"),
+            None
+        )
+        earnings_upcoming = (
+            earnings_signal.signal.metadata.get("upcoming", []) if earnings_signal else []
+        )
+
         system_prompt, user_prompt = build_synthesis_prompt(
             date_str=today.strftime("%A, %B %d, %Y"),
             signal_summaries=[ss.signal.summary for ss in scored_signals],
@@ -180,6 +224,11 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
             watchlist_stocks=watchlist_stocks,
             csp_candidates=csp_candidates,
             sector_metadata=sector_metadata,
+            thematic_metadata=thematic_metadata,
+            treasury_metadata=treasury_metadata,
+            fedwatch_metadata=fedwatch_metadata,
+            policy_headlines=policy_headlines,
+            earnings_upcoming=earnings_upcoming,
             news_headlines=news_headlines,
         )
 

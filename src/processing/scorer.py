@@ -447,6 +447,89 @@ def _score_unusual_volume(signal: Signal, context: dict) -> ScoredSignal:
         )
 
 
+def _score_treasury_yields(signal: Signal, context: dict) -> ScoredSignal:
+    """Treasury yields: score based on 10yr level and yield curve shape.
+
+    Neutral anchor = 4.25% (post-2022 baseline).
+    Score = (4.25 - 10yr) / 1.25, clamped to [-1, +1].
+    Examples:
+        10yr = 2.50% → +1.0 (very loose, bullish)
+        10yr = 4.25% →  0.0 (neutral)
+        10yr = 5.50% → -1.0 (tight, bearish)
+    Extreme: 10yr > 5.0%, yield curve inverted (spread < -0.3%).
+    """
+    ten_yr = signal.value
+    curve_spread = signal.metadata.get("curve_spread")
+
+    NEUTRAL = 4.25
+    SPAN = 1.25
+    raw = (NEUTRAL - ten_yr) / SPAN
+    score = round(max(-1.0, min(1.0, raw)), 3)
+
+    inverted = curve_spread is not None and curve_spread < -0.3
+    extreme = ten_yr > 5.0 or inverted
+
+    # Inverted curve: apply bearish overlay, floor at -0.5
+    if inverted and score > -0.5:
+        score = max(score - 0.3, -1.0)
+        score = round(score, 3)
+
+    THRESHOLD = 0.15
+    if score > THRESHOLD:
+        direction = SignalDirection.BULLISH
+    elif score < -THRESHOLD:
+        direction = SignalDirection.BEARISH
+    else:
+        direction = SignalDirection.NEUTRAL
+
+    curve_note = f" | Curve {signal.metadata.get('curve_label', 'N/A')}" if curve_spread is not None else ""
+    reasoning = f"10yr yield {ten_yr:.2f}% → score {score:+.3f}{curve_note}"
+
+    return ScoredSignal(
+        signal=signal,
+        score=score,
+        direction=direction,
+        extreme=extreme,
+        reasoning=reasoning,
+    )
+
+
+def _score_cme_fedwatch(signal: Signal, context: dict) -> ScoredSignal:
+    """FedWatch: score based on implied rate change vs current FFTR.
+
+    Score = implied_change / 1.0, clamped to [-1, +1].
+    +1.0 = 100bps of cuts priced in (very accommodative / bullish).
+     0.0 = hold expected.
+    -1.0 = 100bps of hikes priced in (tightening / bearish).
+    Extreme: more than 3 cuts or any hikes priced in.
+    """
+    implied_change = signal.value  # positive = cuts expected
+    expected_cuts = signal.metadata.get("expected_cuts", 0)
+
+    SPAN = 1.0
+    score = round(max(-1.0, min(1.0, implied_change / SPAN)), 3)
+    extreme = abs(expected_cuts) > 3 or expected_cuts < 0
+
+    THRESHOLD = 0.15
+    if score > THRESHOLD:
+        direction = SignalDirection.BULLISH
+    elif score < -THRESHOLD:
+        direction = SignalDirection.BEARISH
+    else:
+        direction = SignalDirection.NEUTRAL
+
+    label = signal.metadata.get("direction_label", "unknown")
+    reasoning = f"FedWatch: {label} → implied change {implied_change:+.2f}% → score {score:+.3f}"
+
+    return ScoredSignal(
+        signal=signal,
+        score=score,
+        direction=direction,
+        extreme=extreme,
+        reasoning=reasoning,
+    )
+
+
 # Registry of scoring functions
 _SCORERS = {
     SignalSource.FEAR_GREED: _score_fear_greed,
@@ -459,4 +542,6 @@ _SCORERS = {
     SignalSource.INSIDER_TRADING: _score_insider_trading,
     SignalSource.CONGRESSIONAL_TRADES: _score_congressional_trades,
     SignalSource.UNUSUAL_VOLUME: _score_unusual_volume,
+    SignalSource.TREASURY_YIELDS: _score_treasury_yields,
+    SignalSource.CME_FEDWATCH: _score_cme_fedwatch,
 }

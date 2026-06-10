@@ -6,7 +6,7 @@ an experienced options trader. Your analysis should be actionable, direct, and f
 implications for selling premium.
 
 Guidelines:
-- Be thorough but focused: aim for 250–350 words, enough to complete all three sections
+- Be thorough but focused: aim for 350–450 words, enough to cover all sections meaningfully
 - Lead with the overall market posture
 - Highlight any signals at extreme readings
 - If insider trading AND congressional trades converge on the same ticker, treat this as a \
@@ -17,7 +17,22 @@ high-conviction signal and call it out explicitly
 - End with a clear theta play recommendation and 2-3 watchlist items drawn from the ticker data
 - Do NOT hedge excessively — give a directional lean
 - Call out specific sector trends with catalysts from the news — e.g., 'Technology leading (+1.2%) on AI infrastructure spending' or 'SaaS names under pressure from AI competition'. Explain WHY sectors are moving using the news context. Be specific.
-- For insider trading, only note buy activity — insider buying is a meaningful signal worth highlighting. Do not mention sells."""
+- For insider trading, only note buy activity — insider buying is a meaningful signal worth highlighting. Do not mention sells.
+- When thematic rotation data is present, weave the most significant theme moves into your analysis. \
+Call out standout performers or laggards by name — e.g., 'Cybersecurity (CRWD +3.1%, PANW +2.4%) \
+leading on the news of...' or 'Biotech (XBI -2.3%) breaking down ahead of...'. \
+Prioritize themes with the largest 1D moves or meaningful divergence from the broad market. \
+At least one thematic callout is required when the data is available.
+- For Treasury yields: note the yield level and curve shape. An inverted curve (3mo > 10yr) \
+signals credit stress — widen spread targets or reduce position size. Rising 10yr (>5%) \
+compresses option premiums; falling 10yr is supportive of premium selling.
+- For FedWatch data: integrate rate-cut expectations into your posture. Many priced-in cuts = \
+accommodative backdrop for premium selling; hikes priced in = tighten up.
+- For policy/government news: call out any tariff, trade, or regulatory headlines that move \
+specific sectors (materials, semis, retailers, energy). Name the sector and the catalyst.
+- For earnings: flag any watchlist or CSP candidate tickers reporting in the next 7 days. \
+Selling premium into earnings is high-risk; buying back early or avoiding the name is the \
+conservative theta play. An earnings flag is a required callout if the ticker appears in WATCHLIST."""
 
 USER_PROMPT_TEMPLATE = """Generate an evening market digest analysis for {date}.
 
@@ -28,7 +43,7 @@ USER_PROMPT_TEMPLATE = """Generate an evening market digest analysis for {date}.
 Composite Score: {composite_score} (range: -1.0 bearish to +1.0 bullish)
 Overall Posture: {posture}
 Signals at extremes: {extreme_count}
-{convergence_section}{sector_section}{news_section}{watchlist_section}{csp_section}
+{convergence_section}{sector_section}{thematic_section}{treasury_section}{fedwatch_section}{policy_section}{earnings_section}{news_section}{watchlist_section}{csp_section}
 === FORMAT ===
 Use this exact structure (do NOT restate the raw signals):
 
@@ -86,6 +101,58 @@ def format_sector_breakdown(metadata: dict) -> str:
         f"Laggards: {laggards_str}",
         "",
     ]
+    return "\n".join(lines)
+
+
+def format_thematic_breakdown(metadata: dict) -> str:
+    """Format thematic ETF/basket performance data for the LLM prompt.
+
+    Expects metadata dict with keys: singles, baskets.
+    singles: {label: {ticker, pct_1d, pct_1w, pct_1m}}
+    baskets: {label: {tickers: {sym: {pct_1d, pct_1w, pct_1m}}, avg_1d}}
+    """
+    if not metadata:
+        return ""
+    singles = metadata.get("singles", {})
+    baskets = metadata.get("baskets", {})
+    if not singles and not baskets:
+        return ""
+
+    lines = ["\n=== THEMATIC ROTATION (1D) ==="]
+
+    def _p(v) -> str:
+        return f"{v:+.1f}%" if v is not None else "N/A"
+
+    # Single-ETF themes — one line each with 1D / 1W / 1M
+    for label, d in singles.items():
+        ticker = d.get("ticker", "")
+        lines.append(
+            f"{label} ({ticker}): {_p(d.get('pct_1d'))} 1D"
+            f" | {_p(d.get('pct_1w'))} 1W"
+            f" | {_p(d.get('pct_1m'))} 1M"
+        )
+
+    # Basket themes — group avg 1D/1W/1M, then individual tickers sorted by 1D
+    for label, d in baskets.items():
+        avg_line = (
+            f"avg {_p(d.get('avg_1d'))} 1D"
+            f" | {_p(d.get('avg_1w'))} 1W"
+            f" | {_p(d.get('avg_1m'))} 1M"
+        )
+        ticker_data = d.get("tickers", {})
+        ticker_parts = []
+        for sym, perf in sorted(
+            ticker_data.items(),
+            key=lambda x: x[1].get("pct_1d") or 0,
+            reverse=True,
+        ):
+            p = perf.get("pct_1d")
+            if p is not None:
+                ticker_parts.append(f"{sym} {p:+.1f}%")
+        tickers_str = " | ".join(ticker_parts) if ticker_parts else "N/A"
+        lines.append(f"{label} ({avg_line}): {tickers_str}")
+
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -184,6 +251,97 @@ def format_csp_candidates_for_prompt(candidates: list[dict], top_n: int = 5) -> 
     return "\n=== TOP CSP CANDIDATES ===\n" + "\n".join(lines) + "\n"
 
 
+def format_treasury_section(metadata: dict) -> str:
+    """Format Treasury yield curve and DXY data for the LLM prompt."""
+    if not metadata:
+        return ""
+    yields = metadata.get("yields", {})
+    if not yields:
+        return ""
+
+    lines = ["\n=== TREASURY YIELDS & US DOLLAR ==="]
+
+    # Yield levels with 1D bps change
+    parts = []
+    for label in ("3mo", "5yr", "10yr", "30yr"):
+        d = yields.get(label)
+        if d:
+            lvl = d.get("level")
+            bps = d.get("bps_1d")
+            bps_str = f" ({bps:+.0f}bps)" if bps is not None else ""
+            parts.append(f"{label} {lvl:.2f}%{bps_str}")
+    lines.append(" | ".join(parts))
+
+    # Curve
+    curve_label = metadata.get("curve_label", "N/A")
+    lines.append(f"Yield Curve (3mo/10yr): {curve_label}")
+
+    # DXY
+    dxy = metadata.get("dxy")
+    if dxy:
+        p1d = dxy.get("pct_1d")
+        p1w = dxy.get("pct_1w")
+        p1d_str = f"{p1d:+.1f}%" if p1d is not None else "N/A"
+        p1w_str = f"{p1w:+.1f}%" if p1w is not None else "N/A"
+        lines.append(f"DXY (US Dollar): {dxy['level']:.2f} | {p1d_str} 1D | {p1w_str} 1W")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_fedwatch_section(metadata: dict) -> str:
+    """Format CME FedWatch rate-expectations data for the LLM prompt."""
+    if not metadata:
+        return ""
+    current = metadata.get("current_rate")
+    implied = metadata.get("implied_rate")
+    change = metadata.get("implied_change")
+    label = metadata.get("direction_label", "")
+    cuts = metadata.get("expected_cuts")
+    if current is None or implied is None:
+        return ""
+
+    lines = [
+        "\n=== CME FEDWATCH (RATE EXPECTATIONS) ===",
+        f"Current FFTR Upper: {current:.2f}% | Futures-Implied Rate: {implied:.2f}%",
+        f"Expected Change: {change:+.2f}% ({cuts:+.1f} cuts) — {label}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def format_policy_news_section(headlines: list[dict]) -> str:
+    """Format policy/government RSS headlines for the LLM prompt."""
+    if not headlines:
+        return ""
+    lines = ["\n=== POLICY & GOVERNMENT NEWS ==="]
+    for item in headlines:
+        title = item.get("title", "")
+        summary = item.get("summary", "")
+        if summary:
+            lines.append(f"• {title} — {summary[:120]}")
+        else:
+            lines.append(f"• {title}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_earnings_section(upcoming: list[dict]) -> str:
+    """Format upcoming earnings calendar for the LLM prompt."""
+    if not upcoming:
+        return ""
+    lines = ["\n=== UPCOMING EARNINGS (next 7 days) ==="]
+    for e in upcoming[:20]:
+        sym = e.get("symbol", "")
+        name = e.get("name", "")
+        dt = e.get("report_date", "")
+        est = e.get("estimate", "N/A")
+        est_str = f" (est. EPS ${est})" if est != "N/A" else ""
+        lines.append(f"• {sym} — {name} on {dt}{est_str}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def build_synthesis_prompt(
     date_str: str,
     signal_summaries: list[str],
@@ -194,6 +352,11 @@ def build_synthesis_prompt(
     watchlist_stocks: list[dict] | None = None,
     csp_candidates: list[dict] | None = None,
     sector_metadata: dict | None = None,
+    thematic_metadata: dict | None = None,
+    treasury_metadata: dict | None = None,
+    fedwatch_metadata: dict | None = None,
+    policy_headlines: list[dict] | None = None,
+    earnings_upcoming: list[dict] | None = None,
     news_headlines: list[dict] | None = None,
 ) -> tuple[str, str]:
     """Build the system + user prompt pair for LLM synthesis.
@@ -212,6 +375,11 @@ def build_synthesis_prompt(
         convergence_section = ""
 
     sector_section = format_sector_breakdown(sector_metadata) if sector_metadata else ""
+    thematic_section = format_thematic_breakdown(thematic_metadata) if thematic_metadata else ""
+    treasury_section = format_treasury_section(treasury_metadata) if treasury_metadata else ""
+    fedwatch_section = format_fedwatch_section(fedwatch_metadata) if fedwatch_metadata else ""
+    policy_section = format_policy_news_section(policy_headlines or [])
+    earnings_section = format_earnings_section(earnings_upcoming or [])
     news_section = format_news_section(news_headlines) if news_headlines else ""
 
     watchlist_section = format_watchlist_for_prompt(watchlist_stocks or [])
@@ -225,6 +393,11 @@ def build_synthesis_prompt(
         extreme_count=extreme_count,
         convergence_section=convergence_section,
         sector_section=sector_section,
+        thematic_section=thematic_section,
+        treasury_section=treasury_section,
+        fedwatch_section=fedwatch_section,
+        policy_section=policy_section,
+        earnings_section=earnings_section,
         news_section=news_section,
         watchlist_section=watchlist_section,
         csp_section=csp_section,
