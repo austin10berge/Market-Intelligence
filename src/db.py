@@ -114,6 +114,9 @@ def store_signal(
     summary: str = "",
 ) -> None:
     """Store or update a daily signal."""
+    import math
+    if isinstance(raw_value, float) and (math.isnan(raw_value) or math.isinf(raw_value)):
+        raw_value = 0.0
     conn = _get_connection()
     try:
         conn.execute(
