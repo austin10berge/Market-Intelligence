@@ -48,12 +48,13 @@ async def _call_claude_cli(system_prompt: str, user_prompt: str) -> str | None:
     combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
     try:
         proc = await create_subprocess_exec(
-            "claude", "-p", combined,
+            "claude", "-p",
+            stdin=PIPE,
             stdout=PIPE,
             stderr=PIPE,
         )
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=120
+            proc.communicate(input=combined.encode()), timeout=120
         )
         if proc.returncode == 0:
             output = stdout_bytes.decode().strip()
@@ -67,7 +68,7 @@ async def _call_claude_cli(system_prompt: str, user_prompt: str) -> str | None:
             logger.warning(
                 "LLM: Claude CLI exited with code %d — %s",
                 proc.returncode,
-                stderr_text[:200],
+                stderr_text[:500],
             )
             return None
 
