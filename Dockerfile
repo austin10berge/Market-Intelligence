@@ -35,8 +35,13 @@ FROM base AS discord-bot
 WORKDIR /app/discord_bot
 CMD ["python3", "bot.py"]
 
+# ── claude-cli stage: extract self-contained binary from npm package ──────────
+FROM node:20-slim AS claude-cli
+RUN npm install -g @anthropic-ai/claude-code
+
 # ── pipeline target (scheduled nightly run) ───────────────────────────────────
 FROM base AS pipeline
+COPY --from=claude-cli /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude
 CMD ["python3", "-m", "src.main"]
 
 # ── dashboard target (static web UI served via nginx) ────────────────────────

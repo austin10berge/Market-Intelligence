@@ -84,7 +84,6 @@ services:
     volumes:
       - ./data:/app/data
       - ~/.claude:/root/.claude:ro
-      - /usr/local/bin/claude:/usr/local/bin/claude:ro
     depends_on:
       redis:
         condition: service_healthy
