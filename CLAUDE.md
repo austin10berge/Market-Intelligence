@@ -9,137 +9,75 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Environment
 
-- **Python**: 3.12, but there is **no local virtualenv**. All Python deps live inside the Docker images — run tests, the pipeline, and data refreshes through `docker compose` (see Commands). Bare `python -m ...` on the host will fail because the deps aren't installed there.
-- **ruff** is installed standalone at `~/.local/bin/ruff` for local lint/format (add `~/.local/bin` to PATH). A `PostToolUse` hook (`scripts/ruff-format-hook.sh`) auto-formats every `.py` file edited in a Claude Code session — no manual format step needed.
-- `test_stock_screener.py` has a pre-existing collection error — exclude it with `--ignore=tests/test_stock_screener.py` when running the full suite.
+- **Python**: 3.12, no local virtualenv. All Python deps live inside Docker images — run tests and pipeline via `docker compose`. Bare `python -m ...` on the host will fail.
+- **ruff** at `~/.local/bin/ruff` (add to PATH). A `PostToolUse` hook auto-formats every edited `.py` file — no manual format step needed.
+- Exclude `test_stock_screener.py` with `--ignore=tests/test_stock_screener.py` when running the full suite.
 
 ## Commands
 
 ```bash
-# Lint / format (standalone ruff — not in a venv)
-ruff check src/ tests/
-ruff format src/ tests/
+# Lint / format
+~/.local/bin/ruff check src/ tests/
+~/.local/bin/ruff format src/ tests/
 
 # Docker — run all always-on services (api, dashboard, discord-bot, redis)
 docker compose up --build
 
-# Run all tests via Docker
-docker compose run --rm test
-# Run full suite excluding the pre-existing broken test
+# Tests via Docker
 docker compose run --rm test python3 -m pytest tests/ --ignore=tests/test_stock_screener.py
-# Run a single test file
 docker compose run --rm test python3 -m pytest tests/test_market_data_store.py -v
 
-# Run the nightly pipeline once via Docker
+# Nightly pipeline
 docker compose run --rm pipeline
 
-# Market data refresh (incremental — last 5 trading days)
-docker compose run --rm market-data-refresh
-# Full 2-year backfill (run once manually)
-docker compose run --rm market-data-refresh python3 -m src.market_data.refresh --full
+# Market data refresh
+docker compose run --rm market-data-refresh                                               # incremental (last 5 days)
+docker compose run --rm market-data-refresh python3 -m src.market_data.refresh --full    # 2-year backfill
 
-# Cache pre-warm (runs at 9:25 AM ET via cron)
+# Cache pre-warm
 docker compose run --rm prewarm
 ```
 
+## Deployment Topology
+
+- Docker serves from the **main workspace** (`/home/dev/workspace/Market-Intelligence/src/`). Files in git worktrees (`.claude/worktrees/<id>/`) are **not served** unless `docker-compose.local.yml` explicitly mounts that worktree's `src/`.
+- When debugging a live issue: edits must land in the main workspace. Check `docker-compose.local.yml` `x-worktree-src` before assuming a worktree is mounted.
+- **Production is a separate host** (10.0.1.21). `dev-mi.austin10berge.com` is dev only. Diagnose prod bugs against the PROD API (`market.austin10berge.com`), not local containers.
+- Claude has no SSH/prod access. Prepare exact commands for the user to run manually.
+
 ## Worktree → Dev Dashboard Testing
 
-Changes are developed in a git worktree under `.claude/worktrees/<id>/`. The live dashboard runs from the main folder (`/home/dev/workspace/Market-Intelligence`). To test worktree changes against the real stack without copying files:
-
-`docker-compose.local.yml` contains a `x-worktree-src` YAML anchor that bind-mounts the worktree's `src/` into the `pipeline` and `api` containers at `/app/src`, shadowing the COPYed image layer. **Update that path when switching worktrees.**
+To test worktree changes against the running stack, `docker-compose.local.yml` bind-mounts the worktree's `src/` via the `x-worktree-src` anchor. **Update that path when switching worktrees.**
 
 ```bash
-# One-time image build (only needed when pyproject.toml changes)
+# One-time image build (only when pyproject.toml changes)
 docker compose -f docker-compose.yml -f docker-compose.local.yml build pipeline api
 
-# Trigger a pipeline run using worktree source
+# Pipeline run using worktree source
 docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm pipeline
 
-# Restart the API to pick up code changes (no rebuild)
+# Restart API to pick up changes (no rebuild needed for Python-only edits)
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-build api
 ```
 
-After the pipeline run, the dashboard's AI summary and `/api/market-posture` will reflect the new digest. Pure Python changes need no rebuild — only pyproject.toml dependency changes require `build`.
-
 ## Browser Testing
 
-The frontend (`src/web/`) is JS-rendered, so verify UI changes against a real browser, not `curl`/`WebFetch` (those don't execute the client-side fetch calls). Use the **Playwright MCP** (`mcp__playwright__browser_*`) — registered locally for this project (`claude mcp list` → `playwright`). It drives a headless Chromium already on the box; tools include `browser_navigate`, `browser_snapshot` (accessibility tree — prefer this for asserting state), `browser_click`, `browser_type`, `browser_take_screenshot`, and console message capture.
+The frontend (`src/web/`) is JS-rendered — verify UI changes with the **Playwright MCP** (`mcp__playwright__browser_*`), not `curl`/`WebFetch`. Playwright drives a registered headless Chromium.
 
-- Test against **dev** (`https://dev-mi.austin10berge.com`) — it's public, no auth needed.
-- Drive the real interactions (set filters, click **Run Scan**, wait for results) — a bare page load shows only the empty form.
-- Still use `curl` against `/api/...` for backend-only verification; reserve the browser for rendered-DOM and interaction checks.
-- MCP tools load at session start. If they're absent, the server was added mid-session — start a fresh session.
+- Test against **dev** (`https://dev-mi.austin10berge.com`) — public, no auth needed.
+- Drive real interactions (set filters, click **Run Scan**, wait for results) — bare page load shows only the empty form.
+- Use `browser_snapshot` (accessibility tree) to assert state; `browser_take_screenshot` for visual proof.
+- If `mcp__playwright__*` tools are absent, the server was added mid-session — start a fresh session.
+
+## Caching Rules
+
+When a value appears stuck or a fix has no visible effect: suspect **stale Redis cache or stale Docker image layer first**. Prefer a permanent image rebuild over container-copy hacks — the user will reject non-permanent workarounds.
+
+## MCP & Tooling
+
+- Home Assistant dashboard: use the `ha-mcp` server (already registered). Not `hass-mcp`, not curl.
+- Playwright: registered MCP server — don't hardcode node_modules paths or assume system installs.
 
 ## Architecture
 
-### System Overview
-
-A self-hosted market intelligence platform for options/theta traders. Three independent concerns share the same Python package (`src/`) and SQLite database:
-
-1. **Nightly pipeline** — fetches macro signals, scores them, synthesizes via Gemini LLM, pushes to NTFY + Discord
-2. **FastAPI backend** — always-on REST API (port 8000) for live screener data and pipeline triggering
-3. **Discord bot** — slash commands for on-demand scans and insider trade views
-
-### Key Data Flows
-
-**Nightly pipeline** (`python -m src.main` → `run_pipeline()`):
-- `asyncio.gather` across all fetchers (`src/fetchers/`) → `scorer.py` → `preprocessor.py` → `llm.py` → NTFY + Discord callback
-
-**On-demand scan** (Discord `/scan` → FastAPI `POST /api/scan/trigger`):
-- API kicks off background task → runs `run_pipeline(output_mode="on-demand")` → POSTs result to `discord-bot:9000/callback`
-
-**Screener requests** (browser → `GET /api/screener/csp`):
-- Redis cache check (market-hours-aware TTL via `src/cache.py`) → miss → `screen_csp_candidates()` or `run_csp_scan()` → cache set → return
-
-### CSP Scanner Pipeline (`src/screener/csp_scanner.py`)
-
-The broad-universe scanner runs 4 sequential stages:
-1. **Universe** — S&P 500 (Wikipedia scrape) + NASDAQ 100 (NASDAQ JSON API)
-2. **Fundamental filter** — market cap, price, beta (reads from `universe_fundamentals` table; falls back to live yfinance)
-3. **Volatility gate** — IV ≥ threshold primary; RV-20 fallback (reads from `universe_daily_ohlcv`; falls back to yfinance)
-4. **Technical conditions** — optional stackable conditions (SMA cross, price vs MA, Bollinger Bands, RSI) + **options screener** (`screen_csp_candidates()` in `src/screener/options.py`)
-
-`ScannerParams` carries all user-configurable parameters. `ScannerParams.cache_key_suffix()` generates a per-param-combination hash used for Redis cache keying.
-
-### Local Market Data Store (`src/market_data/`)
-
-Two SQLite tables prefill scanner Stage 1 and 2 to avoid per-ticker yfinance calls:
-- `universe_daily_ohlcv` — daily OHLCV, primary key `(symbol, date)`
-- `universe_fundamentals` — market cap, price, beta, IV, primary key `symbol`
-
-`refresh.py` populates these via `yf.download()` bulk requests. Incremental mode fetches the last 5 trading days; `--full` backfills 2 years. The scanner checks `get_store_status()` and emits a warning if data is >48 hours stale.
-
-### Caching Layer (`src/cache.py`)
-
-Redis (via `redis.asyncio`) with market-hours-aware TTLs:
-- **Watchlist screeners** (CSP, LEAPS, Stocks): 5-minute TTL during market hours; persists until next open outside hours (max 4h weekends)
-- **CSP universe scanner**: fixed 23-hour TTL — designed as an end-of-day snapshot
-- **Market posture**: no TTL — explicitly invalidated when the pipeline writes a new digest
-
-Cache misses are always safe: Redis failures are caught and logged, endpoints fall through to live computation.
-
-### Database (`src/db.py`)
-
-SQLite, WAL mode. Tables auto-created on first connection. Schema highlights:
-- `daily_signals` — upserted per `(date, source)`, metadata stored as JSON blob
-- `digests` — one row per date, composite score + LLM summary
-- `stock_iv_history` — ATM IV snapshots for IV Rank calculation
-- `app_config` — key-value store for watchlists, CSP settings, and 12h API caches (insider/congressional trades)
-
-### Configuration (`src/config.py`)
-
-Single `settings` singleton via Pydantic `Settings`. All values come from `.env`. **No inline comments on value lines** — pydantic-settings reads them as part of the value.
-
-### Deployment
-
-Docker Compose stack on a Proxmox LXC (`firefly`). Four always-on services: `api`, `dashboard`, `discord-bot`, `redis`. Two cron-triggered one-shot services: `pipeline` (7 PM ET weekdays) and `market-data-refresh` (4:30 PM ET weekdays). `prewarm` (9:25 AM ET) pre-fills Redis cache at market open.
-
-The dashboard (`src/web/`) is plain HTML/CSS/JS — no build step. API URL is injected at nginx container startup via `entrypoint.sh` → `config.js` from the `MARKET_INTELLIGENCE_API_URL` env var.
-
-### Signal Sources
-
-All fetchers subclass `BaseFetcher` (`src/fetchers/base.py`) and implement `async fetch() -> Signal | None`. `safe_fetch()` wraps with exception handling so a single bad source never fails the pipeline. Insider trading and congressional trades results are cached in `app_config` for 12 hours to avoid hammering the APIs.
-
-### Testing
-
-`asyncio_mode = "auto"` — all async tests work without explicit decorators. Tests use real SQLite (temp DB) and `respx` for HTTP mocking. Test fixtures are in `tests/conftest.py`.
+For full architecture detail see `@docs/architecture.md`.
