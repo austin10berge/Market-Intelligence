@@ -83,8 +83,8 @@ services:
       REDIS_URL: redis://redis:6379/0
     volumes:
       - ./data:/app/data
-      - ~/.claude:/root/.claude:ro
-      - ~/.claude.json:/root/.claude.json:ro
+      - ~/.claude:/root/.claude
+      - ~/.claude.json:/root/.claude.json
     depends_on:
       redis:
         condition: service_healthy
