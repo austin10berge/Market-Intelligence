@@ -25,11 +25,12 @@ const NAV_ICONS = {
     watchlist:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><circle cx="3.5" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg>`,
     scanner:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>`,
     backtester: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>`,
+    analysis:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
 };
 
 const NAV_LABELS = {
     overview: 'Overview', watchlist: 'Watchlist',
-    scanner: 'Scanner', backtester: 'Backtest',
+    scanner: 'Scanner', backtester: 'Backtest', analysis: 'Charts',
 };
 
 function renderBottomNav() {
@@ -43,10 +44,9 @@ function renderBottomNav() {
 }
 
 function switchTab(tab) {
-    // Tear down the scanner's poll timer when navigating away from it.
-    if (activeTab === 'scanner' && tab !== 'scanner' && window.ScannerView) {
-        window.ScannerView.teardown();
-    }
+    if (activeTab === 'scanner'    && tab !== 'scanner'    && window.ScannerView)    window.ScannerView.teardown();
+    if (activeTab === 'backtester' && tab !== 'backtester' && window.BacktesterView) window.BacktesterView.teardown();
+    if (activeTab === 'analysis'   && tab !== 'analysis'   && window.AnalysisView)   window.AnalysisView.teardown();
     activeTab = tab;
     renderBottomNav();
     const mainContent = document.getElementById('main-content');
@@ -54,7 +54,8 @@ function switchTab(tab) {
         case 'overview':   renderOverviewView();  break;
         case 'watchlist':  renderWatchlistView(); break;
         case 'scanner':    window.ScannerView.render(mainContent); break;
-        case 'backtester': renderHandoffView('Backtester', '/backtest.html', 'Backtest CSP strategies against historical price data.'); break;
+        case 'backtester': window.BacktesterView.render(mainContent); break;
+        case 'analysis':   window.AnalysisView.render(mainContent); break;
     }
 }
 
@@ -86,9 +87,10 @@ let lastLeapsResponse = null;
 
 // ── Overview state ────────────────────────────────────────────────────────────
 
-let cachedPostureData = null;
+let cachedPostureData  = null;
 let cachedOverviewData = null;
-let overviewFetched = false;
+let overviewFetched    = false;
+let sectorView         = 'etfs';
 
 // ── Edit Watchlist state ──────────────────────────────────────────────────────
 
@@ -1012,8 +1014,17 @@ function renderOverviewView() {
                 <div class="overview-card-title">AI Synthesis</div>
                 <div id="llm-summary" class="llm-text"><span class="list-message loading" style="display:inline">Loading…</span></div>
             </div>
+            <div class="overview-card" id="sector-card">
+                <div class="sector-card-header">
+                    <div class="overview-card-title">Sectors</div>
+                    <div class="sector-toggle">
+                        <button class="sector-toggle-btn active" id="toggle-sector-etfs" onclick="switchSectorView('etfs')">Sector ETFs</button>
+                        <button class="sector-toggle-btn" id="toggle-themes" onclick="switchSectorView('themes')">Themes</button>
+                    </div>
+                </div>
+                <div id="sector-bars"><span class="list-message loading" style="display:inline">…</span></div>
+            </div>
             <div class="overview-grid">
-                <div class="overview-card"><div class="overview-card-title">Sectors</div><div id="sector-bars"><span class="list-message loading" style="display:inline">…</span></div></div>
                 <div class="overview-card"><div class="overview-card-title">VIX</div><div id="vix-content"><span class="list-message loading" style="display:inline">…</span></div></div>
                 <div class="overview-card"><div class="overview-card-title">GEX</div><div id="gex-content"><span class="list-message loading" style="display:inline">…</span></div></div>
                 <div class="overview-card"><div class="overview-card-title">Breadth</div><div id="breadth-content"><span class="list-message loading" style="display:inline">…</span></div></div>
@@ -1022,7 +1033,8 @@ function renderOverviewView() {
 
     if (cachedPostureData) renderOverviewPostureSection(cachedPostureData);
     if (cachedOverviewData) {
-        renderSectors(cachedOverviewData.sectors);
+        if (sectorView === 'etfs') renderSectors(cachedOverviewData.sectors);
+        else renderThemes(cachedOverviewData.themes);
         renderVix(cachedOverviewData.vix);
         renderGex(cachedOverviewData.gex);
         renderBreadth(cachedOverviewData.breadth);
@@ -1030,6 +1042,19 @@ function renderOverviewView() {
     if (!overviewFetched) {
         overviewFetched = true;
         fetchMarketOverview();
+    }
+}
+
+function switchSectorView(view) {
+    sectorView = view;
+    const etfsBtn   = document.getElementById('toggle-sector-etfs');
+    const themesBtn = document.getElementById('toggle-themes');
+    if (etfsBtn)   etfsBtn.classList.toggle('active', view === 'etfs');
+    if (themesBtn) themesBtn.classList.toggle('active', view === 'themes');
+    if (view === 'etfs') {
+        renderSectors(cachedOverviewData?.sectors);
+    } else {
+        renderThemes(cachedOverviewData?.themes);
     }
 }
 
