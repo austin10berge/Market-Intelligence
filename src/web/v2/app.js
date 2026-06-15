@@ -1193,7 +1193,8 @@ async function fetchMarketOverview() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         cachedOverviewData = data;
-        renderSectors(data.sectors);
+        if (sectorView === 'etfs') renderSectors(data.sectors);
+        else renderThemes(data.themes);
         renderVix(data.vix);
         renderGex(data.gex);
         renderBreadth(data.breadth);
