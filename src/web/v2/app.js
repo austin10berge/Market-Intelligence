@@ -1212,8 +1212,10 @@ function renderSectors(sectors) {
     const sorted = Object.entries(sectors).sort(([, a], [, b]) => (b.pct_1d ?? -Infinity) - (a.pct_1d ?? -Infinity));
     const vals1d = sorted.map(([, s]) => s.pct_1d).filter(v => v != null);
     const vals1w = sorted.map(([, s]) => s.pct_1w).filter(v => v != null);
+    const vals1m = sorted.map(([, s]) => s.pct_1m).filter(v => v != null);
     const max1d = vals1d.length ? Math.max(...vals1d.map(Math.abs)) : 1;
     const max1w = vals1w.length ? Math.max(...vals1w.map(Math.abs)) : 1;
+    const max1m = vals1m.length ? Math.max(...vals1m.map(Math.abs)) : 1;
     const barW = (pct, maxAbs) => pct == null || maxAbs === 0 ? 0 : Math.abs(pct) / maxAbs * 50;
     const cls  = pct => pct == null ? 'neutral' : pct >= 0 ? 'positive' : 'negative';
     const fmt  = pct => pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
@@ -1222,6 +1224,7 @@ function renderSectors(sectors) {
             <span></span>
             <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1D</span>
             <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1W</span>
+            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1M</span>
         </div>` +
         sorted.map(([ticker, s]) => `
         <div class="sector-bar-row">
@@ -1230,6 +1233,8 @@ function renderSectors(sectors) {
             <span class="sector-pct ${cls(s.pct_1d)}">${fmt(s.pct_1d)}</span>
             <div class="sector-bar-cell"><div class="sector-bar ${cls(s.pct_1w)}" style="width:${barW(s.pct_1w, max1w)}%"></div></div>
             <span class="sector-pct ${cls(s.pct_1w)}">${fmt(s.pct_1w)}</span>
+            <div class="sector-bar-cell"><div class="sector-bar ${cls(s.pct_1m)}" style="width:${barW(s.pct_1m, max1m)}%"></div></div>
+            <span class="sector-pct ${cls(s.pct_1m)}">${fmt(s.pct_1m)}</span>
         </div>`).join('');
 }
 
