@@ -1003,6 +1003,7 @@ async function saveCspSettingsEdit() {
 // ── Market Overview view ──────────────────────────────────────────────────────
 
 function renderOverviewView() {
+    sectorView = 'etfs';
     document.getElementById('main-content').innerHTML = `
         <div class="section-header"><span class="section-title">Market Overview</span></div>
         <div class="overview-section">
