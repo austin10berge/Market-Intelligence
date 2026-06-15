@@ -1238,6 +1238,87 @@ function renderSectors(sectors) {
         </div>`).join('');
 }
 
+function renderThemes(themes) {
+    const el = document.getElementById('sector-bars');
+    if (!el || !themes) { if (el) el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
+
+    const { singles = {}, baskets = {} } = themes;
+
+    // Build unified list: singles and baskets share the same row shape
+    const items = [];
+    for (const [label, d] of Object.entries(singles)) {
+        items.push({ label, type: 'single', ticker: d.ticker, pct_1d: d.pct_1d, pct_1w: d.pct_1w, pct_1m: d.pct_1m });
+    }
+    for (const [label, d] of Object.entries(baskets)) {
+        items.push({ label, type: 'basket', tickers: d.tickers, pct_1d: d.avg_1d, pct_1w: d.avg_1w, pct_1m: d.avg_1m });
+    }
+
+    // Sort by 1D descending; nulls sort to bottom
+    items.sort((a, b) => (b.pct_1d ?? -Infinity) - (a.pct_1d ?? -Infinity));
+
+    const all1d = items.map(i => i.pct_1d).filter(v => v != null);
+    const all1w = items.map(i => i.pct_1w).filter(v => v != null);
+    const all1m = items.map(i => i.pct_1m).filter(v => v != null);
+    const max1d = all1d.length ? Math.max(...all1d.map(Math.abs)) : 1;
+    const max1w = all1w.length ? Math.max(...all1w.map(Math.abs)) : 1;
+    const max1m = all1m.length ? Math.max(...all1m.map(Math.abs)) : 1;
+    const barW = (pct, maxAbs) => pct == null || maxAbs === 0 ? 0 : Math.abs(pct) / maxAbs * 50;
+    const cls  = pct => pct == null ? 'neutral' : pct >= 0 ? 'positive' : 'negative';
+    const fmt  = pct => pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+
+    const rows = items.map(item => {
+        const nameCell = item.type === 'single'
+            ? `<div class="sector-label"><div>${escHtml(item.label)}</div><div style="font-size:10px;color:var(--tv-muted)">${escHtml(item.ticker)}</div></div>`
+            : `<div class="sector-label theme-basket-label"><span class="basket-chevron">▶</span>${escHtml(item.label)}</div>`;
+
+        const mainRow = `<div class="sector-bar-row${item.type === 'basket' ? ' basket-row' : ''}" data-basket="${item.type === 'basket' ? escHtml(item.label) : ''}">
+            ${nameCell}
+            <div class="sector-bar-cell"><div class="sector-bar ${cls(item.pct_1d)}" style="width:${barW(item.pct_1d, max1d)}%"></div></div>
+            <span class="sector-pct ${cls(item.pct_1d)}">${fmt(item.pct_1d)}</span>
+            <div class="sector-bar-cell"><div class="sector-bar ${cls(item.pct_1w)}" style="width:${barW(item.pct_1w, max1w)}%"></div></div>
+            <span class="sector-pct ${cls(item.pct_1w)}">${fmt(item.pct_1w)}</span>
+            <div class="sector-bar-cell"><div class="sector-bar ${cls(item.pct_1m)}" style="width:${barW(item.pct_1m, max1m)}%"></div></div>
+            <span class="sector-pct ${cls(item.pct_1m)}">${fmt(item.pct_1m)}</span>
+        </div>`;
+
+        if (item.type !== 'basket') return mainRow;
+
+        // Constituent sub-rows (hidden by default)
+        const subRows = Object.entries(item.tickers).map(([t, d]) => `
+        <div class="sector-bar-row basket-sub-row" data-parent="${escHtml(item.label)}" style="display:none">
+            <span class="sector-label" style="font-size:10px;padding-left:16px">${escHtml(t)}</span>
+            <div class="sector-bar-cell"><div class="sector-bar ${cls(d.pct_1d)}" style="width:${barW(d.pct_1d, max1d)}%"></div></div>
+            <span class="sector-pct ${cls(d.pct_1d)}" style="font-size:10px">${fmt(d.pct_1d)}</span>
+            <div class="sector-bar-cell"><div class="sector-bar ${cls(d.pct_1w)}" style="width:${barW(d.pct_1w, max1w)}%"></div></div>
+            <span class="sector-pct ${cls(d.pct_1w)}" style="font-size:10px">${fmt(d.pct_1w)}</span>
+            <div class="sector-bar-cell"><div class="sector-bar ${cls(d.pct_1m)}" style="width:${barW(d.pct_1m, max1m)}%"></div></div>
+            <span class="sector-pct ${cls(d.pct_1m)}" style="font-size:10px">${fmt(d.pct_1m)}</span>
+        </div>`).join('');
+
+        return mainRow + subRows;
+    });
+
+    el.innerHTML = `
+        <div class="sector-bar-row sector-bar-header">
+            <span></span>
+            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1D</span>
+            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1W</span>
+            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1M</span>
+        </div>` + rows.join('');
+
+    // Wire up basket expand/collapse
+    el.querySelectorAll('.basket-row').forEach(row => {
+        row.addEventListener('click', () => {
+            const label   = row.dataset.basket;
+            const chevron = row.querySelector('.basket-chevron');
+            const subRows = el.querySelectorAll(`.basket-sub-row[data-parent="${label}"]`);
+            const isOpen  = subRows.length > 0 && subRows[0].style.display !== 'none';
+            subRows.forEach(r => r.style.display = isOpen ? 'none' : 'grid');
+            if (chevron) chevron.textContent = isOpen ? '▶' : '▼';
+        });
+    });
+}
+
 function renderVix(vix) {
     const el = document.getElementById('vix-content');
     if (!el) return;
