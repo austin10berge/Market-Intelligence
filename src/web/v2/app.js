@@ -1311,7 +1311,7 @@ function renderThemes(themes) {
         row.addEventListener('click', () => {
             const label   = row.dataset.basket;
             const chevron = row.querySelector('.basket-chevron');
-            const subRows = el.querySelectorAll(`.basket-sub-row[data-parent="${label}"]`);
+            const subRows = el.querySelectorAll(`.basket-sub-row[data-parent="${CSS.escape(label)}"]`);
             const isOpen  = subRows.length > 0 && subRows[0].style.display !== 'none';
             subRows.forEach(r => r.style.display = isOpen ? 'none' : 'grid');
             if (chevron) chevron.textContent = isOpen ? '▶' : '▼';
