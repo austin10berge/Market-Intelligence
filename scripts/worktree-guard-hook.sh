@@ -15,9 +15,10 @@ except Exception:
     print("")
 ')"
 
-# Fast path: not a worktree file
+# Fast path: not a worktree src/ file (only src/ is served by Docker via bind-mount)
 [[ -z "$FILE" ]] && exit 0
 [[ "$FILE" != *".claude/worktrees/"* ]] && exit 0
+[[ "$FILE" != *"/src/"* ]] && exit 0
 
 # Extract the worktree ID (the directory immediately after "worktrees/")
 WORKTREE_ID="$(python3 -c "

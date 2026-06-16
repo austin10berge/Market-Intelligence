@@ -11,6 +11,7 @@ import httpx
 import yfinance as yf
 
 from ..config import settings
+from .thematic_etf import BASKET_THEMES, SINGLE_TICKER_THEMES
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,9 @@ SECTOR_ETFS = {
     "XLC": "Communication Services",
 }
 
+
 DEFENSIVE = {"XLU", "XLP", "XLV", "XLRE"}
-CYCLICAL  = {"XLK", "XLY", "XLF", "XLI", "XLE", "XLB", "XLC"}
+CYCLICAL = {"XLK", "XLY", "XLF", "XLI", "XLE", "XLB", "XLC"}
 
 
 def _pct_change(series, lookback: int) -> float | None:
@@ -100,12 +102,10 @@ async def _fetch_sectors() -> tuple[dict, str | None]:
 
     # Compute rotation label
     defensive_1d = [
-        v["pct_1d"] for k, v in result.items()
-        if k in DEFENSIVE and v["pct_1d"] is not None
+        v["pct_1d"] for k, v in result.items() if k in DEFENSIVE and v["pct_1d"] is not None
     ]
     cyclical_1d = [
-        v["pct_1d"] for k, v in result.items()
-        if k in CYCLICAL and v["pct_1d"] is not None
+        v["pct_1d"] for k, v in result.items() if k in CYCLICAL and v["pct_1d"] is not None
     ]
 
     if defensive_1d and cyclical_1d:
@@ -240,9 +240,7 @@ def _fetch_breadth() -> dict | None:
             above = sum(r[1] for r in rows)
             pct_above = round(above / qualifying * 100, 1)
 
-            latest_date = conn.execute(
-                "SELECT MAX(date) FROM universe_daily_ohlcv"
-            ).fetchone()[0]
+            latest_date = conn.execute("SELECT MAX(date) FROM universe_daily_ohlcv").fetchone()[0]
             prev_rows = conn.execute(
                 "SELECT DISTINCT date FROM universe_daily_ohlcv"
                 " WHERE date < ? ORDER BY date DESC LIMIT 1",
@@ -257,14 +255,18 @@ def _fetch_breadth() -> dict | None:
                 }
             prev_date = prev_rows[0]
 
-            today_prices = dict(conn.execute(
-                "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
-                (latest_date,),
-            ).fetchall())
-            yesterday_prices = dict(conn.execute(
-                "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
-                (prev_date,),
-            ).fetchall())
+            today_prices = dict(
+                conn.execute(
+                    "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
+                    (latest_date,),
+                ).fetchall()
+            )
+            yesterday_prices = dict(
+                conn.execute(
+                    "SELECT symbol, close FROM universe_daily_ohlcv WHERE date = ?",
+                    (prev_date,),
+                ).fetchall()
+            )
 
             advancing = 0
             declining = 0
@@ -289,12 +291,69 @@ def _fetch_breadth() -> dict | None:
         return None
 
 
+async def _fetch_themes() -> dict:
+    all_tickers = list(SINGLE_TICKER_THEMES.values()) + [
+        t for tickers in BASKET_THEMES.values() for t in tickers
+    ]
+    raw = await asyncio.to_thread(
+        yf.download,
+        " ".join(all_tickers),
+        period="30d",
+        group_by="ticker",
+        progress=False,
+        auto_adjust=True,
+    )
+
+    def _extract(ticker: str) -> dict | None:
+        try:
+            closes = raw[ticker]["Close"].dropna()
+        except (KeyError, TypeError):
+            return None
+        if closes.empty:
+            return None
+        return {
+            "pct_1d": _pct_change(closes, 1),
+            "pct_1w": _pct_change(closes, 5),
+            "pct_1m": _pct_change(closes, 21),
+        }
+
+    singles: dict[str, dict] = {}
+    for label, ticker in SINGLE_TICKER_THEMES.items():
+        data = _extract(ticker)
+        if data is not None:
+            singles[label] = {"ticker": ticker, **data}
+
+    baskets: dict[str, dict] = {}
+    for label, tickers in BASKET_THEMES.items():
+        ticker_data: dict[str, dict] = {}
+        for t in tickers:
+            data = _extract(t)
+            if data is not None:
+                ticker_data[t] = data
+        if not ticker_data:
+            continue
+
+        def _avg(key: str, td: dict = ticker_data) -> float | None:
+            vals = [v[key] for v in td.values() if v.get(key) is not None]
+            return round(sum(vals) / len(vals), 2) if vals else None
+
+        baskets[label] = {
+            "tickers": ticker_data,
+            "avg_1d": _avg("pct_1d"),
+            "avg_1w": _avg("pct_1w"),
+            "avg_1m": _avg("pct_1m"),
+        }
+
+    return {"singles": singles, "baskets": baskets}
+
+
 async def fetch_market_overview() -> dict:
-    sectors_res, vix_res, gex_res, breadth_res = await asyncio.gather(
+    sectors_res, vix_res, gex_res, breadth_res, themes_res = await asyncio.gather(
         _fetch_sectors(),
         _fetch_vix(),
         _fetch_gex(),
         asyncio.to_thread(_fetch_breadth),
+        _fetch_themes(),
         return_exceptions=True,
     )
 
@@ -315,6 +374,7 @@ async def fetch_market_overview() -> dict:
     vix = _unwrap(vix_res, "vix")
     gex = _unwrap(gex_res, "gex")
     breadth = _unwrap(breadth_res, "breadth")
+    themes = _unwrap(themes_res, "themes")
 
     return {
         "sectors": sectors,
@@ -322,4 +382,5 @@ async def fetch_market_overview() -> dict:
         "vix": vix,
         "gex": gex,
         "breadth": breadth,
+        "themes": themes,
     }

@@ -140,6 +140,7 @@ class OptionsConfig(BaseModel):
     type: OptionType = OptionType.CALL
     target_dte: int = 30
     target_delta: float = 0.50
+    roll_dte: int | None = None  # Roll losing contracts when DTE falls to this value
 
 
 class PyramidingConfig(BaseModel):

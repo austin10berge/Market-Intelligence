@@ -133,6 +133,22 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
                     if pos in state.positions:
                         _close_position(state, pos, df, i, close, reason, request)
 
+        # Roll losing option positions that have reached the roll DTE threshold
+        opt_conf = strategy.options
+        if opt_conf.enabled and opt_conf.roll_dte is not None:
+            closing_ids = {id(p) for p in positions_to_close}
+            for pos in list(state.positions):
+                if not pos.is_option or id(pos) in closing_ids:
+                    continue
+                days_held = i - pos.entry_bar_idx
+                rem_dte = max(pos.option_dte_entry - days_held, 0)
+                if rem_dte <= opt_conf.roll_dte:
+                    current_opt_price = _get_option_price(close, pos.option_strike, rem_dte, pos.option_iv_entry, pos.option_type)
+                    if current_opt_price < pos.entry_price:
+                        roll_shares = pos.shares
+                        _close_position(state, pos, df, i, close, "roll", request)
+                        _open_position(state, pos.direction, i, close, df, request, override_shares=roll_shares)
+
         # Check entry
         can_enter = True
         if state.positions:
@@ -253,12 +269,13 @@ def _open_position(
     price: float,
     df: pd.DataFrame,
     request: BacktestRequest,
+    override_shares: float | None = None,
 ) -> None:
     sizing = request.strategy.position_sizing
     opt_conf = request.strategy.options
-    
+
     equity = _calc_equity(state, price, df, bar_idx, request)
-    
+
     if opt_conf.enabled:
         # Approximate option pricing
         iv = float(df["rv20"].iloc[bar_idx]) if "rv20" in df and not pd.isna(df["rv20"].iloc[bar_idx]) else 0.30
@@ -278,14 +295,17 @@ def _open_position(
                      price * (1 - request.slippage_pct / 100.0)
         fill_price_cost = fill_price
 
-    shares = _calculate_shares(
-        sizing_method=sizing.method,
-        sizing_value=sizing.value,
-        risk_pct=sizing.risk_pct,
-        equity=equity,
-        fill_price=fill_price_cost,
-        stop_loss_pct=request.strategy.exit.stop_loss_pct,
-    )
+    if override_shares is not None:
+        shares = override_shares
+    else:
+        shares = _calculate_shares(
+            sizing_method=sizing.method,
+            sizing_value=sizing.value,
+            risk_pct=sizing.risk_pct,
+            equity=equity,
+            fill_price=fill_price_cost,
+            stop_loss_pct=request.strategy.exit.stop_loss_pct,
+        )
 
     if shares <= 0:
         return

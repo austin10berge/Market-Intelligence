@@ -82,9 +82,9 @@ FETCHERS = [
 async def run_pipeline(output_mode: str = "notify") -> dict | None:
     """Execute the full evening market sentiment pipeline."""
     today = date.today()
-    logger.info(f"{'='*60}")
+    logger.info(f"{'=' * 60}")
     logger.info(f"📊 Evening Market Sentiment Pipeline — {today.isoformat()}")
-    logger.info(f"{'='*60}")
+    logger.info(f"{'=' * 60}")
 
     try:
         # ── Step 1: Fetch all signals in parallel ────────────────
@@ -135,7 +135,9 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
             stocks_envelope = await cache_get(KEY_SCREENER_STOCKS)
             if stocks_envelope and stocks_envelope.get("data"):
                 watchlist_stocks = stocks_envelope["data"]
-                logger.info("Watchlist stocks loaded from cache (%d tickers)", len(watchlist_stocks))
+                logger.info(
+                    "Watchlist stocks loaded from cache (%d tickers)", len(watchlist_stocks)
+                )
             else:
                 watchlist_stocks = await asyncio.to_thread(screen_stocks, None, True)
                 if watchlist_stocks:
@@ -169,46 +171,37 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
 
         # Extract sector and news metadata for enriched LLM prompt
         sector_signal = next(
-            (ss for ss in scored_signals if "sector" in ss.signal.source.value.lower()),
-            None
+            (ss for ss in scored_signals if "sector" in ss.signal.source.value.lower()), None
         )
         sector_metadata = sector_signal.signal.metadata if sector_signal else None
 
-        news_signal = next(
-            (ss for ss in scored_signals if ss.signal.source.value == "news"),
-            None
-        )
+        news_signal = next((ss for ss in scored_signals if ss.signal.source.value == "news"), None)
         news_headlines = news_signal.signal.metadata.get("headlines", []) if news_signal else []
 
         thematic_signal = next(
-            (ss for ss in scored_signals if ss.signal.source.value == "thematic_etf"),
-            None
+            (ss for ss in scored_signals if ss.signal.source.value == "thematic_etf"), None
         )
         thematic_metadata = thematic_signal.signal.metadata if thematic_signal else None
 
         treasury_signal = next(
-            (ss for ss in scored_signals if ss.signal.source.value == "treasury_yields"),
-            None
+            (ss for ss in scored_signals if ss.signal.source.value == "treasury_yields"), None
         )
         treasury_metadata = treasury_signal.signal.metadata if treasury_signal else None
 
         fedwatch_signal = next(
-            (ss for ss in scored_signals if ss.signal.source.value == "cme_fedwatch"),
-            None
+            (ss for ss in scored_signals if ss.signal.source.value == "cme_fedwatch"), None
         )
         fedwatch_metadata = fedwatch_signal.signal.metadata if fedwatch_signal else None
 
         policy_signal = next(
-            (ss for ss in scored_signals if ss.signal.source.value == "policy_news"),
-            None
+            (ss for ss in scored_signals if ss.signal.source.value == "policy_news"), None
         )
         policy_headlines = (
             policy_signal.signal.metadata.get("headlines", []) if policy_signal else []
         )
 
         earnings_signal = next(
-            (ss for ss in scored_signals if ss.signal.source.value == "earnings_calendar"),
-            None
+            (ss for ss in scored_signals if ss.signal.source.value == "earnings_calendar"), None
         )
         earnings_upcoming = (
             earnings_signal.signal.metadata.get("upcoming", []) if earnings_signal else []
@@ -236,12 +229,16 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
 
         # Build the full notification text
         header = f"📊 Evening Market Digest — {today.strftime('%b %d, %Y')}\n\n"
-        
+
         # Format the raw signals nicely
         raw_signals_block = "\n".join(f"• {ss.signal.summary}" for ss in scored_signals)
         raw_signals_block += f"\n\nComposite Score: {composite:+.3f} (Range: -1.0 to +1.0)"
-        
-        if digest_text and "Unable to generate" not in digest_text and "LLM unavailable" not in digest_text:
+
+        if (
+            digest_text
+            and "Unable to generate" not in digest_text
+            and "LLM unavailable" not in digest_text
+        ):
             llm_section = f"\n\n🤖 AI Analysis:\n{digest_text}"
         else:
             llm_section = f"\n\n⚠️ {digest_text}"
@@ -265,13 +262,28 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
         # ── Step 4: Notify ───────────────────────────────────────
         logger.info("Step 4/4: Sending notification...")
         if output_mode == "notify":
+            # Send signals digest first (keeps ntfy body under attachment threshold)
             await _notify(
                 title=f"📊 Market Digest — {posture.value}",
-                message=full_text,
+                message=header + raw_signals_block,
                 priority=4 if extreme_count > 0 else 3,
                 posture=posture.value,
                 composite_score=composite,
             )
+            # Send AI analysis as a separate notification
+            if (
+                digest_text
+                and "Unable to generate" not in digest_text
+                and "LLM unavailable" not in digest_text
+            ):
+                await _notify(
+                    title=f"🤖 AI Analysis — {today.strftime('%b %d, %Y')}",
+                    message=digest_text,
+                    priority=3,
+                    posture=posture.value,
+                    composite_score=composite,
+                    tags="robot",
+                )
 
         logger.info("✅ Pipeline complete!")
 
@@ -307,9 +319,16 @@ async def _fetch_all() -> list[Signal]:
     return [r for r in results if r is not None]
 
 
-async def _notify(title: str, message: str, priority: int = 3, posture: str = "", composite_score: float = 0.0) -> None:
+async def _notify(
+    title: str,
+    message: str,
+    priority: int = 3,
+    posture: str = "",
+    composite_score: float = 0.0,
+    tags: str = "chart",
+) -> None:
     """Send via NTFY (primary) and Discord (parallel); fall back to Home Assistant if NTFY fails."""
-    ntfy_task = send_ntfy(title, message, priority=priority, tags="chart")
+    ntfy_task = send_ntfy(title, message, priority=priority, tags=tags)
     discord_task = send_discord_digest(title, message, posture, composite_score)
     results = await asyncio.gather(ntfy_task, discord_task, return_exceptions=True)
     ntfy_sent = results[0] if not isinstance(results[0], Exception) else False

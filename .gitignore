@@ -45,3 +45,4 @@ htmlcov/
 # Local screenshots / scratch artifacts (e.g. Playwright MCP verification captures)
 /*.png
 .playwright-mcp/
+.superpowers/
