@@ -91,8 +91,8 @@ def compute_macro_for_date(date: str) -> dict | None:
         "market_posture": digest_row["posture"] if digest_row else None,
         "composite_score": float(digest_row["composite_score"]) if digest_row else None,
         "fear_greed_score": float(fg_row["raw_value"]) if fg_row else None,
-        "spy_above_ema50": int(curr_spy > spy_ema50) if spy_ema50 else None,
-        "spy_above_ema200": int(curr_spy > spy_ema200) if spy_ema200 else None,
-        "spy_rsi": round(spy_rsi, 2) if spy_rsi else None,
+        "spy_above_ema50": int(curr_spy > spy_ema50) if spy_ema50 is not None else None,
+        "spy_above_ema200": int(curr_spy > spy_ema200) if spy_ema200 is not None else None,
+        "spy_rsi": round(spy_rsi, 2) if spy_rsi is not None else None,
         "top_sectors": json.dumps(top_sectors),
     }
