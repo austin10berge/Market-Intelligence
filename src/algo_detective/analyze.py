@@ -1,0 +1,195 @@
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+
+import numpy as np
+from scipy.stats import ks_2samp
+
+from .store import get_all_features
+
+logger = logging.getLogger(__name__)
+
+_NUMERIC_FEATURES = [
+    "rsi", "adx", "rv20", "bb_pct_b", "bb_width_pct", "atr_pct",
+    "volume_ratio", "roc20", "macd_histogram", "pct_from_52wk_high",
+    "price_vs_ema20_pct", "price_vs_ema50_pct", "price_vs_ema150_pct", "price_vs_ema200_pct",
+    "price_vs_sma20_pct", "price_vs_sma50_pct", "price_vs_sma150_pct", "price_vs_sma200_pct",
+]
+
+_BOOLEAN_FEATURES = [
+    "price_above_ema20", "price_above_ema50", "price_above_ema150", "price_above_ema200",
+    "price_above_sma20", "price_above_sma50", "price_above_sma150", "price_above_sma200",
+    "ema20_above_ema50", "ema50_above_ema150", "ema50_above_ema200", "ema150_above_ema200",
+    "sma20_above_sma50", "sma50_above_sma150", "sma50_above_sma200", "sma150_above_sma200",
+    "price_above_bb_middle", "price_above_bb_upper", "price_below_bb_lower",
+]
+
+
+def rank_features(features: list[dict]) -> list[dict]:
+    """Rank all features by KS statistic (prime vs control distribution separation)."""
+    prime = [f for f in features if f["is_prime"] == 1]
+    control = [f for f in features if f["is_prime"] == 0]
+    if not prime or not control:
+        return []
+
+    rankings = []
+
+    for feat in _NUMERIC_FEATURES:
+        p_vals = [f[feat] for f in prime if f.get(feat) is not None]
+        c_vals = [f[feat] for f in control if f.get(feat) is not None]
+        if len(p_vals) < 5 or len(c_vals) < 5:
+            continue
+        stat, pval = ks_2samp(p_vals, c_vals)
+        rankings.append({
+            "feature": feat,
+            "ks_stat": round(float(stat), 4),
+            "p_value": float(pval),
+            "prime_mean": round(float(np.mean(p_vals)), 4),
+            "control_mean": round(float(np.mean(c_vals)), 4),
+            "type": "numeric",
+        })
+
+    for feat in _BOOLEAN_FEATURES:
+        p_vals = [f[feat] for f in prime if f.get(feat) is not None]
+        c_vals = [f[feat] for f in control if f.get(feat) is not None]
+        if len(p_vals) < 5 or len(c_vals) < 5:
+            continue
+        p_rate = float(np.mean(p_vals))
+        c_rate = float(np.mean(c_vals))
+        # Use absolute difference as the KS proxy for booleans
+        stat = abs(p_rate - c_rate)
+        rankings.append({
+            "feature": feat,
+            "ks_stat": round(stat, 4),
+            "p_value": None,
+            "prime_mean": round(p_rate, 4),
+            "control_mean": round(c_rate, 4),
+            "type": "boolean",
+        })
+
+    return sorted(rankings, key=lambda r: r["ks_stat"], reverse=True)
+
+
+def _apply_criteria(row: dict, criteria: dict) -> bool:
+    """Return True if row satisfies all criteria."""
+    for key, val in criteria.items():
+        if key.endswith("_min"):
+            feat = key[:-4]
+            if row.get(feat) is None or row[feat] < val:
+                return False
+        elif key.endswith("_max"):
+            feat = key[:-4]
+            if row.get(feat) is None or row[feat] > val:
+                return False
+        elif isinstance(val, bool):
+            expected = int(val)
+            if row.get(key) != expected:
+                return False
+    return True
+
+
+def _score_criteria(features: list[dict], criteria: dict) -> dict:
+    prime = [f for f in features if f["is_prime"] == 1]
+    control = [f for f in features if f["is_prime"] == 0]
+    tp = sum(1 for f in prime if _apply_criteria(f, criteria))
+    fp = sum(1 for f in control if _apply_criteria(f, criteria))
+    fn = len(prime) - tp
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / len(prime) if prime else 0.0
+    return {
+        "criteria": criteria,
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "true_positives": tp,
+        "false_positives": fp,
+        "false_negatives": fn,
+    }
+
+
+def find_thresholds(features: list[dict], top_n: int = 10) -> list[dict]:
+    """Grid-search thresholds for top-ranked features. Returns criteria candidates sorted by precision."""
+    rankings = rank_features(features)
+    top = rankings[:top_n]
+
+    # Build a candidate pool — start with each top feature individually, then combine
+    candidates = []
+
+    # Boolean features: just require True for those with higher prime_mean than control_mean
+    bool_criteria: dict = {}
+    for r in top:
+        if r["type"] == "boolean" and r["prime_mean"] > r["control_mean"] + 0.15:
+            bool_criteria[r["feature"]] = True
+
+    if bool_criteria:
+        candidates.append(_score_criteria(features, bool_criteria))
+
+    # Numeric features: grid-search percentile-based min/max thresholds
+    prime = [f for f in features if f["is_prime"] == 1]
+    for r in [x for x in top if x["type"] == "numeric"]:
+        feat = r["feature"]
+        p_vals = sorted(f[feat] for f in prime if f.get(feat) is not None)
+        if len(p_vals) < 10:
+            continue
+        p10 = float(np.percentile(p_vals, 10))
+        p90 = float(np.percentile(p_vals, 90))
+        # Try with just this numeric constraint plus the bool constraints
+        crit = {**bool_criteria, f"{feat}_min": round(p10, 2), f"{feat}_max": round(p90, 2)}
+        candidates.append(_score_criteria(features, crit))
+
+    # Combined: add top-2 numeric constraints together
+    num_top = [r for r in top if r["type"] == "numeric"][:2]
+    if len(num_top) == 2:
+        crit = dict(bool_criteria)
+        for r in num_top:
+            feat = r["feature"]
+            p_vals = sorted(f[feat] for f in prime if f.get(feat) is not None)
+            if len(p_vals) >= 10:
+                crit[f"{feat}_min"] = round(float(np.percentile(p_vals, 10)), 2)
+                crit[f"{feat}_max"] = round(float(np.percentile(p_vals, 90)), 2)
+        candidates.append(_score_criteria(features, crit))
+
+    return sorted(candidates, key=lambda c: (c["precision"], c["recall"]), reverse=True)
+
+
+def run_analyze(output_dir: Path | None = None) -> None:
+    if output_dir is None:
+        output_dir = Path(__file__).parent.parent.parent / "data" / "detective"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    features = get_all_features()
+    prime_count = sum(1 for f in features if f["is_prime"] == 1)
+    control_count = len(features) - prime_count
+    logger.info("Analyzing %d prime + %d control rows", prime_count, control_count)
+
+    rankings = rank_features(features)
+    candidates = find_thresholds(features, top_n=10)
+
+    output = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_prime": prime_count,
+        "total_control": control_count,
+        "feature_rankings": rankings,
+        "criteria_candidates": candidates,
+    }
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out_path = output_dir / f"analysis_{today}.json"
+    out_path.write_text(json.dumps(output, indent=2))
+    logger.info("Analysis written to %s", out_path)
+
+    print(f"\n=== Top 10 discriminating features ===")
+    for i, r in enumerate(rankings[:10], 1):
+        print(f"  {i:2}. {r['feature']:<30} KS={r['ks_stat']:.3f}  prime_mean={r['prime_mean']:.3f}  control_mean={r['control_mean']:.3f}")
+
+    print(f"\n=== Top 3 criteria candidates ===")
+    for i, c in enumerate(candidates[:3], 1):
+        print(f"  {i}. precision={c['precision']:.3f}  recall={c['recall']:.3f}  TP={c['true_positives']}  FP={c['false_positives']}")
+        print(f"     {c['criteria']}")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    run_analyze()
