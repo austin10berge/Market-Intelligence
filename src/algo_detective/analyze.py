@@ -84,7 +84,7 @@ def _apply_criteria(row: dict, criteria: dict) -> bool:
             feat = key[:-4]
             if row.get(feat) is None or row[feat] > val:
                 return False
-        elif isinstance(val, bool):
+        elif isinstance(val, int):
             expected = int(val)
             if row.get(key) != expected:
                 return False
@@ -151,7 +151,10 @@ def find_thresholds(features: list[dict], top_n: int = 10) -> list[dict]:
                 crit[f"{feat}_max"] = round(float(np.percentile(p_vals, 90)), 2)
         candidates.append(_score_criteria(features, crit))
 
-    return sorted(candidates, key=lambda c: (c["precision"], c["recall"]), reverse=True)
+    passing = [c for c in candidates if c["recall"] >= 0.7]
+    if not passing:
+        logger.warning("find_thresholds: no criteria candidate achieved recall >= 0.7")
+    return sorted(passing, key=lambda c: (c["precision"], c["recall"]), reverse=True)
 
 
 def run_analyze(output_dir: Path | None = None) -> None:
@@ -172,7 +175,7 @@ def run_analyze(output_dir: Path | None = None) -> None:
         "total_prime": prime_count,
         "total_control": control_count,
         "feature_rankings": rankings,
-        "criteria_candidates": candidates,
+        "criteria_candidates": [{"rank": i + 1, **c} for i, c in enumerate(candidates)],
     }
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -180,11 +183,11 @@ def run_analyze(output_dir: Path | None = None) -> None:
     out_path.write_text(json.dumps(output, indent=2))
     logger.info("Analysis written to %s", out_path)
 
-    print(f"\n=== Top 10 discriminating features ===")
+    print("\n=== Top 10 discriminating features ===")
     for i, r in enumerate(rankings[:10], 1):
         print(f"  {i:2}. {r['feature']:<30} KS={r['ks_stat']:.3f}  prime_mean={r['prime_mean']:.3f}  control_mean={r['control_mean']:.3f}")
 
-    print(f"\n=== Top 3 criteria candidates ===")
+    print("\n=== Top 3 criteria candidates ===")
     for i, c in enumerate(candidates[:3], 1):
         print(f"  {i}. precision={c['precision']:.3f}  recall={c['recall']:.3f}  TP={c['true_positives']}  FP={c['false_positives']}")
         print(f"     {c['criteria']}")

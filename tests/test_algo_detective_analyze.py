@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import pytest
-from src.algo_detective.analyze import rank_features, find_thresholds
+from src.algo_detective.analyze import find_thresholds, rank_features
 
 
 def _make_features(n_prime=50, n_control=500):
@@ -79,6 +78,7 @@ def test_find_thresholds_returns_criteria_with_scores():
 def test_find_thresholds_precision_focus():
     rows = _make_features()
     candidates = find_thresholds(rows, top_n=5)
-    # Best candidate should have reasonable precision
+    # Best candidate should have reasonable precision and recall
     best = max(candidates, key=lambda c: c["precision"])
     assert best["precision"] >= 0.5
+    assert best["recall"] >= 0.7
