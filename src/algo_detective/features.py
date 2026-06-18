@@ -111,7 +111,7 @@ def compute_features(
     # ── Volume ratio vs 20-day avg (excluding today) ──────────────────────────
     volume_ratio = None
     vol_window = volume.iloc[-21:-1]
-    if len(vol_window) >= 10:
+    if len(vol_window) >= 20:
         avg = float(vol_window.mean())
         if avg > 0:
             volume_ratio = curr_volume / avg
