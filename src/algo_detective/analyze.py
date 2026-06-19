@@ -85,7 +85,8 @@ def _apply_criteria(row: dict, criteria: dict) -> bool:
                 return False
         elif key.endswith("_max"):
             feat = key[:-4]
-            if row.get(feat) is None or row[feat] > val:
+            feat_val = row.get(feat)
+            if feat_val is not None and feat_val > val:
                 return False
         elif isinstance(val, int):
             expected = int(val)
