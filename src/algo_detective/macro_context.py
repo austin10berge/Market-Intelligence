@@ -52,10 +52,10 @@ def compute_macro_for_date(date: str) -> dict | None:
             FROM universe_daily_ohlcv
             WHERE symbol = 'SPY' AND date <= ?
             ORDER BY date ASC
-            LIMIT 504
             """,
             (date,),
         ).fetchall()
+        spy_rows = spy_rows[-504:]
     finally:
         conn.close()
 
