@@ -17,6 +17,9 @@ _NUMERIC_FEATURES = [
     "volume_ratio", "roc20", "macd_histogram", "pct_from_52wk_high",
     "price_vs_ema20_pct", "price_vs_ema50_pct", "price_vs_ema150_pct", "price_vs_ema200_pct",
     "price_vs_sma20_pct", "price_vs_sma50_pct", "price_vs_sma150_pct", "price_vs_sma200_pct",
+    # Fundamentals
+    "market_cap_b", "beta", "forward_pe", "peg_ratio",
+    "revenue_growth", "earnings_growth", "debt_to_equity", "dividend_yield", "fcf",
 ]
 
 _BOOLEAN_FEATURES = [

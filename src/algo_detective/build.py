@@ -11,6 +11,7 @@ from .ingest import get_prime_tickers_for_date, get_unique_dates, load_prime_tic
 from .macro_context import compute_macro_for_date
 from .store import (
     _get_connection,
+    backfill_fundamentals,
     ensure_tables,
     get_computed_pairs,
     get_feature_counts,
@@ -62,6 +63,20 @@ def run_build(csv_path: Path = _CSV_PATH) -> None:
         all_syms = [t for t, _ in to_compute]
         fund_rows = get_fundamentals_for_tickers(all_syms)
         sector_map = {r["symbol"]: r.get("sector") for r in fund_rows}
+        fund_map = {
+            r["symbol"]: {
+                "market_cap_b": r.get("market_cap_b"),
+                "beta": r.get("beta"),
+                "forward_pe": r.get("forward_pe"),
+                "peg_ratio": r.get("peg_ratio"),
+                "revenue_growth": r.get("revenue_growth"),
+                "earnings_growth": r.get("earnings_growth"),
+                "debt_to_equity": r.get("debt_to_equity"),
+                "dividend_yield": r.get("dividend_yield"),
+                "fcf": r.get("fcf"),
+            }
+            for r in fund_rows
+        }
 
         macro = compute_macro_for_date(date)
         if macro:
@@ -85,9 +100,12 @@ def run_build(csv_path: Path = _CSV_PATH) -> None:
             if is_prime:
                 _cross_validate(ticker, date, feats, records)
 
-            rows_to_insert.append(
-                {"date": date, "ticker": ticker, "is_prime": is_prime, **feats, "computed_at": now}
-            )
+            rows_to_insert.append({
+                "date": date, "ticker": ticker, "is_prime": is_prime,
+                **feats,
+                **fund_map.get(ticker, {}),
+                "computed_at": now,
+            })
 
         count = upsert_feature_rows_bulk(rows_to_insert)
         logger.info("Date %s: inserted %d rows", date, count)
@@ -165,9 +183,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build the algo detective feature matrix")
     parser.add_argument("--inspect", metavar="DATE", help="Print feature summary for YYYY-MM-DD")
     parser.add_argument("--csv", default=str(_CSV_PATH), help="Path to prime_tickers.csv")
+    parser.add_argument(
+        "--backfill-fundamentals",
+        action="store_true",
+        help="Migrate schema and backfill fundamental columns for all existing rows",
+    )
     args = parser.parse_args()
 
     if args.inspect:
         run_inspect(args.inspect)
+    elif args.backfill_fundamentals:
+        ensure_tables()  # adds new columns via ALTER TABLE
+        count = backfill_fundamentals()
+        logger.info("Backfilled fundamentals for %d rows", count)
     else:
         run_build(Path(args.csv))

@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS detective_features (
     macd_histogram          REAL,
     pct_from_52wk_high      REAL,
     sector                  TEXT,
+    market_cap_b            REAL,
+    beta                    REAL,
+    forward_pe              REAL,
+    peg_ratio               REAL,
+    revenue_growth          REAL,
+    earnings_growth         REAL,
+    debt_to_equity          REAL,
+    dividend_yield          REAL,
+    fcf                     REAL,
     computed_at             TEXT NOT NULL,
     PRIMARY KEY (date, ticker)
 );
@@ -89,11 +98,64 @@ def _get_connection() -> sqlite3.Connection:
     return conn
 
 
+_FUNDAMENTAL_COLUMNS = [
+    ("market_cap_b", "REAL"),
+    ("beta", "REAL"),
+    ("forward_pe", "REAL"),
+    ("peg_ratio", "REAL"),
+    ("revenue_growth", "REAL"),
+    ("earnings_growth", "REAL"),
+    ("debt_to_equity", "REAL"),
+    ("dividend_yield", "REAL"),
+    ("fcf", "REAL"),
+]
+
+
 def ensure_tables() -> None:
     conn = _get_connection()
     try:
         conn.executescript(_DDL)
         conn.commit()
+        # Add any new columns to an existing table (idempotent)
+        for col, col_type in _FUNDAMENTAL_COLUMNS:
+            try:
+                conn.execute(
+                    f"ALTER TABLE detective_features ADD COLUMN {col} {col_type}"
+                )
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
+    finally:
+        conn.close()
+
+
+def backfill_fundamentals() -> int:
+    """Join universe_fundamentals into detective_features for all existing rows.
+
+    Safe to call multiple times — overwrites with current fundamentals snapshot.
+    Returns number of rows updated.
+    """
+    conn = _get_connection()
+    try:
+        conn.execute("""
+            UPDATE detective_features
+            SET market_cap_b    = f.market_cap_b,
+                beta            = f.beta,
+                forward_pe      = f.forward_pe,
+                peg_ratio       = f.peg_ratio,
+                revenue_growth  = f.revenue_growth,
+                earnings_growth = f.earnings_growth,
+                debt_to_equity  = f.debt_to_equity,
+                dividend_yield  = f.dividend_yield,
+                fcf             = f.fcf
+            FROM universe_fundamentals f
+            WHERE detective_features.ticker = f.symbol
+        """)
+        count = conn.execute(
+            "SELECT changes() AS n"
+        ).fetchone()["n"]
+        conn.commit()
+        return count
     finally:
         conn.close()
 
