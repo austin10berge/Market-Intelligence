@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 import yfinance as yf
 
@@ -58,7 +59,7 @@ class SectorEtfFetcher(BaseFetcher):
                 if len(close_col) >= 2:
                     prev_close = float(close_col.iloc[-2])
                     curr_close = float(close_col.iloc[-1])
-                    if prev_close > 0:
+                    if prev_close > 0 and not math.isnan(curr_close) and not math.isnan(prev_close):
                         pct_change = round(((curr_close - prev_close) / prev_close) * 100, 2)
                         performances[ticker] = pct_change
             except Exception:

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import sqlite3
 from contextlib import asynccontextmanager, closing
@@ -280,13 +281,19 @@ async def get_market_posture():
                         pass
                 signals.append(s_dict)
 
+            def _nan_to_none(v):
+                return None if isinstance(v, float) and math.isnan(v) else v
+
             data = {
                 "date": date_str,
-                "composite_score": digest["composite_score"],
+                "composite_score": _nan_to_none(digest["composite_score"]),
                 "posture": digest["posture"],
                 "llm_summary": digest["llm_summary"],
                 "full_text": digest["full_text"],
-                "signals": signals,
+                "signals": [
+                    {k: _nan_to_none(val) for k, val in s.items()}
+                    for s in signals
+                ],
             }
 
         # Market posture only changes when the pipeline runs, so we use a long TTL
