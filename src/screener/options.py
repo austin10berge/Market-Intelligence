@@ -11,7 +11,7 @@ import yfinance as yf
 from dateutil.relativedelta import relativedelta  # noqa: F401 — kept for any future use
 
 from ..config import settings as app_settings
-from ..db import get_watchlist, get_csp_settings
+from ..db import get_csp_settings, get_watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ def _bs_put_delta(S: float, K: float, T: float, sigma: float) -> float | None:
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return None
     try:
-        d1 = (math.log(S / K) + (_RISK_FREE_RATE + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+        d1 = (math.log(S / K) + (_RISK_FREE_RATE + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
         # N(d1) via math.erf; put delta = N(d1) - 1, abs = 1 - N(d1)
         n_d1 = (1.0 + math.erf(d1 / math.sqrt(2.0))) / 2.0
         return round(1.0 - n_d1, 4)
@@ -73,7 +73,9 @@ def _compute_technicals(symbol: str) -> dict | None:
 
         # ── RSI(14) ────────────────────────────────────────────────────────────────────
         rsi_series = ta.rsi(hist["Close"], length=14)
-        rsi_val = float(rsi_series.iloc[-1]) if rsi_series is not None and not rsi_series.empty else None
+        rsi_val = (
+            float(rsi_series.iloc[-1]) if rsi_series is not None and not rsi_series.empty else None
+        )
 
         # ── ADX(14) ────────────────────────────────────────────────────────────────────
         # pandas-ta returns a DataFrame with columns ADX_14, DMP_14, DMN_14
@@ -89,14 +91,16 @@ def _compute_technicals(symbol: str) -> dict | None:
         if len(hist) >= 50:
             sma50_series = ta.sma(hist["Close"], length=50)
             if sma50_series is not None and not sma50_series.empty:
-                sma50_val = float(sma50_series.iloc[-1])
+                v = float(sma50_series.iloc[-1])
+                sma50_val = None if math.isnan(v) else v
 
         # ── 5-day return — used in pullback_mode ───────────────────────────────────
         recent_return_5d = None
         if len(hist) >= 6:
-            recent_return_5d = float(
+            v = float(
                 (hist["Close"].iloc[-1] - hist["Close"].iloc[-6]) / hist["Close"].iloc[-6] * 100
             )
+            recent_return_5d = None if math.isnan(v) else v
 
         if rsi_val is None or adx_val is None:
             logger.debug("Could not compute RSI/ADX for %s", symbol)
@@ -136,11 +140,11 @@ def _score_candidate(
     rsi_score     — Rewards RSI near 50 (healthy pullback), penalises extremes.
     adx_score     — Rewards ADX 18-35 (trend present but not exhausted).
     """
-    w_ay  = settings.get("score_weight_ay",     0.35)
-    w_pop = settings.get("score_weight_pop",    0.20)
-    w_iv  = settings.get("score_weight_iv_pct", 0.20)
-    w_rsi = settings.get("score_weight_rsi",    0.15)
-    w_adx = settings.get("score_weight_adx",    0.10)
+    w_ay = settings.get("score_weight_ay", 0.35)
+    w_pop = settings.get("score_weight_pop", 0.20)
+    w_iv = settings.get("score_weight_iv_pct", 0.20)
+    w_rsi = settings.get("score_weight_rsi", 0.15)
+    w_adx = settings.get("score_weight_adx", 0.10)
 
     # AY: 0 -> 0 pts, 60%+ -> 100 pts (linear up to cap)
     ay_score = min(annualized_roc / 60.0, 1.0) * 100
@@ -166,9 +170,9 @@ def _score_candidate(
         adx_score = max(0.0, 100 - abs(adx - 25.0) * 8)
 
     composite = (
-        w_ay  * ay_score
+        w_ay * ay_score
         + w_pop * pop_score
-        + w_iv  * iv_pct_score
+        + w_iv * iv_pct_score
         + w_rsi * rsi_score
         + w_adx * adx_score
     )
@@ -215,7 +219,8 @@ def screen_csp_candidates(
         settings["max_adx"] = max_adx
     logger.info(
         "Screening CSP candidates across %d tickers with settings: %s",
-        len(tickers), settings,
+        len(tickers),
+        settings,
     )
 
     # ── Step 1: Technical pre-filter ───────────────────────────────────────────────────
@@ -236,7 +241,10 @@ def screen_csp_candidates(
             tech_rejected += 1
             logger.debug(
                 "RSI filter: %s rsi=%.1f (allowed %.0f-%.0f)",
-                symbol, rsi, settings["min_rsi"], settings["max_rsi"],
+                symbol,
+                rsi,
+                settings["min_rsi"],
+                settings["max_rsi"],
             )
             continue
 
@@ -245,7 +253,10 @@ def screen_csp_candidates(
             tech_rejected += 1
             logger.debug(
                 "ADX filter: %s adx=%.1f (allowed %.0f-%.0f)",
-                symbol, adx, settings["min_adx"], settings["max_adx"],
+                symbol,
+                adx,
+                settings["min_adx"],
+                settings["max_adx"],
             )
             continue
 
@@ -258,14 +269,14 @@ def screen_csp_candidates(
                 tech_rejected += 1
                 continue
             if not (
-                rsi <= 55
-                and ret5d is not None
-                and ret5d < 0  # recent pullback
+                rsi <= 55 and ret5d is not None and ret5d < 0  # recent pullback
             ):
                 tech_rejected += 1
                 logger.debug(
                     "Pullback mode filter: %s rsi=%.1f ret5d=%s",
-                    symbol, rsi, ret5d,
+                    symbol,
+                    rsi,
+                    ret5d,
                 )
                 continue
 
@@ -274,7 +285,9 @@ def screen_csp_candidates(
     qualifying_tickers = list(technicals.keys())
     logger.info(
         "Technical pre-filter: %d/%d tickers passed (%d rejected)",
-        len(qualifying_tickers), len(tickers), tech_rejected,
+        len(qualifying_tickers),
+        len(tickers),
+        tech_rejected,
     )
 
     # ── Step 2: Collect candidate contracts from yfinance ─────────────────────────
@@ -286,13 +299,15 @@ def screen_csp_candidates(
             expirations = ticker.options
             current_price = ticker.fast_info.last_price
 
-            valid_exps = _get_valid_expirations(expirations, settings["min_dte"], settings["max_dte"])
+            valid_exps = _get_valid_expirations(
+                expirations, settings["min_dte"], settings["max_dte"]
+            )
             if not valid_exps:
                 continue
 
             # Wide internal pre-filter — delta filtering happens post-Alpaca snapshot
-            max_strike = current_price          # ATM (0% OTM)
-            min_strike = current_price * 0.70   # 30% OTM
+            max_strike = current_price  # ATM (0% OTM)
+            min_strike = current_price * 0.70  # 30% OTM
 
             for exp_str in valid_exps:
                 try:
@@ -305,9 +320,7 @@ def screen_csp_candidates(
                 if puts.empty:
                     continue
 
-                valid_puts = puts[
-                    (puts["strike"] >= min_strike) & (puts["strike"] <= max_strike)
-                ]
+                valid_puts = puts[(puts["strike"] >= min_strike) & (puts["strike"] <= max_strike)]
 
                 for _, put_data in valid_puts.iterrows():
                     strike = put_data["strike"]
@@ -318,16 +331,18 @@ def screen_csp_candidates(
                     exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
                     dte = (exp_date - date.today()).days
 
-                    potential_contracts.append({
-                        "symbol": symbol,
-                        "occ_symbol": occ_symbol,
-                        "yf_premium": yf_premium,
-                        "current_price": current_price,
-                        "expiration": exp_str,
-                        "strike": strike,
-                        "otm_pct": otm_pct,
-                        "dte": dte,
-                    })
+                    potential_contracts.append(
+                        {
+                            "symbol": symbol,
+                            "occ_symbol": occ_symbol,
+                            "yf_premium": yf_premium,
+                            "current_price": current_price,
+                            "expiration": exp_str,
+                            "strike": strike,
+                            "otm_pct": otm_pct,
+                            "dte": dte,
+                        }
+                    )
 
         except Exception as e:
             logger.warning("Failed to fetch yf chain for %s: %s", symbol, e)
@@ -358,19 +373,24 @@ def screen_csp_candidates(
                     alpaca_snapshots.update(batch)
                     logger.info(
                         "Alpaca snapshots: requested %d symbols, received %d (chunk %d/%d)",
-                        len(chunk), len(batch), i // chunk_size + 1,
+                        len(chunk),
+                        len(batch),
+                        i // chunk_size + 1,
                         (len(occ_symbols) - 1) // chunk_size + 1,
                     )
                     if not batch:
                         logger.warning(
                             "Alpaca returned 0 snapshots for chunk. "
                             "Status: %d. First 3 symbols: %s. Response: %s",
-                            response.status_code, chunk[:3], response.text[:300],
+                            response.status_code,
+                            chunk[:3],
+                            response.text[:300],
                         )
                 else:
                     logger.error(
                         "Alpaca API error: status=%d body=%s",
-                        response.status_code, response.text[:500],
+                        response.status_code,
+                        response.text[:500],
                     )
             except httpx.TimeoutException:
                 logger.error("Alpaca API timed out after 30s for chunk of %d symbols", len(chunk))
@@ -394,7 +414,10 @@ def screen_csp_candidates(
             rejected["no_alpaca_snapshot"] += 1
             logger.debug(
                 "No Alpaca snapshot for %s (%s %s %.0fP)",
-                c["occ_symbol"], c["symbol"], c["expiration"], c["strike"],
+                c["occ_symbol"],
+                c["symbol"],
+                c["expiration"],
+                c["strike"],
             )
             continue
 
@@ -430,7 +453,12 @@ def screen_csp_candidates(
             rejected["delta_filter"] += 1
             logger.debug(
                 "Delta filter: %s %s %.0fP — delta=%.3f (allowed %.2f-%.2f)",
-                c["symbol"], c["expiration"], c["strike"], delta, min_delta, max_delta,
+                c["symbol"],
+                c["expiration"],
+                c["strike"],
+                delta,
+                min_delta,
+                max_delta,
             )
             continue
 
@@ -440,7 +468,11 @@ def screen_csp_candidates(
             rejected["low_iv"] += 1
             logger.debug(
                 "Low IV filtered: %s %s %.0fP — iv=%.1f (min=%.0f)",
-                c["symbol"], c["expiration"], c["strike"], iv, min_iv,
+                c["symbol"],
+                c["expiration"],
+                c["strike"],
+                iv,
+                min_iv,
             )
             continue
 
@@ -448,7 +480,10 @@ def screen_csp_candidates(
             rejected["low_premium"] += 1
             logger.debug(
                 "Low premium filtered: %s %s %.0fP — premium=%.2f",
-                c["symbol"], c["expiration"], c["strike"], premium,
+                c["symbol"],
+                c["expiration"],
+                c["strike"],
+                premium,
             )
             continue
 
@@ -458,7 +493,11 @@ def screen_csp_candidates(
             rejected["low_roc"] += 1
             logger.debug(
                 "Low ROC filtered: %s %s %.0fP — roc=%.2f%% (min=%.1f%%)",
-                c["symbol"], c["expiration"], c["strike"], roc, settings["min_roc"],
+                c["symbol"],
+                c["expiration"],
+                c["strike"],
+                roc,
+                settings["min_roc"],
             )
             continue
 
@@ -470,7 +509,10 @@ def screen_csp_candidates(
                 rejected["wide_spread"] += 1
                 logger.debug(
                     "Wide spread filtered: %s %s %.0fP — spread=%.1f%% (max=%.0f%%)",
-                    c["symbol"], c["expiration"], c["strike"], spread_pct,
+                    c["symbol"],
+                    c["expiration"],
+                    c["strike"],
+                    spread_pct,
                     settings["max_spread_pct"],
                 )
                 continue
@@ -542,15 +584,15 @@ def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365
     """Find LEAPS call candidates (>365 DTE, Deep ITM)."""
     if tickers is None:
         tickers = get_watchlist()
-        
+
     logger.info(f"Screening LEAPS candidates across {len(tickers)} tickers...")
     candidates = []
-    
+
     for symbol in tickers:
         try:
             ticker = yf.Ticker(symbol)
             expirations = ticker.options
-            
+
             # Find an expiration roughly 1+ year out
             # Reusing original target helper but just checking minimum dates manually
             target_exp = None
@@ -559,46 +601,53 @@ def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365
             for exp_str in expirations:
                 exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
                 diff = (exp_date - today).days
-                if diff > 0 and abs(diff - min_dte) < best_diff and diff >= 300: # Slightly loose bounds
+                if (
+                    diff > 0 and abs(diff - min_dte) < best_diff and diff >= 300
+                ):  # Slightly loose bounds
                     best_diff = abs(diff - min_dte)
                     target_exp = exp_str
-                    
+
             if not target_exp:
                 continue
-                
+
             chain = ticker.option_chain(target_exp)
             calls = chain.calls
-            
+
             # Get current price
             current_price = ticker.fast_info.last_price
-            
+
             # Real LEAPS delta target is ~0.80. As proxy, look ~20% ITM.
             target_strike = current_price * 0.80
-            
+
             if not calls.empty:
-                closest_call = calls.iloc[(calls['strike'] - target_strike).abs().argsort()[:1]]
+                closest_call = calls.iloc[(calls["strike"] - target_strike).abs().argsort()[:1]]
                 if not closest_call.empty:
                     call_data = closest_call.iloc[0]
-                    premium = call_data['lastPrice']
-                    strike = call_data['strike']
-                    
+                    premium = call_data["lastPrice"]
+                    strike = call_data["strike"]
+
                     # Compute break-even
                     break_even = strike + premium
                     premium_over_stock = ((break_even - current_price) / current_price) * 100
-                    
-                    candidates.append({
-                        "symbol": symbol,
-                        "type": "LEAPS Call",
-                        "current_price": round(current_price, 2),
-                        "expiration": target_exp,
-                        "strike": float(strike),
-                        "premium": float(premium),
-                        "break_even": round(break_even, 2),
-                        "premium_markup_percent": round(premium_over_stock, 2),
-                        "volume": int(call_data['volume']) if not type(call_data['volume']) is float or call_data['volume'] == call_data['volume'] else 0
-                    })
+
+                    candidates.append(
+                        {
+                            "symbol": symbol,
+                            "type": "LEAPS Call",
+                            "current_price": round(current_price, 2),
+                            "expiration": target_exp,
+                            "strike": float(strike),
+                            "premium": float(premium),
+                            "break_even": round(break_even, 2),
+                            "premium_markup_percent": round(premium_over_stock, 2),
+                            "volume": int(call_data["volume"])
+                            if type(call_data["volume"]) is not float
+                            or call_data["volume"] == call_data["volume"]
+                            else 0,
+                        }
+                    )
         except Exception as e:
             logger.warning(f"Failed to screen LEAPS for {symbol}: {e}")
-            
+
     # Sort by lowest markup over current stock price
     return sorted(candidates, key=lambda x: x["premium_markup_percent"])

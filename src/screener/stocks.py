@@ -34,11 +34,12 @@ def _safe_pct(new_val, old_val):
 
 
 def _to_float(value: object) -> float | None:
-    """Convert loosely typed API values into floats."""
+    """Convert loosely typed API values into floats, returning None for NaN."""
     if value is None:
         return None
     try:
-        return float(value)
+        result = float(value)
+        return None if math.isnan(result) else result
     except (TypeError, ValueError):
         return None
 
@@ -78,8 +79,7 @@ def _black_scholes_price(
 
     sqrt_t = math.sqrt(time_to_expiry)
     d1 = (
-        math.log(spot / strike)
-        + (risk_free_rate + 0.5 * volatility * volatility) * time_to_expiry
+        math.log(spot / strike) + (risk_free_rate + 0.5 * volatility * volatility) * time_to_expiry
     ) / (volatility * sqrt_t)
     d2 = d1 - volatility * sqrt_t
 
@@ -96,14 +96,20 @@ def _black_scholes_price(
 def _quote_midpoint(snapshot: dict) -> float | None:
     """Use the most reliable available quote midpoint or last trade."""
     latest_quote = snapshot.get("latestQuote") or snapshot.get("latest_quote") or {}
-    bid = _to_float(latest_quote.get("bp") if "bp" in latest_quote else latest_quote.get("bid_price"))
-    ask = _to_float(latest_quote.get("ap") if "ap" in latest_quote else latest_quote.get("ask_price"))
+    bid = _to_float(
+        latest_quote.get("bp") if "bp" in latest_quote else latest_quote.get("bid_price")
+    )
+    ask = _to_float(
+        latest_quote.get("ap") if "ap" in latest_quote else latest_quote.get("ask_price")
+    )
 
     if bid is not None and ask is not None and bid > 0 and ask >= bid:
         return (bid + ask) / 2
 
     latest_trade = snapshot.get("latestTrade") or snapshot.get("latest_trade") or {}
-    trade_price = _to_float(latest_trade.get("p") if "p" in latest_trade else latest_trade.get("price"))
+    trade_price = _to_float(
+        latest_trade.get("p") if "p" in latest_trade else latest_trade.get("price")
+    )
     if trade_price is not None and trade_price > 0:
         return trade_price
 
@@ -397,7 +403,7 @@ def _fetch_option_bars(
     symbol_to_bars: dict[str, dict[str, float]] = defaultdict(dict)
     batch_size = 100
     for idx in range(0, len(contract_symbols), batch_size):
-        batch = contract_symbols[idx: idx + batch_size]
+        batch = contract_symbols[idx : idx + batch_size]
         next_page_token: str | None = None
         while True:
             params = {
@@ -494,7 +500,11 @@ def backfill_stock_iv_history(
                     strike_price = _to_float(contract.get("strike_price"))
                     option_type = contract.get("type")
                     contract_symbol = contract.get("symbol")
-                    if not expiration_str or strike_price is None or option_type not in {"call", "put"}:
+                    if (
+                        not expiration_str
+                        or strike_price is None
+                        or option_type not in {"call", "put"}
+                    ):
                         continue
                     expiration = datetime.strptime(expiration_str, "%Y-%m-%d").date()
                     contracts_by_expiry[expiration].append(
@@ -576,13 +586,16 @@ def backfill_stock_iv_history(
                             (
                                 contract
                                 for contract in contracts_for_expiry
-                                if contract["strike"] == target_strike and contract["type"] == option_type
+                                if contract["strike"] == target_strike
+                                and contract["type"] == option_type
                             ),
                             None,
                         )
                         if contract is None:
                             continue
-                        option_price = option_bars.get(contract["symbol"], {}).get(trade_date.isoformat())
+                        option_price = option_bars.get(contract["symbol"], {}).get(
+                            trade_date.isoformat()
+                        )
                         if option_price is None:
                             continue
                         iv = _solve_implied_volatility(
@@ -672,13 +685,19 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 eps_val = _to_float(info.get("trailingEps"))
                 eps_growth_val = _to_float(info.get("earningsGrowth"))
                 rv20_val = _calculate_rv20(hist)
-                atm_iv_val = _fetch_alpaca_atm_iv_percent(alpaca_client, symbol, float(current_price))
+                atm_iv_val = _fetch_alpaca_atm_iv_percent(
+                    alpaca_client, symbol, float(current_price)
+                )
                 if atm_iv_val is not None and persist_history:
-                    store_stock_iv_snapshot(snapshot_date=snapshot_date, symbol=symbol, atm_iv=atm_iv_val)
+                    store_stock_iv_snapshot(
+                        snapshot_date=snapshot_date, symbol=symbol, atm_iv=atm_iv_val
+                    )
 
                 iv_history = get_stock_iv_history(symbol, lookback_days=IV_RANK_LOOKBACK_DAYS)
                 if atm_iv_val is not None and len(iv_history) < MIN_IV_RANK_POINTS:
-                    logger.info("Auto-backfilling IV history for %s (%d points)", symbol, len(iv_history))
+                    logger.info(
+                        "Auto-backfilling IV history for %s (%d points)", symbol, len(iv_history)
+                    )
                     backfill_stock_iv_history([symbol])
                     iv_history = get_stock_iv_history(symbol, lookback_days=IV_RANK_LOOKBACK_DAYS)
                 iv_percentile_val = (
@@ -696,7 +715,9 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 price_history_1m = []
                 history_slice = hist["Close"].tail(21) if len(hist) >= 21 else hist["Close"]
                 if len(history_slice) > 0:
-                    price_history_1m = [round(float(p), 2) for p in history_slice.tolist() if not pd.isna(p)]
+                    price_history_1m = [
+                        round(float(p), 2) for p in history_slice.tolist() if not pd.isna(p)
+                    ]
 
                 # Technical indicators for TA annotation pills
                 sma_200_val: float | None = None
@@ -706,19 +727,23 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 try:
                     close = hist["Close"]
                     if len(close) >= 200:
-                        sma_200_val = round(float(ta.sma(close, length=200).iloc[-1]), 2)
+                        v = float(ta.sma(close, length=200).iloc[-1])
+                        sma_200_val = None if math.isnan(v) else round(v, 2)
                     if len(close) >= 20:
                         bbands = ta.bbands(close, length=20, std=2)
                         if bbands is not None and not bbands.empty:
                             upper_col = next((c for c in bbands.columns if "BBU" in c), None)
-                            mid_col   = next((c for c in bbands.columns if "BBM" in c), None)
+                            mid_col = next((c for c in bbands.columns if "BBM" in c), None)
                             lower_col = next((c for c in bbands.columns if "BBL" in c), None)
                             if upper_col:
-                                bb_upper_val = round(float(bbands[upper_col].iloc[-1]), 2)
+                                v = float(bbands[upper_col].iloc[-1])
+                                bb_upper_val = None if math.isnan(v) else round(v, 2)
                             if mid_col:
-                                bb_mid_val = round(float(bbands[mid_col].iloc[-1]), 2)
+                                v = float(bbands[mid_col].iloc[-1])
+                                bb_mid_val = None if math.isnan(v) else round(v, 2)
                             if lower_col:
-                                bb_lower_val = round(float(bbands[lower_col].iloc[-1]), 2)
+                                v = float(bbands[lower_col].iloc[-1])
+                                bb_lower_val = None if math.isnan(v) else round(v, 2)
                 except Exception as exc:
                     logger.debug("TA indicators failed for %s: %s", symbol, exc)
 
@@ -726,32 +751,46 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                     {
                         "symbol": symbol,
                         "name": info.get("shortName", symbol) or symbol,
-                        "price": round(float(current_price), 2) if not pd.isna(current_price) else 0.0,
+                        "price": round(float(current_price), 2)
+                        if not pd.isna(current_price)
+                        else 0.0,
                         "sector": info.get("sector", "N/A") or "N/A",
                         "pct_1d": round(pct_1d, 2),
                         "pct_1w": round(pct_1w, 2),
                         "pct_1m": round(pct_1m, 2),
                         "price_history_1m": price_history_1m,
                         "pe": round(float(pe_val), 2) if pd.notna(pe_val) else "N/A",
-                        "forward_pe": round(float(forward_pe_val), 2) if pd.notna(forward_pe_val) else "N/A",
-                        "peg_ratio": round(peg_ratio_val, 2) if peg_ratio_val is not None else "N/A",
+                        "forward_pe": round(float(forward_pe_val), 2)
+                        if pd.notna(forward_pe_val)
+                        else "N/A",
+                        "peg_ratio": round(peg_ratio_val, 2)
+                        if peg_ratio_val is not None
+                        else "N/A",
                         "beta": round(float(beta_val), 2) if pd.notna(beta_val) else "N/A",
                         "fcf": fcf_val,
-                        "debt_to_equity": round(debt_to_equity_val, 2) if debt_to_equity_val is not None else "N/A",
+                        "debt_to_equity": round(debt_to_equity_val, 2)
+                        if debt_to_equity_val is not None
+                        else "N/A",
                         "revenue": revenue_val,
-                        "revenue_growth": round(revenue_growth_val * 100, 1) if revenue_growth_val is not None else "N/A",
+                        "revenue_growth": round(revenue_growth_val * 100, 1)
+                        if revenue_growth_val is not None
+                        else "N/A",
                         "eps": round(eps_val, 2) if eps_val is not None else "N/A",
-                        "eps_growth": round(eps_growth_val * 100, 1) if eps_growth_val is not None else "N/A",
+                        "eps_growth": round(eps_growth_val * 100, 1)
+                        if eps_growth_val is not None
+                        else "N/A",
                         "atm_iv": round(atm_iv_val, 2) if atm_iv_val is not None else "N/A",
                         "rv20": round(rv20_val, 2) if rv20_val is not None else "N/A",
                         "atm_iv_rv20": round(atm_iv_rv20_val, 2)
                         if atm_iv_rv20_val is not None
                         else "N/A",
-                        "iv_percentile": round(iv_percentile_val, 2) if iv_percentile_val is not None else "N/A",
+                        "iv_percentile": round(iv_percentile_val, 2)
+                        if iv_percentile_val is not None
+                        else "N/A",
                         "iv_history_points": len(iv_history),
-                        "sma_200":  sma_200_val,
+                        "sma_200": sma_200_val,
                         "bb_upper": bb_upper_val,
-                        "bb_mid":   bb_mid_val,
+                        "bb_mid": bb_mid_val,
                         "bb_lower": bb_lower_val,
                     }
                 )

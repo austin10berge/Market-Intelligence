@@ -35,8 +35,8 @@ ET = zoneinfo.ZoneInfo("America/New_York")
 
 # ── Market-hours helpers ──────────────────────────────────────────────────────
 
-MARKET_OPEN  = (9, 30)   # 9:30 AM ET
-MARKET_CLOSE = (16, 0)   # 4:00 PM ET
+MARKET_OPEN = (9, 30)  # 9:30 AM ET
+MARKET_CLOSE = (16, 0)  # 4:00 PM ET
 
 
 def market_is_open() -> bool:
@@ -132,15 +132,16 @@ def get_redis() -> aioredis.Redis:
 
 # ── Cache key constants ───────────────────────────────────────────────────────
 
-KEY_SCREENER_CSP      = "screener:csp"
-KEY_SCREENER_LEAPS    = "screener:leaps"
-KEY_SCREENER_STOCKS   = "screener:stocks"
+KEY_SCREENER_CSP = "screener:csp"
+KEY_SCREENER_LEAPS = "screener:leaps"
+KEY_SCREENER_STOCKS = "screener:stocks"
 KEY_SCREENER_CSP_SCAN = "screener:csp-scan"
-KEY_MARKET_POSTURE    = "market:posture"
-KEY_MARKET_OVERVIEW   = "market:overview"
+KEY_MARKET_POSTURE = "market:posture"
+KEY_MARKET_OVERVIEW = "market:overview"
 
 
 # ── Core get/set helpers ──────────────────────────────────────────────────────
+
 
 async def cache_get(key: str) -> dict | None:
     """Retrieve a cached envelope by key. Returns the full envelope dict or None on miss/error."""
@@ -171,7 +172,10 @@ async def cache_set(key: str, data: Any, ttl: int) -> None:
         "ttl": ttl,
     }
     try:
-        await get_redis().set(key, json.dumps(envelope), ex=ttl)
+        # allow_nan=False ensures NaN floats raise immediately rather than storing
+        # an invalid JSON token that FastAPI's JSONResponse (also allow_nan=False) would
+        # fail to re-serialize on the way out, producing an opaque 500.
+        await get_redis().set(key, json.dumps(envelope, allow_nan=False), ex=ttl)
     except Exception as exc:
         logger.warning("Redis SET failed for key '%s': %s", key, exc)
 
@@ -199,6 +203,7 @@ async def cache_delete_pattern(pattern: str) -> None:
 
 # ── Domain-specific invalidation helpers ─────────────────────────────────────
 
+
 async def invalidate_screener_cache() -> None:
     """Wipe all screener cache entries. Call when watchlist or CSP settings change."""
     await cache_delete_pattern("screener:*")
@@ -210,6 +215,7 @@ async def invalidate_market_posture() -> None:
 
 
 # ── Pre-warm helper ───────────────────────────────────────────────────────────
+
 
 async def is_cache_warm(key: str) -> bool:
     """Return True if a key already exists in Redis (avoids duplicate pre-warm work)."""
