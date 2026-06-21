@@ -77,9 +77,123 @@ def rank_features(features: list[dict]) -> list[dict]:
 
 
 def _apply_criteria(row: dict, criteria: dict) -> bool:
-    """Return True if row satisfies all criteria."""
+    """Return True if row satisfies all criteria.
+
+    Standard keys: KEY_min / KEY_max apply floor/ceiling to feature KEY.
+      _min: NULL fails; _max: NULL passes.
+    Integer value keys: exact match required.
+
+    Special sector-scoped keys:
+    - options_iv_min: global IV floor (NULL best_iv fails)
+    - financials_market_cap_b_min: market_cap_b floor for Financial Services only
+    - technology_fcf_min: fcf floor for Technology only
+    - {sector}_iv_min: IV floor for that sector (NULL fails); sectors: industrials,
+      consumer_cyclical, technology, healthcare, energy, basic_materials, utilities
+    - consumer_defensive_iv_max: IV ceiling for Consumer Defensive (NULL passes)
+    - real_estate_block: if truthy, exclude all Real Estate rows
+    - communication_services_market_cap_b_min: mcap floor for Communication Services only
+    - iv_rv_min: minimum IV/RV20 ratio (NULL best_iv or rv20 fails)
+    """
     for key, val in criteria.items():
-        if key.endswith("_min"):
+        if key == "options_iv_min":
+            iv = row.get("best_iv")
+            if iv is None or iv < val:
+                return False
+        elif key == "financials_market_cap_b_min":
+            if row.get("sector") == "Financial Services":
+                if row.get("market_cap_b") is None or row["market_cap_b"] < val:
+                    return False
+        elif key == "technology_fcf_min":
+            if row.get("sector") == "Technology":
+                if row.get("fcf") is None or row["fcf"] < val:
+                    return False
+        elif key == "industrials_iv_min":
+            if row.get("sector") == "Industrials":
+                iv = row.get("best_iv")
+                if iv is None or iv < val:
+                    return False
+        elif key == "consumer_cyclical_iv_min":
+            if row.get("sector") == "Consumer Cyclical":
+                iv = row.get("best_iv")
+                if iv is None or iv < val:
+                    return False
+        elif key == "technology_iv_min":
+            if row.get("sector") == "Technology":
+                iv = row.get("best_iv")
+                if iv is None or iv < val:
+                    return False
+        elif key == "healthcare_iv_min":
+            if row.get("sector") == "Healthcare":
+                iv = row.get("best_iv")
+                if iv is None or iv < val:
+                    return False
+        elif key == "energy_iv_min":
+            if row.get("sector") == "Energy":
+                iv = row.get("best_iv")
+                if iv is None or iv < val:
+                    return False
+        elif key == "consumer_defensive_iv_max":
+            if row.get("sector") == "Consumer Defensive":
+                iv = row.get("best_iv")
+                if iv is not None and iv > val:
+                    return False
+        elif key == "real_estate_block":
+            if val and row.get("sector") == "Real Estate":
+                return False
+        elif key == "basic_materials_iv_min":
+            if row.get("sector") == "Basic Materials":
+                iv = row.get("best_iv")
+                if iv is None or iv < val:
+                    return False
+        elif key == "utilities_iv_min":
+            if row.get("sector") == "Utilities":
+                iv = row.get("best_iv")
+                if iv is None or iv < val:
+                    return False
+        elif key == "communication_services_market_cap_b_min":
+            if row.get("sector") == "Communication Services":
+                if row.get("market_cap_b") is None or row["market_cap_b"] < val:
+                    return False
+        elif key == "iv_rv_min":
+            iv = row.get("best_iv")
+            rv = row.get("rv20")
+            if iv is None or rv is None or rv == 0 or iv / rv < val:
+                return False
+        elif key == "financials_volume_ratio_max":
+            if row.get("sector") == "Financial Services":
+                vr = row.get("volume_ratio")
+                if vr is not None and vr > val:
+                    return False
+        elif key == "financials_adx_min":
+            if row.get("sector") == "Financial Services":
+                adx = row.get("adx")
+                if adx is None or adx < val:
+                    return False
+        elif key == "technology_volume_ratio_max":
+            if row.get("sector") == "Technology":
+                vr = row.get("volume_ratio")
+                if vr is not None and vr > val:
+                    return False
+        elif key == "technology_market_cap_b_min":
+            if row.get("sector") == "Technology":
+                if row.get("market_cap_b") is None or row["market_cap_b"] < val:
+                    return False
+        elif key == "financials_rsi_max":
+            if row.get("sector") == "Financial Services":
+                rsi = row.get("rsi")
+                if rsi is not None and rsi > val:
+                    return False
+        elif key == "consumer_cyclical_rsi_max":
+            if row.get("sector") == "Consumer Cyclical":
+                rsi = row.get("rsi")
+                if rsi is not None and rsi > val:
+                    return False
+        elif key == "technology_rsi_max":
+            if row.get("sector") == "Technology":
+                rsi = row.get("rsi")
+                if rsi is not None and rsi > val:
+                    return False
+        elif key.endswith("_min"):
             feat = key[:-4]
             if row.get(feat) is None or row[feat] < val:
                 return False
