@@ -91,6 +91,7 @@ let cachedPostureData  = null;
 let cachedOverviewData = null;
 let overviewFetched    = false;
 let sectorView         = 'etfs';
+let sectorTf           = '1d';
 
 // ── Edit Watchlist state ──────────────────────────────────────────────────────
 
@@ -1210,33 +1211,36 @@ async function fetchMarketOverview() {
 function renderSectors(sectors) {
     const el = document.getElementById('sector-bars');
     if (!el || !sectors) { if (el) el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
-    const sorted = Object.entries(sectors).sort(([, a], [, b]) => (b.pct_1d ?? -Infinity) - (a.pct_1d ?? -Infinity));
-    const vals1d = sorted.map(([, s]) => s.pct_1d).filter(v => v != null);
-    const vals1w = sorted.map(([, s]) => s.pct_1w).filter(v => v != null);
-    const vals1m = sorted.map(([, s]) => s.pct_1m).filter(v => v != null);
-    const max1d = vals1d.length ? Math.max(...vals1d.map(Math.abs)) : 1;
-    const max1w = vals1w.length ? Math.max(...vals1w.map(Math.abs)) : 1;
-    const max1m = vals1m.length ? Math.max(...vals1m.map(Math.abs)) : 1;
-    const barW = (pct, maxAbs) => pct == null || maxAbs === 0 ? 0 : Math.abs(pct) / maxAbs * 50;
-    const cls  = pct => pct == null ? 'neutral' : pct >= 0 ? 'positive' : 'negative';
-    const fmt  = pct => pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
-    el.innerHTML = `
-        <div class="sector-bar-row sector-bar-header">
-            <span></span>
-            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1D</span>
-            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1W</span>
-            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1M</span>
-        </div>` +
-        sorted.map(([ticker, s]) => `
-        <div class="sector-bar-row">
-            <span class="sector-label" title="${escHtml(ticker)}">${escHtml(s.name)}</span>
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(s.pct_1d)}" style="width:${barW(s.pct_1d, max1d)}%"></div></div>
-            <span class="sector-pct ${cls(s.pct_1d)}">${fmt(s.pct_1d)}</span>
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(s.pct_1w)}" style="width:${barW(s.pct_1w, max1w)}%"></div></div>
-            <span class="sector-pct ${cls(s.pct_1w)}">${fmt(s.pct_1w)}</span>
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(s.pct_1m)}" style="width:${barW(s.pct_1m, max1m)}%"></div></div>
-            <span class="sector-pct ${cls(s.pct_1m)}">${fmt(s.pct_1m)}</span>
-        </div>`).join('');
+    const tf = sectorTf;
+    const sorted = Object.entries(sectors).sort(([, a], [, b]) => (b[`pct_${tf}`] ?? -Infinity) - (a[`pct_${tf}`] ?? -Infinity));
+    const fmt = pct => pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+    const arrowUp   = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 11V3M7 3L3.5 6.5M7 3L10.5 6.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const arrowDown = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 3V11M7 11L3.5 7.5M7 11L10.5 7.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    el.innerHTML =
+        `<div class="sector-tf-row">
+            <span class="sector-tf-btn${tf==='1d'?' active':''}" data-tf="1d">1D</span>
+            <span class="sector-tf-btn${tf==='1w'?' active':''}" data-tf="1w">1W</span>
+            <span class="sector-tf-btn${tf==='1m'?' active':''}" data-tf="1m">1M</span>
+        </div>
+        <div class="sector-pills">` +
+        sorted.map(([ticker, s]) => {
+            const pct = s[`pct_${tf}`];
+            const pos = pct == null || pct >= 0;
+            return `
+        <div class="sector-pill ${pos ? 'positive' : 'negative'}">
+            <div class="sector-pill-icon">${pos ? arrowUp : arrowDown}</div>
+            <div class="sector-pill-body">
+                <span class="sector-pill-name">${escHtml(s.name)}</span>
+                <span class="sector-pill-ticker">${escHtml(ticker)}</span>
+            </div>
+            <span class="sector-pill-pct">${fmt(pct)}</span>
+        </div>`;
+        }).join('') +
+        `</div>`;
+    el.querySelectorAll('.sector-tf-btn').forEach(btn => {
+        btn.addEventListener('click', () => _setSectorTf(btn.dataset.tf));
+    });
+    _setupSectorSwipe(el);
 }
 
 function renderThemes(themes) {
@@ -1244,8 +1248,8 @@ function renderThemes(themes) {
     if (!el || !themes) { if (el) el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
 
     const { singles = {}, baskets = {} } = themes;
+    const tf = sectorTf;
 
-    // Build unified list: singles and baskets share the same row shape
     const items = [];
     for (const [label, d] of Object.entries(singles)) {
         items.push({ label, type: 'single', ticker: d.ticker, pct_1d: d.pct_1d, pct_1w: d.pct_1w, pct_1m: d.pct_1m });
@@ -1253,71 +1257,101 @@ function renderThemes(themes) {
     for (const [label, d] of Object.entries(baskets)) {
         items.push({ label, type: 'basket', tickers: d.tickers, pct_1d: d.avg_1d, pct_1w: d.avg_1w, pct_1m: d.avg_1m });
     }
+    items.sort((a, b) => (b[`pct_${tf}`] ?? -Infinity) - (a[`pct_${tf}`] ?? -Infinity));
 
-    // Sort by 1D descending; nulls sort to bottom
-    items.sort((a, b) => (b.pct_1d ?? -Infinity) - (a.pct_1d ?? -Infinity));
-
-    const all1d = items.map(i => i.pct_1d).filter(v => v != null);
-    const all1w = items.map(i => i.pct_1w).filter(v => v != null);
-    const all1m = items.map(i => i.pct_1m).filter(v => v != null);
-    const max1d = all1d.length ? Math.max(...all1d.map(Math.abs)) : 1;
-    const max1w = all1w.length ? Math.max(...all1w.map(Math.abs)) : 1;
-    const max1m = all1m.length ? Math.max(...all1m.map(Math.abs)) : 1;
-    const barW = (pct, maxAbs) => pct == null || maxAbs === 0 ? 0 : Math.abs(pct) / maxAbs * 50;
-    const cls  = pct => pct == null ? 'neutral' : pct >= 0 ? 'positive' : 'negative';
-    const fmt  = pct => pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+    const fmt = pct => pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+    const arrowUp   = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 11V3M7 3L3.5 6.5M7 3L10.5 6.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const arrowDown = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 3V11M7 11L3.5 7.5M7 11L10.5 7.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
     const rows = items.map(item => {
-        const nameCell = item.type === 'single'
-            ? `<div class="sector-label"><div>${escHtml(item.label)}</div><div style="font-size:10px;color:var(--tv-muted)">${escHtml(item.ticker)}</div></div>`
-            : `<div class="sector-label theme-basket-label"><span class="basket-chevron">▶</span>${escHtml(item.label)}</div>`;
+        const pct = item[`pct_${tf}`];
+        const pos = pct == null || pct >= 0;
+        const subLabel = item.type === 'basket'
+            ? `<span class="sector-pill-ticker theme-basket-toggle">▶ basket</span>`
+            : (item.ticker ? `<span class="sector-pill-ticker">${escHtml(item.ticker)}</span>` : '');
 
-        const mainRow = `<div class="sector-bar-row${item.type === 'basket' ? ' basket-row' : ''}" data-basket="${item.type === 'basket' ? escHtml(item.label) : ''}">
-            ${nameCell}
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(item.pct_1d)}" style="width:${barW(item.pct_1d, max1d)}%"></div></div>
-            <span class="sector-pct ${cls(item.pct_1d)}">${fmt(item.pct_1d)}</span>
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(item.pct_1w)}" style="width:${barW(item.pct_1w, max1w)}%"></div></div>
-            <span class="sector-pct ${cls(item.pct_1w)}">${fmt(item.pct_1w)}</span>
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(item.pct_1m)}" style="width:${barW(item.pct_1m, max1m)}%"></div></div>
-            <span class="sector-pct ${cls(item.pct_1m)}">${fmt(item.pct_1m)}</span>
+        const mainPill = `
+        <div class="sector-pill ${pos ? 'positive' : 'negative'}${item.type === 'basket' ? ' basket-pill' : ''}" data-basket="${item.type === 'basket' ? escHtml(item.label) : ''}">
+            <div class="sector-pill-icon">${pos ? arrowUp : arrowDown}</div>
+            <div class="sector-pill-body">
+                <span class="sector-pill-name">${escHtml(item.label)}</span>
+                ${subLabel}
+            </div>
+            <span class="sector-pill-pct">${fmt(pct)}</span>
         </div>`;
 
-        if (item.type !== 'basket') return mainRow;
+        if (item.type !== 'basket') return mainPill;
 
-        // Constituent sub-rows (hidden by default)
-        const subRows = Object.entries(item.tickers).map(([t, d]) => `
-        <div class="sector-bar-row basket-sub-row" data-parent="${escHtml(item.label)}" style="display:none">
-            <span class="sector-label" style="font-size:10px;padding-left:16px">${escHtml(t)}</span>
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(d.pct_1d)}" style="width:${barW(d.pct_1d, max1d)}%"></div></div>
-            <span class="sector-pct ${cls(d.pct_1d)}" style="font-size:10px">${fmt(d.pct_1d)}</span>
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(d.pct_1w)}" style="width:${barW(d.pct_1w, max1w)}%"></div></div>
-            <span class="sector-pct ${cls(d.pct_1w)}" style="font-size:10px">${fmt(d.pct_1w)}</span>
-            <div class="sector-bar-cell"><div class="sector-bar ${cls(d.pct_1m)}" style="width:${barW(d.pct_1m, max1m)}%"></div></div>
-            <span class="sector-pct ${cls(d.pct_1m)}" style="font-size:10px">${fmt(d.pct_1m)}</span>
-        </div>`).join('');
+        const subPills = Object.entries(item.tickers).map(([t, d]) => {
+            const subPct = d[`pct_${tf}`];
+            const subPos = subPct == null || subPct >= 0;
+            return `
+        <div class="sector-pill sector-pill-sub ${subPos ? 'positive' : 'negative'}" data-parent="${escHtml(item.label)}" style="display:none">
+            <div class="sector-pill-icon" style="width:22px;height:22px">${subPos ? arrowUp : arrowDown}</div>
+            <div class="sector-pill-body">
+                <span class="sector-pill-name" style="font-size:12px">${escHtml(t)}</span>
+            </div>
+            <span class="sector-pill-pct" style="font-size:12px">${fmt(subPct)}</span>
+        </div>`;
+        }).join('');
 
-        return mainRow + subRows;
+        return mainPill + subPills;
     });
 
-    el.innerHTML = `
-        <div class="sector-bar-row sector-bar-header">
-            <span></span>
-            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1D</span>
-            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1W</span>
-            <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1M</span>
-        </div>` + rows.join('');
+    el.innerHTML =
+        `<div class="sector-tf-row">
+            <span class="sector-tf-btn${tf==='1d'?' active':''}" data-tf="1d">1D</span>
+            <span class="sector-tf-btn${tf==='1w'?' active':''}" data-tf="1w">1W</span>
+            <span class="sector-tf-btn${tf==='1m'?' active':''}" data-tf="1m">1M</span>
+        </div>
+        <div class="sector-pills">` + rows.join('') + `</div>`;
 
-    // Wire up basket expand/collapse
-    el.querySelectorAll('.basket-row').forEach(row => {
-        row.addEventListener('click', () => {
-            const label   = row.dataset.basket;
-            const chevron = row.querySelector('.basket-chevron');
-            const subRows = el.querySelectorAll(`.basket-sub-row[data-parent="${CSS.escape(label)}"]`);
-            const isOpen  = subRows.length > 0 && subRows[0].style.display !== 'none';
-            subRows.forEach(r => r.style.display = isOpen ? 'none' : 'grid');
-            if (chevron) chevron.textContent = isOpen ? '▶' : '▼';
+    el.querySelectorAll('.sector-tf-btn').forEach(btn => {
+        btn.addEventListener('click', () => _setSectorTf(btn.dataset.tf));
+    });
+    el.querySelectorAll('.basket-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const label  = pill.dataset.basket;
+            const toggle = pill.querySelector('.theme-basket-toggle');
+            const subs   = el.querySelectorAll(`.sector-pill-sub[data-parent="${CSS.escape(label)}"]`);
+            const isOpen = subs.length > 0 && subs[0].style.display !== 'none';
+            subs.forEach(p => p.style.display = isOpen ? 'none' : 'flex');
+            if (toggle) toggle.textContent = isOpen ? '▶ basket' : '▼ basket';
         });
     });
+    _setupSectorSwipe(el);
+}
+
+function _setSectorTf(tf, dir) {
+    sectorTf = tf;
+    if (sectorView === 'etfs') renderSectors(cachedOverviewData?.sectors);
+    else renderThemes(cachedOverviewData?.themes);
+    if (dir) {
+        const pills = document.querySelector('#sector-bars .sector-pills');
+        if (pills) {
+            pills.classList.add(`anim-${dir}`);
+            setTimeout(() => pills.classList.remove(`anim-${dir}`), 200);
+        }
+    }
+}
+
+function _setupSectorSwipe(el) {
+    if (el.dataset.swipeInit) return;
+    el.dataset.swipeInit = '1';
+    const tfs = ['1d', '1w', '1m'];
+    let startX = 0, startY = 0;
+    el.addEventListener('touchstart', e => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+    }, { passive: true });
+    el.addEventListener('touchend', e => {
+        const dx = e.changedTouches[0].clientX - startX;
+        const dy = e.changedTouches[0].clientY - startY;
+        if (Math.abs(dx) < 40 || Math.abs(dy) > Math.abs(dx)) return;
+        const idx = tfs.indexOf(sectorTf);
+        if (dx < 0 && idx < 2) _setSectorTf(tfs[idx + 1], 'fwd');
+        else if (dx > 0 && idx > 0) _setSectorTf(tfs[idx - 1], 'back');
+    }, { passive: true });
 }
 
 function renderVix(vix) {

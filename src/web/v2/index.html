@@ -536,25 +536,106 @@
             color: var(--tv-muted);
         }
 
-        /* Sector bars */
-        .sector-bar-row {
-            display: grid;
-            grid-template-columns: 5rem 1fr auto 1fr auto 1fr auto;
+        /* Sector pills */
+        .sector-pills { display: flex; flex-direction: column; gap: 6px; }
+        .sector-pill {
+            display: flex;
             align-items: center;
-            gap: 3px;
-            margin-bottom: 4px;
-            font-size: 0.9rem;
+            gap: 12px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: rgba(8, 153, 129, 0.1);
+            border: 1px solid rgba(8, 153, 129, 0.22);
+            transition: border-color 0.15s;
         }
-        .sector-label { color: var(--tv-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .sector-bar-cell { position: relative; height: 8px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
-        .sector-bar { position: absolute; top: 0; height: 100%; border-radius: 2px; }
-        .sector-bar.positive { left: 50%; background: var(--tv-green); }
-        .sector-bar.negative { right: 50%; background: var(--tv-red); }
-        .sector-pct { font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-align: right; min-width: 3rem; }
-        .sector-pct.positive { color: var(--tv-green); }
-        .sector-pct.negative { color: var(--tv-red); }
-        .sector-pct.neutral  { color: var(--tv-muted); }
-        .sector-timeframe-label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--tv-muted); text-align: center; }
+        .sector-pill.negative {
+            background: rgba(242, 54, 69, 0.08);
+            border-color: rgba(242, 54, 69, 0.2);
+        }
+        @media (hover: hover) {
+            .sector-pill:hover { border-color: rgba(8, 153, 129, 0.45); }
+            .sector-pill.negative:hover { border-color: rgba(242, 54, 69, 0.4); }
+        }
+        .sector-pill-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: var(--tv-green);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .sector-pill.negative .sector-pill-icon { background: var(--tv-red); }
+        .sector-pill-body {
+            flex: 1;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .sector-pill-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--tv-green);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sector-pill.negative .sector-pill-name { color: var(--tv-red); }
+        .sector-pill-ticker {
+            font-size: 12px;
+            font-family: 'IBM Plex Mono', monospace;
+            color: rgba(8, 153, 129, 0.65);
+            flex-shrink: 0;
+        }
+        .sector-pill.negative .sector-pill-ticker { color: rgba(242, 54, 69, 0.65); }
+        .sector-pill-pct {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--tv-green);
+            flex-shrink: 0;
+        }
+        .sector-pill.negative .sector-pill-pct { color: var(--tv-red); }
+        .sector-pill-sub { margin-left: 18px; }
+        .basket-pill { cursor: pointer; }
+
+        /* Sector timeframe selector */
+        .sector-tf-row {
+            display: flex;
+            gap: 2px;
+            margin-bottom: 10px;
+            background: var(--tv-surface2);
+            border-radius: 6px;
+            padding: 2px;
+        }
+        .sector-tf-btn {
+            flex: 1;
+            text-align: center;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--tv-muted);
+            padding: 4px 0;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.12s, color 0.12s;
+            user-select: none;
+        }
+        .sector-tf-btn.active {
+            background: var(--tv-text);
+            color: var(--tv-bg);
+        }
+
+        /* Slide animations on timeframe change */
+        @keyframes sector-slide-fwd  { from { transform: translateX(16px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes sector-slide-back { from { transform: translateX(-16px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .sector-pills.anim-fwd  { animation: sector-slide-fwd  0.18s ease; }
+        .sector-pills.anim-back { animation: sector-slide-back 0.18s ease; }
 
         /* Sector card header with toggle */
         .sector-card-header {

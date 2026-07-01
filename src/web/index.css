@@ -1032,82 +1032,81 @@ header {
     margin: 0 0 0.75rem 0;
 }
 
-/* Sector bar chart */
-.sector-bar-row {
-    display: grid;
-    grid-template-columns: 5rem 1fr auto 1fr auto 1fr auto;
+/* Sector pills */
+.sector-pills { display: flex; flex-direction: column; gap: 6px; }
+
+.sector-pill {
+    display: flex;
     align-items: center;
-    gap: 0.25rem;
-    margin-bottom: 0.35rem;
-    font-size: 0.78rem;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.22);
+    transition: border-color 0.15s;
 }
 
-.sector-timeframe-label {
-    font-size: 0.68rem;
+.sector-pill.negative {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+@media (hover: hover) {
+    .sector-pill:hover { border-color: rgba(16, 185, 129, 0.45); }
+    .sector-pill.negative:hover { border-color: rgba(239, 68, 68, 0.4); }
+}
+
+.sector-pill-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--accent-green, #10b981);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.sector-pill.negative .sector-pill-icon { background: var(--accent-red, #ef4444); }
+
+.sector-pill-body {
+    flex: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.sector-pill-name {
+    font-size: 14px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-muted, #888);
-}
-
-.sector-label {
-    color: var(--text-muted, #888);
+    color: var(--accent-green, #10b981);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.sector-bar-cell {
-    position: relative;
-    height: 1rem;
-    background: var(--bar-track, rgba(255, 255, 255, 0.06));
-    border-radius: 2px;
-    overflow: hidden;
+.sector-pill.negative .sector-pill-name { color: var(--accent-red, #ef4444); }
+
+.sector-pill-ticker {
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: rgba(16, 185, 129, 0.65);
+    flex-shrink: 0;
 }
 
-.sector-bar {
-    position: absolute;
-    top: 0;
-    height: 100%;
-    border-radius: 2px;
+.sector-pill.negative .sector-pill-ticker { color: rgba(239, 68, 68, 0.65); }
+
+.sector-pill-pct {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent-green, #10b981);
+    flex-shrink: 0;
 }
 
-/* Center-anchored bars: positive bars grow right from center, negative grow left */
-.sector-bar.positive {
-    left: 50%;
-    background: var(--accent-green, #4caf50);
-}
-
-.sector-bar.negative {
-    right: 50%;
-    background: var(--accent-red, #f44336);
-}
-
-.sector-bar.opacity-1w {
-    opacity: 1;
-}
-
-.sector-bar.opacity-1m {
-    opacity: 0.3;
-}
-
-.sector-pct {
-    font-size: 0.72rem;
-    text-align: right;
-    min-width: 3rem;
-}
-
-.sector-pct.positive {
-    color: var(--accent-green, #4caf50);
-}
-
-.sector-pct.negative {
-    color: var(--accent-red, #f44336);
-}
-
-.sector-pct.neutral {
-    color: var(--text-muted, #888);
-}
+.sector-pill.negative .sector-pill-pct { color: var(--accent-red, #ef4444); }
 
 /* VIX panel */
 .vix-spot {

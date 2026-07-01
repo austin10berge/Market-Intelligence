@@ -221,60 +221,25 @@ function renderSectors(sectors) {
     if (!el) return;
     if (!sectors) { el.innerHTML = '<div class="loading-placeholder">Unavailable</div>'; return; }
 
-    // Sort by 1D % descending (nulls last)
-    const sorted = Object.entries(sectors).sort(([, a], [, b]) => {
-        const av = a.pct_1d ?? -Infinity;
-        const bv = b.pct_1d ?? -Infinity;
-        return bv - av;
-    });
+    const sorted = Object.entries(sectors).sort(([, a], [, b]) => (b.pct_1d ?? -Infinity) - (a.pct_1d ?? -Infinity));
+    const fmt = pct => pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+    const arrowUp   = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 11V3M7 3L3.5 6.5M7 3L10.5 6.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const arrowDown = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 3V11M7 11L3.5 7.5M7 11L10.5 7.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-    const vals1d = sorted.map(([, s]) => s.pct_1d).filter(v => v != null);
-    const vals1w = sorted.map(([, s]) => s.pct_1w).filter(v => v != null);
-    const vals1m = sorted.map(([, s]) => s.pct_1m).filter(v => v != null);
-    const max1d = vals1d.length ? Math.max(...vals1d.map(Math.abs)) : 1;
-    const max1w = vals1w.length ? Math.max(...vals1w.map(Math.abs)) : 1;
-    const max1m = vals1m.length ? Math.max(...vals1m.map(Math.abs)) : 1;
-
-    function barWidth(pct, maxAbs) {
-        if (pct == null || maxAbs === 0) return 0;
-        return Math.abs(pct) / maxAbs * 50;
-    }
-
-    function pctClass(pct) {
-        if (pct == null) return 'neutral';
-        return pct >= 0 ? 'positive' : 'negative';
-    }
-
-    function fmtPct(pct) {
-        if (pct == null) return '—';
-        return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
-    }
-
-    const header = `
-    <div class="sector-bar-row sector-bar-header">
-      <span></span>
-      <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1D</span>
-      <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1W</span>
-      <span class="sector-timeframe-label" style="grid-column:span 2;text-align:center">1M</span>
-    </div>`;
-
-    el.innerHTML = header + sorted.map(([ticker, s]) => `
-    <div class="sector-bar-row">
-      <span class="sector-label" title="${escHtml(ticker)}">${escHtml(s.name)}</span>
-      <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1d)}" style="width:${barWidth(s.pct_1d, max1d)}%"></div>
-      </div>
-      <span class="sector-pct ${pctClass(s.pct_1d)}">${fmtPct(s.pct_1d)}</span>
-      <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1w)} opacity-1w" style="width:${barWidth(s.pct_1w, max1w)}%"></div>
-      </div>
-      <span class="sector-pct ${pctClass(s.pct_1w)}">${fmtPct(s.pct_1w)}</span>
-      <div class="sector-bar-cell">
-        <div class="sector-bar ${pctClass(s.pct_1m)}" style="width:${barWidth(s.pct_1m, max1m)}%"></div>
-      </div>
-      <span class="sector-pct ${pctClass(s.pct_1m)}">${fmtPct(s.pct_1m)}</span>
-    </div>
-  `).join('');
+    el.innerHTML = `<div class="sector-pills">` +
+        sorted.map(([ticker, s]) => {
+            const pos = s.pct_1d == null || s.pct_1d >= 0;
+            return `
+        <div class="sector-pill ${pos ? 'positive' : 'negative'}">
+            <div class="sector-pill-icon">${pos ? arrowUp : arrowDown}</div>
+            <div class="sector-pill-body">
+                <span class="sector-pill-name">${escHtml(s.name)}</span>
+                <span class="sector-pill-ticker">${escHtml(ticker)}</span>
+            </div>
+            <span class="sector-pill-pct">${fmt(s.pct_1d)}</span>
+        </div>`;
+        }).join('') +
+        `</div>`;
 }
 
 function renderVix(vix) {
