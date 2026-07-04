@@ -92,6 +92,8 @@ class TradeChatCog(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
+        if message.type not in (discord.MessageType.default, discord.MessageType.reply):
+            return
         if self.trade_channel_id is None:
             return
 
