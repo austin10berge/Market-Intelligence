@@ -34,7 +34,7 @@ def detect_tickers(text: str, universe: set[str]) -> list[str]:
 
     for match in re.finditer(r'\b([A-Z]{2,5})\b', text):
         t = match.group(1)
-        if t not in seen and t not in TICKER_SKIP_WORDS and t in universe:
+        if t not in seen and t not in TICKER_SKIP_WORDS:
             found.append(t)
             seen.add(t)
 
