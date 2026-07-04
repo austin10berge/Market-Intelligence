@@ -3,7 +3,7 @@ FROM python:3.12-slim AS base
 WORKDIR /app
 
 # install curl for healthchecks and ca-certificates for outbound HTTPS
-RUN apt-get update && apt-get install -y curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl ca-certificates libgomp1 && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies from pyproject.toml
 COPY pyproject.toml .
@@ -33,6 +33,9 @@ CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--lo
 # ── discord-bot target ────────────────────────────────────────────────────────
 FROM base AS discord-bot
 WORKDIR /app/discord_bot
+# Make the top-level `src` package importable (bot.py runs from /app/discord_bot,
+# so /app is not on sys.path by default). The trade chat cog imports from `src`.
+ENV PYTHONPATH=/app
 CMD ["python3", "bot.py"]
 
 # ── claude-cli stage: extract self-contained binary from npm package ──────────

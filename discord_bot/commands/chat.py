@@ -1,0 +1,179 @@
+"""Trade chat cog — designated channel listener and conversational trading partner."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime
+from pathlib import Path
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from src.chat import (
+    build_prompt,
+    call_claude_chat,
+    detect_tickers,
+    format_screener_block,
+)
+from src.db import (
+    get_stock_watchlist,
+    get_trade_chat_channel_id,
+    get_trade_chat_history,
+    is_trade_chat_thread,
+    save_trade_chat_message,
+    set_trade_chat_channel_id,
+)
+from src.screener.stocks import screen_stocks
+from src.synthesis.llm import synthesize
+
+logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT_PATH = Path(__file__).parent.parent / "trade_system_prompt.txt"
+
+
+def _load_system_prompt() -> str:
+    if _SYSTEM_PROMPT_PATH.exists():
+        return _SYSTEM_PROMPT_PATH.read_text().strip()
+    logger.warning("trade_system_prompt.txt not found — using empty system prompt")
+    return "You are a trading partner."
+
+
+def _split_message(text: str, limit: int = 1990) -> list[str]:
+    """Split a string into chunks that fit Discord's 2000-char message limit."""
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    while text:
+        chunks.append(text[:limit])
+        text = text[limit:]
+    return chunks
+
+
+class TradeChatCog(commands.Cog):
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+        self.system_prompt = _load_system_prompt()
+        self.trade_channel_id: int | None = None
+        self._universe: set[str] | None = None
+
+    async def cog_load(self) -> None:
+        channel_id = get_trade_chat_channel_id()
+        if channel_id:
+            self.trade_channel_id = int(channel_id)
+            logger.info("Trade chat channel configured: %s", channel_id)
+        else:
+            logger.warning("Trade chat: no channel configured. Run /trade-setup.")
+
+    @property
+    def universe(self) -> set[str]:
+        """Lazy-load the screener ticker universe for bare-word detection."""
+        if self._universe is None:
+            self._universe = set(get_stock_watchlist())
+        return self._universe
+
+    @app_commands.command(
+        name="trade-setup",
+        description="Set this channel as the trade chat channel",
+    )
+    async def trade_setup(self, interaction: discord.Interaction) -> None:
+        channel_id = str(interaction.channel_id)
+        set_trade_chat_channel_id(channel_id)
+        self.trade_channel_id = int(channel_id)
+        logger.info("Trade chat channel set to %s", channel_id)
+        await interaction.response.send_message(
+            f"Trade chat channel set to <#{channel_id}>. "
+            "Send a message here to start a conversation thread.",
+            ephemeral=True,
+        )
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot:
+            return
+        if self.trade_channel_id is None:
+            return
+
+        channel = message.channel
+
+        # Top-level message in the designated channel → create a thread
+        if (
+            not isinstance(channel, discord.Thread)
+            and channel.id == self.trade_channel_id
+        ):
+            try:
+                thread = await message.create_thread(
+                    name=f"Trade Chat — {datetime.now().strftime('%b %d')}",
+                    auto_archive_duration=1440,
+                )
+            except discord.HTTPException as exc:
+                logger.warning("Failed to create trade thread: %s", exc)
+                thread = channel  # type: ignore[assignment]
+            await self._handle_message(thread, message)
+            return
+
+        # Message inside a known trade thread
+        if (
+            isinstance(channel, discord.Thread)
+            and channel.parent_id == self.trade_channel_id
+            and is_trade_chat_thread(str(channel.id))
+        ):
+            await self._handle_message(channel, message)
+
+    async def _handle_message(
+        self, thread: discord.Thread, message: discord.Message
+    ) -> None:
+        thread_id = str(thread.id)
+
+        async with thread.typing():
+            tickers = detect_tickers(message.content, self.universe)
+
+            screener_blocks: list[str] = []
+            if tickers:
+                results = await asyncio.gather(
+                    *[
+                        asyncio.to_thread(screen_stocks, [t], False)
+                        for t in tickers
+                    ],
+                    return_exceptions=True,
+                )
+                for ticker, result in zip(tickers, results):
+                    if isinstance(result, Exception) or not result:
+                        screener_blocks.append(f"[{ticker}: data unavailable]")
+                    else:
+                        screener_blocks.append(format_screener_block(ticker, result[0]))
+
+            history = get_trade_chat_history(thread_id)
+            prompt = build_prompt(
+                self.system_prompt, history, message.content, screener_blocks
+            )
+
+            response = await call_claude_chat(prompt)
+
+            if response is None:
+                # Gemini fallback — no conversation history, just current turn
+                user_prompt = message.content
+                if screener_blocks:
+                    user_prompt += "\n\n" + "\n\n".join(screener_blocks)
+                response = await synthesize(self.system_prompt, user_prompt)
+
+            if not response:
+                response = (
+                    "Sorry, I'm having trouble reaching the LLM right now. "
+                    "Try again in a moment."
+                )
+
+            # Persist — store user message with injected data so history is self-contained
+            user_content = message.content
+            if screener_blocks:
+                user_content += "\n\n" + "\n\n".join(screener_blocks)
+            save_trade_chat_message(thread_id, "user", user_content)
+            save_trade_chat_message(thread_id, "assistant", response)
+
+        for chunk in _split_message(response):
+            await thread.send(chunk)
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(TradeChatCog(bot))

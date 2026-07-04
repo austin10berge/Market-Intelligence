@@ -32,6 +32,10 @@ if not DISCORD_BOT_TOKEN:
 class MarketIntelligenceBot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.default()
+        # Required so the trade chat cog can read message text in the designated
+        # channel/threads. Also enable this "Message Content Intent" for the bot
+        # in the Discord Developer Portal, or message.content arrives empty.
+        intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self) -> None:
@@ -39,6 +43,7 @@ class MarketIntelligenceBot(commands.Bot):
         await self.load_extension("commands.scan")
         await self.load_extension("commands.insider")
         await self.load_extension("commands.callback_server")
+        await self.load_extension("commands.chat")
         synced = await self.tree.sync()
         logger.info(f"Synced {len(synced)} slash command(s)")
 
