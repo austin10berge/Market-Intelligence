@@ -41,18 +41,6 @@ def detect_tickers(text: str, universe: set[str]) -> list[str]:
     return found
 
 
-def _fmt_float(val: object, suffix: str = "", prefix: str = "", plus: bool = False) -> str:
-    """Format a numeric field for display, returning '' if N/A or None."""
-    if val is None or val == "N/A":
-        return ""
-    try:
-        f = float(val)
-        sign = "+" if plus and f >= 0 else ""
-        return f"{prefix}{sign}{f}{suffix}"
-    except (TypeError, ValueError):
-        return ""
-
-
 def format_screener_block(ticker: str, data: dict) -> str:
     """Render a compact screener data block for injection into the LLM prompt."""
     from datetime import date
