@@ -99,6 +99,22 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS trade_chat_config (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS trade_chat_history (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id  TEXT NOT NULL,
+            role       TEXT NOT NULL,
+            content    TEXT NOT NULL,
+            timestamp  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_trade_chat_history_thread
+            ON trade_chat_history(thread_id);
     """)
     conn.commit()
 
@@ -574,3 +590,56 @@ def delete_strategy(strategy_id: int) -> bool:
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+
+# ── Trade chat ────────────────────────────────────────────────────────────────
+
+def get_trade_chat_channel_id() -> str | None:
+    """Return the configured Discord channel ID for trade chat, or None."""
+    with _get_connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM trade_chat_config WHERE key = 'channel_id'"
+        ).fetchone()
+        return row["value"] if row else None
+
+
+def set_trade_chat_channel_id(channel_id: str) -> None:
+    """Upsert the designated trade chat channel ID."""
+    with _get_connection() as conn:
+        conn.execute(
+            "INSERT INTO trade_chat_config(key, value) VALUES('channel_id', ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (channel_id,),
+        )
+        conn.commit()
+
+
+def save_trade_chat_message(thread_id: str, role: str, content: str) -> None:
+    """Append a message to a trade chat thread's history."""
+    with _get_connection() as conn:
+        conn.execute(
+            "INSERT INTO trade_chat_history(thread_id, role, content) VALUES(?, ?, ?)",
+            (thread_id, role, content),
+        )
+        conn.commit()
+
+
+def get_trade_chat_history(thread_id: str) -> list[dict]:
+    """Return all messages for a thread in chronological order."""
+    with _get_connection() as conn:
+        rows = conn.execute(
+            "SELECT role, content FROM trade_chat_history"
+            " WHERE thread_id = ? ORDER BY id ASC",
+            (thread_id,),
+        ).fetchall()
+        return [{"role": row["role"], "content": row["content"]} for row in rows]
+
+
+def is_trade_chat_thread(thread_id: str) -> bool:
+    """Return True if this thread_id has any messages in trade_chat_history."""
+    with _get_connection() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM trade_chat_history WHERE thread_id = ? LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        return row is not None
