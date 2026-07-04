@@ -60,6 +60,30 @@ def _calculate_rv20(hist: pd.DataFrame) -> float | None:
     return float(rv20)
 
 
+def _calculate_adr20(hist: pd.DataFrame) -> float | None:
+    """Compute 20-day average daily range as % of close (ADR)."""
+    if len(hist) < 20:
+        return None
+    high = hist["High"].iloc[-20:]
+    low = hist["Low"].iloc[-20:]
+    close = hist["Close"].iloc[-20:]
+    if (close == 0).any():
+        return None
+    adr = float(((high - low) / close).mean() * 100)
+    return round(adr, 2)
+
+
+def _calculate_volume_ratio(hist: pd.DataFrame) -> float | None:
+    """Compute current day volume relative to 20-day average volume."""
+    if len(hist) < 20:
+        return None
+    avg_vol_20d = hist["Volume"].iloc[-20:-1].mean()
+    current_vol = hist["Volume"].iloc[-1]
+    if pd.isna(avg_vol_20d) or avg_vol_20d <= 0 or pd.isna(current_vol):
+        return None
+    return round(float(current_vol / avg_vol_20d), 2)
+
+
 def _norm_cdf(value: float) -> float:
     """Normal CDF used for Black-Scholes pricing."""
     return 0.5 * (1.0 + math.erf(value / math.sqrt(2.0)))
@@ -685,6 +709,7 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 eps_val = _to_float(info.get("trailingEps"))
                 eps_growth_val = _to_float(info.get("earningsGrowth"))
                 rv20_val = _calculate_rv20(hist)
+                adr20_val = _calculate_adr20(hist)
                 atm_iv_val = _fetch_alpaca_atm_iv_percent(
                     alpaca_client, symbol, float(current_price)
                 )
@@ -724,6 +749,10 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 bb_upper_val: float | None = None
                 bb_mid_val: float | None = None
                 bb_lower_val: float | None = None
+                rsi_val: float | None = None
+                sma_50_val: float | None = None
+                ema_200_val: float | None = None
+                volume_ratio_val: float | None = None
                 try:
                     close = hist["Close"]
                     if len(close) >= 200:
@@ -744,8 +773,57 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                             if lower_col:
                                 v = float(bbands[lower_col].iloc[-1])
                                 bb_lower_val = None if math.isnan(v) else round(v, 2)
+                    if len(close) >= 14:
+                        rsi_s = ta.rsi(close, length=14)
+                        if rsi_s is not None and not rsi_s.empty:
+                            v = float(rsi_s.iloc[-1])
+                            rsi_val = None if math.isnan(v) else round(v, 1)
+                    if len(close) >= 50:
+                        sma_50_s = ta.sma(close, length=50)
+                        if sma_50_s is not None and not sma_50_s.empty:
+                            v = float(sma_50_s.iloc[-1])
+                            sma_50_val = None if math.isnan(v) else round(v, 2)
+                    if len(close) >= 200:
+                        ema_200_s = ta.ema(close, length=200)
+                        if ema_200_s is not None and not ema_200_s.empty:
+                            v = float(ema_200_s.iloc[-1])
+                            ema_200_val = None if math.isnan(v) else round(v, 2)
+                    volume_ratio_val = _calculate_volume_ratio(hist)
                 except Exception as exc:
                     logger.debug("TA indicators failed for %s: %s", symbol, exc)
+
+                # Derived fields — computed from already-fetched data
+                high_52wk = _to_float(info.get("fiftyTwoWeekHigh"))
+                pct_from_52wk_high_val: float | None = None
+                if high_52wk and high_52wk > 0 and not pd.isna(current_price):
+                    pct_from_52wk_high_val = round(
+                        ((float(current_price) - high_52wk) / high_52wk) * 100, 1
+                    )
+
+                market_cap_val = _to_float(info.get("marketCap"))
+
+                sma_200_pct_val: float | None = None
+                if sma_200_val is not None and sma_200_val > 0:
+                    sma_200_pct_val = round(
+                        ((float(current_price) - sma_200_val) / sma_200_val) * 100, 1
+                    )
+
+                ema_200_pct_val: float | None = None
+                if ema_200_val is not None and ema_200_val > 0:
+                    ema_200_pct_val = round(
+                        ((float(current_price) - ema_200_val) / ema_200_val) * 100, 1
+                    )
+
+                bb_width_pct_val: float | None = None
+                if (
+                    bb_upper_val is not None
+                    and bb_lower_val is not None
+                    and bb_mid_val is not None
+                    and bb_mid_val > 0
+                ):
+                    bb_width_pct_val = round(
+                        ((bb_upper_val - bb_lower_val) / bb_mid_val) * 100, 1
+                    )
 
                 candidates.append(
                     {
@@ -781,6 +859,7 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                         else "N/A",
                         "atm_iv": round(atm_iv_val, 2) if atm_iv_val is not None else "N/A",
                         "rv20": round(rv20_val, 2) if rv20_val is not None else "N/A",
+                        "adr20": adr20_val if adr20_val is not None else "N/A",
                         "atm_iv_rv20": round(atm_iv_rv20_val, 2)
                         if atm_iv_rv20_val is not None
                         else "N/A",
@@ -792,6 +871,17 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                         "bb_upper": bb_upper_val,
                         "bb_mid": bb_mid_val,
                         "bb_lower": bb_lower_val,
+                        "rsi": rsi_val if rsi_val is not None else "N/A",
+                        "sma_50": sma_50_val,
+                        "ema_200": ema_200_val,
+                        "volume_ratio": volume_ratio_val if volume_ratio_val is not None else "N/A",
+                        "pct_from_52wk_high": pct_from_52wk_high_val
+                        if pct_from_52wk_high_val is not None
+                        else "N/A",
+                        "market_cap": market_cap_val,
+                        "sma_200_pct": sma_200_pct_val if sma_200_pct_val is not None else "N/A",
+                        "ema_200_pct": ema_200_pct_val if ema_200_pct_val is not None else "N/A",
+                        "bb_width_pct": bb_width_pct_val if bb_width_pct_val is not None else "N/A",
                     }
                 )
 
