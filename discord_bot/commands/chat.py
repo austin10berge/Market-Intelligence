@@ -154,8 +154,12 @@ class TradeChatCog(commands.Cog):
             response = await call_claude_chat(prompt)
 
             if response is None:
-                # Gemini fallback — no conversation history, just current turn
-                user_prompt = message.content
+                # Gemini fallback — include history as formatted text
+                history_text = "".join(
+                    f"{'User' if t['role'] == 'user' else 'Assistant'}: {t['content']}\n\n"
+                    for t in history
+                )
+                user_prompt = history_text + message.content
                 if screener_blocks:
                     user_prompt += "\n\n" + "\n\n".join(screener_blocks)
                 response = await synthesize(self.system_prompt, user_prompt)
