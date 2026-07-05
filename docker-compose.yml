@@ -68,8 +68,8 @@ services:
     expose:
       - "9000"  # Internal only — allows api container to POST callbacks here
     volumes:
-      - ~/.claude:/root/.claude:ro
-      - /home/dev/.local/bin/claude:/usr/local/bin/claude:ro
+      - ~/.claude:/root/.claude
+      - ~/.claude.json:/root/.claude.json
     depends_on:
       api:
         condition: service_healthy

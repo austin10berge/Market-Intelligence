@@ -30,17 +30,18 @@ RUN find /app/src -name "*.pyc" -delete 2>/dev/null || true
 EXPOSE 8000
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
 
+# ── claude-cli stage: extract self-contained binary from npm package ──────────
+FROM node:20-slim AS claude-cli
+RUN npm install -g @anthropic-ai/claude-code
+
 # ── discord-bot target ────────────────────────────────────────────────────────
 FROM base AS discord-bot
+COPY --from=claude-cli /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude
 WORKDIR /app/discord_bot
 # Make the top-level `src` package importable (bot.py runs from /app/discord_bot,
 # so /app is not on sys.path by default). The trade chat cog imports from `src`.
 ENV PYTHONPATH=/app
 CMD ["python3", "bot.py"]
-
-# ── claude-cli stage: extract self-contained binary from npm package ──────────
-FROM node:20-slim AS claude-cli
-RUN npm install -g @anthropic-ai/claude-code
 
 # ── pipeline target (scheduled nightly run) ───────────────────────────────────
 FROM base AS pipeline
