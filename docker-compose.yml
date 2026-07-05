@@ -67,6 +67,9 @@ services:
       DISCORD_BOT_CALLBACK_PORT: "9000"
     expose:
       - "9000"  # Internal only — allows api container to POST callbacks here
+    volumes:
+      - ~/.claude:/root/.claude:ro
+      - /home/dev/.local/bin/claude:/usr/local/bin/claude:ro
     depends_on:
       api:
         condition: service_healthy
