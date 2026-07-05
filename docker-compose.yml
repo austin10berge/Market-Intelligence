@@ -68,6 +68,10 @@ services:
     expose:
       - "9000"  # Internal only — allows api container to POST callbacks here
     volumes:
+      # Bot resolves the relative db_path from WORKDIR /app/discord_bot, so this
+      # maps to the same host ./data dir (and DB file) the api uses. Without it
+      # the SQLite DB lives in the container layer and is wiped on recreate.
+      - ./data:/app/discord_bot/data
       - ~/.claude:/root/.claude
       - ~/.claude.json:/root/.claude.json
     depends_on:
