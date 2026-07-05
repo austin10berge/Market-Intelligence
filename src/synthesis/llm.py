@@ -48,7 +48,7 @@ async def _call_claude_cli(system_prompt: str, user_prompt: str) -> str | None:
     combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
     try:
         proc = await create_subprocess_exec(
-            "claude", "-p",
+            "claude", "-p", "--tools", "",
             stdin=PIPE,
             stdout=PIPE,
             stderr=PIPE,

@@ -206,7 +206,7 @@ async def call_claude_chat(prompt: str, timeout: int = 120) -> str | None:
     """Call `claude -p` with the assembled prompt. Returns None on any failure."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "claude", "-p",
+            "claude", "-p", "--tools", "WebSearch", "--allowedTools", "WebSearch",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
