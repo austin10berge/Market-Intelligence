@@ -211,12 +211,20 @@ async def call_claude_chat(prompt: str, timeout: int = 120) -> str | None:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout_bytes, _ = await asyncio.wait_for(
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(input=prompt.encode()), timeout=timeout
         )
         if proc.returncode == 0:
             output = stdout_bytes.decode().strip()
-            return output if output else None
+            if output:
+                return output
+            logger.warning("chat: claude -p returned empty output")
+            return None
+        logger.warning(
+            "chat: claude -p exited with code %d — %s",
+            proc.returncode,
+            stderr_bytes.decode().strip()[:500],
+        )
         return None
     except TimeoutError:
         logger.warning("chat: claude -p timed out after %ds", timeout)
