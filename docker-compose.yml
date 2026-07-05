@@ -79,6 +79,11 @@ services:
       # reach the host's real Claude Code config/credentials.
       - ./.claude/discord-bot-config/.claude:/root/.claude
       - ./.claude/discord-bot-config/.claude.json:/root/.claude.json
+      # Read-only so edits are a versioned host-file change, never a bot write
+      # (the bot has no Edit/Write tool anyway — see the .claude mount above).
+      # Loaded once in discord_bot/commands/chat.py's TradeChat.__init__, so a
+      # plain `docker compose restart discord-bot` picks up edits — no rebuild.
+      - ./discord_bot/trade_system_prompt.txt:/app/discord_bot/trade_system_prompt.txt:ro
     depends_on:
       api:
         condition: service_healthy
