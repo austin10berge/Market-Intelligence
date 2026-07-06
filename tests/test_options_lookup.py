@@ -34,3 +34,41 @@ class TestDetectOptionsIntent:
 
     def test_wheel_keyword_triggers_put(self):
         assert detect_options_intent("thinking about the wheel on SOFI") == "put"
+
+    # False-positive fix tests: ensure word-boundary matching, not substring matching
+    def test_no_match_put_in_computer(self):
+        """'put' substring in 'computer' should not trigger."""
+        assert detect_options_intent("the computer says buy") is None
+
+    def test_no_match_cc_in_according(self):
+        """'cc' substring in 'according' should not trigger."""
+        assert detect_options_intent("according to the chart, buy") is None
+
+    def test_no_match_cc_in_accept(self):
+        """'cc' substring in 'accept' should not trigger."""
+        assert detect_options_intent("I accept that risk") is None
+
+    def test_no_match_cc_in_occurred(self):
+        """'cc' substring in 'occurred' should not trigger."""
+        assert detect_options_intent("it occurred to me") is None
+
+    def test_no_match_put_in_dispute(self):
+        """'put' substring in 'dispute' should not trigger."""
+        assert detect_options_intent("I dispute that") is None
+
+    def test_no_match_put_in_reputation(self):
+        """'put' substring in 'reputation' should not trigger."""
+        assert detect_options_intent("reputation matters") is None
+
+    # Verify existing positive cases still work after the fix
+    def test_still_match_csp_full_word(self):
+        """'csp' as a full word should still trigger."""
+        assert detect_options_intent("should I sell a CSP on SOFI") == "put"
+
+    def test_still_match_covered_call_phrase(self):
+        """'covered call' as a full phrase should still trigger."""
+        assert detect_options_intent("what about a SOFI covered call") == "call"
+
+    def test_still_match_wheel_full_word(self):
+        """'wheel' as a full word should still trigger."""
+        assert detect_options_intent("thinking about the wheel on SOFI") == "put"

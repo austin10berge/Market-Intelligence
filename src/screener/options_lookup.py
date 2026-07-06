@@ -17,6 +17,28 @@ _PUT_SHORTHAND_RE = re.compile(r"\b\d{1,4}(?:\.\d+)?p\b", re.IGNORECASE)
 _DATE_SHORTHAND_RE = re.compile(r"\b\d{1,2}/\d{1,2}\b")
 
 
+def _has_word_match(text: str, words: frozenset[str]) -> bool:
+    """Check if text contains any of the words/phrases with word-boundary matching.
+
+    Uses regex with \b word boundaries to avoid false positives from substring
+    matches (e.g., "put" in "computer" or "cc" in "according").
+    """
+    for word in words:
+        # Split multi-word phrases and rejoin with whitespace boundaries
+        parts = word.split()
+        if len(parts) == 1:
+            # Single word: word boundaries on both sides
+            pattern = r"\b" + re.escape(word) + r"\b"
+        else:
+            # Multi-word phrase: word boundary at start/end, one-or-more spaces between
+            pattern = r"\b" + r"\s+".join(re.escape(p) for p in parts) + r"\b"
+
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+
+    return False
+
+
 def detect_options_intent(text: str) -> str | None:
     """Classify a chat message as call-side, put-side/generic options intent, or neither.
 
@@ -29,9 +51,9 @@ def detect_options_intent(text: str) -> str | None:
     """
     lowered = text.lower()
 
-    has_call_word = any(word in lowered for word in _CALL_WORDS)
-    has_put_word = any(word in lowered for word in _PUT_WORDS)
-    has_generic_word = any(word in lowered for word in _GENERIC_WORDS)
+    has_call_word = _has_word_match(lowered, _CALL_WORDS)
+    has_put_word = _has_word_match(lowered, _PUT_WORDS)
+    has_generic_word = _has_word_match(lowered, _GENERIC_WORDS)
     has_call_shorthand = bool(_CALL_SHORTHAND_RE.search(text))
     has_put_shorthand = bool(_PUT_SHORTHAND_RE.search(text))
     has_date_shorthand = bool(_DATE_SHORTHAND_RE.search(text))
