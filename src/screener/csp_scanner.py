@@ -93,6 +93,12 @@ AVAILABLE_CONDITIONS: list[dict] = [
         "group": "Trend",
     },
     {
+        "id": "sma50_above_sma150",
+        "label": "50 SMA > 150 SMA",
+        "description": "Medium-term above long-term MA — healthy trend structure (20 > 50 > 150 > 200 is the full bullish stack)",
+        "group": "Trend",
+    },
+    {
         "id": "sma50_above_sma20",
         "label": "50 SMA > 20 SMA",
         "description": "Medium-term above short-term MA — slower trend dominant (note: 20 SMA > 50 SMA signals short-term bullish momentum)",
@@ -164,8 +170,16 @@ class ScannerParams:
     min_revenue_growth:  float | None = DEFAULT_MIN_REVENUE_GROWTH
     min_earnings_growth: float | None = DEFAULT_MIN_EARNINGS_GROWTH
     min_dividend_yield:  float | None = DEFAULT_MIN_DIVIDEND_YIELD
-    max_forward_pe:      float | None = None
-    max_peg_ratio:       float | None = None
+    max_forward_pe:          float | None = None
+    max_peg_ratio:           float | None = None
+    max_dividend_yield:      float | None = None   # e.g. 0.025 → 2.5%
+    rv20_max:                float | None = None   # e.g. 45.0 (annualised %)
+    bb_width_pct_min:        float | None = None   # e.g. 4.0
+    bb_width_pct_max:        float | None = None   # e.g. 21.0
+    volume_ratio_max:        float | None = None   # e.g. 1.15 (ratio vs 20d avg)
+    pct_from_52wk_high_max:  float | None = None   # e.g. 12.0 (% below 52wk high)
+    adr20_pct_max:           float | None = None   # e.g. 4.0
+    price_vs_ema200_pct_min: float | None = None   # e.g. 5.0 (% above EMA200)
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
     restrict_to_watchlist_universe: bool = False
@@ -198,6 +212,14 @@ class ScannerParams:
         min_dividend_yield: float | None = DEFAULT_MIN_DIVIDEND_YIELD,
         max_forward_pe: float | None = None,
         max_peg_ratio: float | None = None,
+        max_dividend_yield: float | None = None,
+        rv20_max: float | None = None,
+        bb_width_pct_min: float | None = None,
+        bb_width_pct_max: float | None = None,
+        volume_ratio_max: float | None = None,
+        pct_from_52wk_high_max: float | None = None,
+        adr20_pct_max: float | None = None,
+        price_vs_ema200_pct_min: float | None = None,
         restrict_to_watchlist_universe: bool = False,
         sectors: str | None = None,
     ) -> "ScannerParams":
@@ -221,13 +243,21 @@ class ScannerParams:
             min_adx          = min_adx   if min_adx   is not None else DEFAULT_MIN_ADX,
             max_adx          = max_adx   if max_adx   is not None else DEFAULT_MAX_ADX,
             conditions       = sorted(parsed_conditions),
-            min_fcf_b           = min_fcf_b,
-            max_debt_to_equity  = max_debt_to_equity,
-            min_revenue_growth  = min_revenue_growth,
-            min_earnings_growth = min_earnings_growth,
-            min_dividend_yield  = min_dividend_yield,
-            max_forward_pe      = max_forward_pe,
-            max_peg_ratio       = max_peg_ratio,
+            min_fcf_b            = min_fcf_b,
+            max_debt_to_equity   = max_debt_to_equity,
+            min_revenue_growth   = min_revenue_growth,
+            min_earnings_growth  = min_earnings_growth,
+            min_dividend_yield   = min_dividend_yield,
+            max_forward_pe       = max_forward_pe,
+            max_peg_ratio        = max_peg_ratio,
+            max_dividend_yield   = max_dividend_yield,
+            rv20_max             = rv20_max,
+            bb_width_pct_min     = bb_width_pct_min,
+            bb_width_pct_max     = bb_width_pct_max,
+            volume_ratio_max     = volume_ratio_max,
+            pct_from_52wk_high_max  = pct_from_52wk_high_max,
+            adr20_pct_max        = adr20_pct_max,
+            price_vs_ema200_pct_min = price_vs_ema200_pct_min,
             restrict_to_watchlist_universe = restrict_to_watchlist_universe,
             sectors          = sorted(parsed_sectors),
         )
@@ -507,10 +537,13 @@ def _fundamental_filter_from_store(
             if earnings_growth < params.min_earnings_growth:
                 continue
 
-        # Dividend yield gate
+        # Dividend yield gates (min and max)
         dividend_yield = row.get("dividend_yield")
         if params.min_dividend_yield is not None and dividend_yield is not None:
             if dividend_yield < params.min_dividend_yield:
+                continue
+        if params.max_dividend_yield is not None and dividend_yield is not None:
+            if dividend_yield > params.max_dividend_yield:
                 continue
 
         # Forward PE gate
@@ -692,18 +725,68 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
         # SMAs
         sma20  = float(ta.sma(close, length=20).iloc[-1])  if len(hist) >= 20  else None
         sma50  = float(ta.sma(close, length=50).iloc[-1])  if len(hist) >= 50  else None
+        sma150 = float(ta.sma(close, length=150).iloc[-1]) if len(hist) >= 150 else None
         sma200 = float(ta.sma(close, length=200).iloc[-1]) if len(hist) >= 200 else None
+
+        # EMA 200 and price distance from it
+        ema200: float | None = None
+        price_vs_ema200_pct: float | None = None
+        if len(hist) >= 200:
+            ema200_series = ta.ema(close, length=200)
+            if ema200_series is not None and not ema200_series.empty:
+                ema200 = float(ema200_series.iloc[-1])
+                if ema200 and ema200 > 0:
+                    price_vs_ema200_pct = round((last_price - ema200) / ema200 * 100, 2)
 
         # Bollinger Bands (20-period, 2σ)
         bb_lower: float | None = None
+        bb_upper: float | None = None
+        bb_mid: float | None = None
         bb_pct_from_lower: float | None = None
+        bb_width_pct: float | None = None
         if len(hist) >= 20:
             bbands = ta.bbands(close, length=20, std=2)
             if bbands is not None and not bbands.empty:
-                lower_col = [c for c in bbands.columns if "LB" in c or "lower" in c.lower() or "BBL" in c]
+                lower_col = next((c for c in bbands.columns if "BBL" in c), None)
+                upper_col = next((c for c in bbands.columns if "BBU" in c), None)
+                mid_col   = next((c for c in bbands.columns if "BBM" in c), None)
                 if lower_col:
-                    bb_lower = float(bbands[lower_col[0]].iloc[-1])
-                    bb_pct_from_lower = round(((last_price - bb_lower) / bb_lower) * 100, 2) if bb_lower and bb_lower > 0 else None
+                    bb_lower = float(bbands[lower_col].iloc[-1])
+                    bb_pct_from_lower = (
+                        round((last_price - bb_lower) / bb_lower * 100, 2)
+                        if bb_lower and bb_lower > 0 else None
+                    )
+                if upper_col:
+                    bb_upper = float(bbands[upper_col].iloc[-1])
+                if mid_col:
+                    bb_mid = float(bbands[mid_col].iloc[-1])
+                if bb_upper is not None and bb_lower is not None and bb_mid is not None and bb_mid > 0:
+                    bb_width_pct = round((bb_upper - bb_lower) / bb_mid * 100, 2)
+
+        # Volume ratio: today's volume vs 20-day average
+        volume_ratio: float | None = None
+        if "Volume" in hist.columns and len(hist) >= 21:
+            vol = hist["Volume"]
+            last_vol = float(vol.iloc[-1])
+            avg_vol_20 = float(vol.iloc[-21:-1].mean())
+            if avg_vol_20 > 0 and last_vol >= 0:
+                volume_ratio = round(last_vol / avg_vol_20, 3)
+
+        # % below 52-week high (positive = below high)
+        pct_from_52wk_high: float | None = None
+        if len(hist) >= 252:
+            high_52w = float(close.tail(252).max())
+            if high_52w > 0:
+                pct_from_52wk_high = round((high_52w - last_price) / high_52w * 100, 2)
+
+        # ADR20 — average daily range as % of close
+        adr20_pct: float | None = None
+        if len(hist) >= 20:
+            hi20 = hist["High"].iloc[-20:]
+            lo20 = hist["Low"].iloc[-20:]
+            cl20 = hist["Close"].iloc[-20:]
+            if (cl20 > 0).all():
+                adr20_pct = round(float(((hi20 - lo20) / cl20).mean() * 100), 2)
 
         # RSI(14)
         rsi: float | None = None
@@ -722,14 +805,22 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
                     adx = round(float(adx_df[adx_col[0]].iloc[-1]), 2)
 
         return {
-            "price":               round(last_price, 2),
-            "sma20":               round(sma20, 2)  if sma20  is not None else None,
-            "sma50":               round(sma50, 2)  if sma50  is not None else None,
-            "sma200":              round(sma200, 2) if sma200 is not None else None,
-            "bb_lower":            round(bb_lower, 2) if bb_lower is not None else None,
-            "bb_pct_from_lower":   bb_pct_from_lower,
-            "rsi":                 round(rsi, 2) if rsi is not None else None,
-            "adx":                 adx,
+            "price":                round(last_price, 2),
+            "sma20":                round(sma20, 2)  if sma20  is not None else None,
+            "sma50":                round(sma50, 2)  if sma50  is not None else None,
+            "sma150":               round(sma150, 2) if sma150 is not None else None,
+            "sma200":               round(sma200, 2) if sma200 is not None else None,
+            "ema200":               round(ema200, 2) if ema200 is not None else None,
+            "price_vs_ema200_pct":  price_vs_ema200_pct,
+            "bb_lower":             round(bb_lower, 2) if bb_lower is not None else None,
+            "bb_upper":             round(bb_upper, 2) if bb_upper is not None else None,
+            "bb_width_pct":         bb_width_pct,
+            "bb_pct_from_lower":    bb_pct_from_lower,
+            "volume_ratio":         volume_ratio,
+            "pct_from_52wk_high":   pct_from_52wk_high,
+            "adr20_pct":            adr20_pct,
+            "rsi":                  round(rsi, 2) if rsi is not None else None,
+            "adx":                  adx,
         }
     except Exception as exc:
         logger.warning("Technical indicators failed for %s: %s", symbol, exc)
@@ -750,6 +841,7 @@ def _check_conditions(indicators: dict, conditions: list[str]) -> tuple[bool, di
     p     = indicators.get("price")
     s20   = indicators.get("sma20")
     s50   = indicators.get("sma50")
+    s150  = indicators.get("sma150")
     s200  = indicators.get("sma200")
     bb_d  = indicators.get("bb_pct_from_lower")   # % above lower band
     rsi   = indicators.get("rsi")
@@ -757,6 +849,8 @@ def _check_conditions(indicators: dict, conditions: list[str]) -> tuple[bool, di
     for cond in conditions:
         if cond == "sma50_above_sma200":
             results[cond] = bool(s50 is not None and s200 is not None and s50 > s200)
+        elif cond == "sma50_above_sma150":
+            results[cond] = bool(s50 is not None and s150 is not None and s50 > s150)
         elif cond == "sma50_above_sma20":
             results[cond] = bool(s50 is not None and s20 is not None and s50 > s20)
         elif cond == "sma20_above_sma50":
@@ -784,20 +878,35 @@ def _check_conditions(indicators: dict, conditions: list[str]) -> tuple[bool, di
 
 def apply_technical_conditions(
     vol_rows: list[dict],
-    conditions: list[str],
-    max_rsi: float = 100.0,
-    min_adx: float = 0.0,
-    max_adx: float = 100.0,
+    params: "ScannerParams",
 ) -> tuple[list[str], list[dict]]:
-    """Apply stacked technical conditions plus the RSI and ADX threshold gates.
+    """Apply stacked technical conditions plus RSI, ADX, and numeric range gates.
 
     Reads OHLCV from the local store (2y of data). Falls back to yfinance
     if a ticker has no local data.
     """
+    conditions = params.conditions
+    max_rsi    = params.max_rsi
+    min_adx    = params.min_adx
+    max_adx    = params.max_adx
+
     rsi_filter_active = max_rsi < 100.0
     adx_filter_active = min_adx > 0 or max_adx < 100.0
-    if not conditions and not rsi_filter_active and not adx_filter_active:
-        # No conditions active — pass everyone through
+
+    # Numeric technical gates that require indicator computation
+    numeric_tech_gates = any([
+        params.rv20_max is not None,
+        params.bb_width_pct_min is not None,
+        params.bb_width_pct_max is not None,
+        params.volume_ratio_max is not None,
+        params.pct_from_52wk_high_max is not None,
+        params.adr20_pct_max is not None,
+        params.price_vs_ema200_pct_min is not None,
+    ])
+
+    needs_indicators = bool(conditions) or rsi_filter_active or adx_filter_active or numeric_tech_gates
+
+    if not needs_indicators:
         tickers = [r["symbol"] for r in vol_rows]
         for row in vol_rows:
             row["technical_conditions"] = {}
@@ -807,27 +916,33 @@ def apply_technical_conditions(
     passing_rows: list[dict] = []
 
     logger.info(
-        "Technical conditions filter: %d tickers, %d conditions: %s, RSI<%.0f, ADX %.0f-%.0f",
-        len(vol_rows), len(conditions), conditions, max_rsi, min_adx, max_adx,
+        "Technical filter: %d tickers, conditions=%s, RSI<%.0f, ADX %.0f-%.0f",
+        len(vol_rows), conditions, max_rsi, min_adx, max_adx,
     )
 
     for row in vol_rows:
         symbol = row["symbol"]
 
+        # rv20 is already in row from the vol-filter stage (annualised %)
+        if params.rv20_max is not None:
+            rv20_val = row.get("rv20")
+            if rv20_val is not None and rv20_val > params.rv20_max:
+                logger.debug("rv20_max failed for %s: %.1f > %.1f", symbol, rv20_val, params.rv20_max)
+                continue
+
         # Try local store first (504 trading days ≈ 2y)
         hist = get_ohlcv(symbol, lookback_days=504)
         if hist.empty:
-            # Fallback to yfinance
             try:
                 hist = yf.Ticker(symbol).history(period="2y")
             except Exception as exc:
-                logger.warning("History fetch failed for %s — excluding from results: %s", symbol, exc)
+                logger.warning("History fetch failed for %s — excluding: %s", symbol, exc)
                 row["technical_conditions"] = {}
                 continue
 
         indicators = _compute_technical_indicators(symbol, hist)
         if indicators is None:
-            logger.debug("Insufficient history for %s — excluding from results", symbol)
+            logger.debug("Insufficient history for %s — excluding", symbol)
             row["technical_indicators"] = None
             row["technical_conditions"] = {}
             continue
@@ -844,19 +959,54 @@ def apply_technical_conditions(
             adx_val = indicators.get("adx")
             adx_passed = adx_val is not None and min_adx <= adx_val <= max_adx
 
+        # Numeric range gates (None value = pass, consistent with _apply_criteria convention)
+        failed_gates: list[str] = []
+
+        def _gate_max(key: str, limit: float | None) -> bool:
+            if limit is None:
+                return True
+            val = indicators.get(key)
+            if val is None:
+                return True   # NULL passes max gate
+            if val > limit:
+                failed_gates.append(f"{key}>{limit}")
+                return False
+            return True
+
+        def _gate_min(key: str, limit: float | None) -> bool:
+            if limit is None:
+                return True
+            val = indicators.get(key)
+            if val is None:
+                return False  # NULL fails min gate
+            if val < limit:
+                failed_gates.append(f"{key}<{limit}")
+                return False
+            return True
+
+        numeric_passed = all([
+            _gate_min("bb_width_pct",       params.bb_width_pct_min),
+            _gate_max("bb_width_pct",       params.bb_width_pct_max),
+            _gate_max("volume_ratio",        params.volume_ratio_max),
+            _gate_max("pct_from_52wk_high",  params.pct_from_52wk_high_max),
+            _gate_max("adr20_pct",           params.adr20_pct_max),
+            _gate_min("price_vs_ema200_pct", params.price_vs_ema200_pct_min),
+        ])
+
         row["technical_indicators"] = indicators
         row["technical_conditions"] = results
 
-        if all_passed and rsi_passed and adx_passed:
+        if all_passed and rsi_passed and adx_passed and numeric_passed:
             passing_tickers.append(symbol)
             passing_rows.append(row)
         else:
-            failed = [k for k, v in results.items() if not v]
+            all_failed = [k for k, v in results.items() if not v]
             if not rsi_passed:
-                failed.append(f"rsi_max({max_rsi})")
+                all_failed.append(f"rsi_max({max_rsi})")
             if not adx_passed:
-                failed.append(f"adx_range({min_adx}-{max_adx})")
-            logger.debug("Conditions failed for %s: %s", symbol, failed)
+                all_failed.append(f"adx_range({min_adx}-{max_adx})")
+            all_failed.extend(failed_gates)
+            logger.debug("Technical failed for %s: %s", symbol, all_failed)
 
     logger.info(
         "Technical conditions: %d/%d tickers passed",
@@ -937,10 +1087,8 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
             "warnings": data_warnings,
         }
 
-    # 4. Technical conditions + RSI threshold gate
-    tech_passing, tech_rows = apply_technical_conditions(
-        vol_rows, params.conditions, params.max_rsi, params.min_adx, params.max_adx
-    )
+    # 4. Technical conditions + RSI/ADX + numeric range gates
+    tech_passing, tech_rows = apply_technical_conditions(vol_rows, params)
     if not tech_passing:
         logger.warning("No tickers passed technical conditions filter")
         return {

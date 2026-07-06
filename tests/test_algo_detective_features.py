@@ -58,6 +58,7 @@ def test_required_keys_present():
         "bb_pct_b", "bb_width_pct", "price_above_bb_middle",
         "rv20", "atr_pct", "volume_ratio", "roc20", "macd_histogram",
         "pct_from_52wk_high", "close_price", "volume", "sector",
+        "adr20_pct",
     ]
     for key in required:
         assert key in result, f"Missing key: {key}"
@@ -102,6 +103,16 @@ def test_sector_passes_through():
     as_of = df.index[-1].strftime("%Y-%m-%d")
     result = compute_features("GE", as_of, df, sector="Industrials")
     assert result["sector"] == "Industrials"
+
+
+def test_adr20_pct_exact_for_known_range():
+    """_make_ohlcv sets High=close*1.005, Low=close*0.995 on every bar, so the
+    daily range is exactly 1% of close every day — adr20_pct must be 1.0."""
+    df = _make_ohlcv(n=250)
+    as_of = df.index[-1].strftime("%Y-%m-%d")
+    result = compute_features("GE", as_of, df)
+    assert result is not None
+    assert result["adr20_pct"] == pytest.approx(1.0, abs=1e-2)
 
 
 def test_no_lookahead():

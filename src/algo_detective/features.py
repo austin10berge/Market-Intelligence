@@ -108,6 +108,12 @@ def compute_features(
     if len(ret) >= 20:
         rv20 = float(ret.iloc[-20:].std() * math.sqrt(252))
 
+    # ── ADR-20 (20-day average daily range as % of close) ────────────────────
+    adr20_pct = None
+    if len(df) >= 20:
+        daily_range_pct = (high.iloc[-20:] - low.iloc[-20:]) / close.iloc[-20:]
+        adr20_pct = round(float(daily_range_pct.mean() * 100), 4)
+
     # ── Volume ratio vs 20-day avg (excluding today) ──────────────────────────
     volume_ratio = None
     vol_window = volume.iloc[-21:-1]
@@ -185,6 +191,7 @@ def compute_features(
         "roc20": _r(roc20),
         "macd_histogram": _r(macd_histogram),
         "pct_from_52wk_high": _r(pct_from_52wk_high),
+        "adr20_pct": adr20_pct,
         "sector": sector,
     }
 

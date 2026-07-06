@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS detective_features (
     roc20                   REAL,
     macd_histogram          REAL,
     pct_from_52wk_high      REAL,
+    adr20_pct               REAL,
     sector                  TEXT,
     market_cap_b            REAL,
     beta                    REAL,
@@ -119,6 +120,7 @@ _FUNDAMENTAL_COLUMNS = [
     ("debt_to_equity", "REAL"),
     ("dividend_yield", "REAL"),
     ("fcf", "REAL"),
+    ("adr20_pct", "REAL"),
 ]
 
 _OPTIONS_COLUMNS = [

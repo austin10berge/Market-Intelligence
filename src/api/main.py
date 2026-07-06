@@ -388,9 +388,17 @@ async def get_csp_scan_candidates(
     max_debt_to_equity:  float | None = Query(default=2.0),
     min_revenue_growth:  float | None = Query(default=-0.10),
     min_earnings_growth: float | None = Query(default=None),
-    min_dividend_yield:  float | None = Query(default=None),
-    max_forward_pe:      float | None = Query(default=None),
-    max_peg_ratio:       float | None = Query(default=None),
+    min_dividend_yield:      float | None = Query(default=None),
+    max_forward_pe:          float | None = Query(default=None),
+    max_peg_ratio:           float | None = Query(default=None),
+    max_dividend_yield:      float | None = Query(default=None),
+    rv20_max:                float | None = Query(default=None),
+    bb_width_pct_min:        float | None = Query(default=None),
+    bb_width_pct_max:        float | None = Query(default=None),
+    volume_ratio_max:        float | None = Query(default=None),
+    pct_from_52wk_high_max:  float | None = Query(default=None),
+    adr20_pct_max:           float | None = Query(default=None),
+    price_vs_ema200_pct_min: float | None = Query(default=None),
     restrict_to_watchlist_universe: bool = False,
     sectors:             str   | None = None,
     response: Response = None,
@@ -398,24 +406,7 @@ async def get_csp_scan_candidates(
     """Run the broad-universe CSP scanner (S&P 500, NASDAQ 100, and NASDAQ large-cap ≥$2B).
 
     All parameters are optional and default to the scanner defaults when omitted.
-    Different parameter combinations produce independent cache entries so prior
-    results are never overwritten by a different param set.
-
-    Query params
-    ------------
-    min_cap    : minimum market cap in billions (default 10)
-    max_price  : maximum stock price (default 150)
-    min_beta   : minimum beta (default 0.8)
-    max_beta   : maximum beta (default 2.4)
-    min_vol    : minimum IV/RV threshold % (default 30)
-    max_rsi    : maximum RSI(14) threshold (default 65)
-    min_adx    : minimum ADX(14) threshold (default 15)
-    max_adx    : maximum ADX(14) threshold (default 50)
-    conditions : comma-separated list of technical condition IDs to apply
-    restrict_to_watchlist_universe : if true, limit to S&P 500 + NASDAQ 100 tickers only (default false)
-
-    Cache TTL: 23 hours regardless of market status (EOD snapshot design).
-    Zero-universe results are never cached.
+    Cache TTL: 23 hours. Zero-universe results are never cached.
     Use DELETE /api/screener/csp-scan to bust any cached result.
     """
     params = ScannerParams.from_query(
@@ -437,6 +428,14 @@ async def get_csp_scan_candidates(
         min_dividend_yield=min_dividend_yield,
         max_forward_pe=max_forward_pe,
         max_peg_ratio=max_peg_ratio,
+        max_dividend_yield=max_dividend_yield,
+        rv20_max=rv20_max,
+        bb_width_pct_min=bb_width_pct_min,
+        bb_width_pct_max=bb_width_pct_max,
+        volume_ratio_max=volume_ratio_max,
+        pct_from_52wk_high_max=pct_from_52wk_high_max,
+        adr20_pct_max=adr20_pct_max,
+        price_vs_ema200_pct_min=price_vs_ema200_pct_min,
         restrict_to_watchlist_universe=restrict_to_watchlist_universe,
         sectors=sectors,
     )
@@ -489,9 +488,17 @@ async def invalidate_csp_scan_cache(
     max_debt_to_equity:  float | None = Query(default=2.0),
     min_revenue_growth:  float | None = Query(default=-0.10),
     min_earnings_growth: float | None = Query(default=None),
-    min_dividend_yield:  float | None = Query(default=None),
-    max_forward_pe:      float | None = Query(default=None),
-    max_peg_ratio:       float | None = Query(default=None),
+    min_dividend_yield:      float | None = Query(default=None),
+    max_forward_pe:          float | None = Query(default=None),
+    max_peg_ratio:           float | None = Query(default=None),
+    max_dividend_yield:      float | None = Query(default=None),
+    rv20_max:                float | None = Query(default=None),
+    bb_width_pct_min:        float | None = Query(default=None),
+    bb_width_pct_max:        float | None = Query(default=None),
+    volume_ratio_max:        float | None = Query(default=None),
+    pct_from_52wk_high_max:  float | None = Query(default=None),
+    adr20_pct_max:           float | None = Query(default=None),
+    price_vs_ema200_pct_min: float | None = Query(default=None),
     restrict_to_watchlist_universe: bool = False,
     sectors:             str   | None = None,
 ):
@@ -510,6 +517,14 @@ async def invalidate_csp_scan_cache(
         min_dividend_yield=min_dividend_yield,
         max_forward_pe=max_forward_pe,
         max_peg_ratio=max_peg_ratio,
+        max_dividend_yield=max_dividend_yield,
+        rv20_max=rv20_max,
+        bb_width_pct_min=bb_width_pct_min,
+        bb_width_pct_max=bb_width_pct_max,
+        volume_ratio_max=volume_ratio_max,
+        pct_from_52wk_high_max=pct_from_52wk_high_max,
+        adr20_pct_max=adr20_pct_max,
+        price_vs_ema200_pct_min=price_vs_ema200_pct_min,
         restrict_to_watchlist_universe=restrict_to_watchlist_universe,
         sectors=sectors,
     )
