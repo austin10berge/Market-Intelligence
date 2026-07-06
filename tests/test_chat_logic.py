@@ -4,6 +4,7 @@ from __future__ import annotations
 from src.chat import (
     TICKER_SKIP_WORDS,
     build_prompt,
+    build_thread_title,
     detect_tickers,
     format_screener_block,
 )
@@ -46,6 +47,41 @@ class TestDetectTickers:
         assert "NVDA" in result
         assert "AAPL" in result
         assert result.index("NVDA") < result.index("AAPL")
+
+
+class TestBuildThreadTitle:
+    def test_ticker_and_topic_words(self):
+        result = build_thread_title(
+            "What do you think about $AAPL here, is this an earnings pullback?", UNIVERSE
+        )
+        assert result == "AAPL: Here Earnings Pullback"
+
+    def test_multiple_tickers_joined(self):
+        result = build_thread_title("$AAPL and $MSFT both breaking out today", UNIVERSE)
+        assert result == "AAPL, MSFT: Both Breaking Out"
+
+    def test_caps_at_three_tickers(self):
+        result = build_thread_title(
+            "$AAPL $MSFT $NVDA $GOOG all ripping", UNIVERSE
+        )
+        assert result == "AAPL, MSFT, NVDA: All Ripping"
+
+    def test_ticker_only_no_topic_words(self):
+        result = build_thread_title("$AAPL", UNIVERSE)
+        assert result == "AAPL"
+
+    def test_topic_words_only_no_ticker(self):
+        result = build_thread_title("thinking about a swing trade setup", UNIVERSE)
+        assert result == "Thinking Swing Trade"
+
+    def test_falls_back_to_date_when_nothing_survives(self):
+        result = build_thread_title("what do you think about this", UNIVERSE)
+        assert result.startswith("Trade Chat — ")
+
+    def test_truncates_to_100_chars(self):
+        long_content = "$AAPL " + "x" * 60 + " " + "y" * 60 + " " + "z" * 60
+        result = build_thread_title(long_content, UNIVERSE)
+        assert len(result) == 100
 
 
 class TestFormatScreenerBlock:

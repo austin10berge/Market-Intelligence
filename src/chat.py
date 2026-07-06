@@ -41,6 +41,46 @@ def detect_tickers(text: str, universe: set[str]) -> list[str]:
     return found
 
 
+_THREAD_TITLE_STOPWORDS: frozenset[str] = frozenset({
+    "a", "an", "the", "is", "are", "on", "in", "to", "for", "my", "i",
+    "of", "and", "or", "this", "that", "with", "about", "what", "do",
+    "you", "think", "we", "should", "can", "would", "it", "be", "at",
+    "so", "just", "will", "was", "were",
+})
+
+
+def build_thread_title(content: str, universe: set[str]) -> str:
+    """Build a Discord thread title like "AAPL, TSLA: Earnings Pullback".
+
+    Falls back to "Trade Chat — {date}" when no ticker or topic word
+    survives filtering (e.g. a bare greeting with no tickers).
+    """
+    from datetime import datetime
+
+    tickers = detect_tickers(content, universe)
+    ticker_set = {t.upper() for t in tickers}
+
+    topic_words: list[str] = []
+    for word in re.findall(r"[a-zA-Z']+", content):
+        if word.upper() in ticker_set or word.upper() in TICKER_SKIP_WORDS:
+            continue
+        if word.lower() in _THREAD_TITLE_STOPWORDS:
+            continue
+        topic_words.append(word.capitalize())
+        if len(topic_words) == 3:
+            break
+
+    if tickers:
+        prefix = ", ".join(tickers[:3])
+        title = f"{prefix}: {' '.join(topic_words)}" if topic_words else prefix
+    elif topic_words:
+        title = " ".join(topic_words)
+    else:
+        title = f"Trade Chat — {datetime.now().strftime('%b %d')}"
+
+    return title[:100]
+
+
 def format_screener_block(ticker: str, data: dict) -> str:
     """Render a compact screener data block for injection into the LLM prompt."""
     from datetime import date
