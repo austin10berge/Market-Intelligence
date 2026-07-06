@@ -47,8 +47,6 @@ from .cache import (
     screener_ttl,
 )
 from . import db
-from .algo_detective.options_chain import fetch_snapshot_pcr
-from .algo_detective.store import get_all_features as _get_detective_features
 
 import argparse
 import json
@@ -292,6 +290,9 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
         # ── Step 5: Algo-detective options snapshot ──────────────
         logger.info("Step 5/5: Collecting algo-detective options snapshot...")
         try:
+            from .algo_detective.options_chain import fetch_snapshot_pcr
+            from .algo_detective.store import get_all_features as _get_detective_features
+
             _features = await asyncio.to_thread(_get_detective_features)
             _prime = sorted({f["ticker"] for f in _features if f["is_prime"] == 1})
             if _prime:
