@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import discord
@@ -13,6 +12,7 @@ from discord.ext import commands
 
 from src.chat import (
     build_prompt,
+    build_thread_title,
     call_claude_chat,
     detect_tickers,
     format_screener_block,
@@ -106,7 +106,7 @@ class TradeChatCog(commands.Cog):
         ):
             try:
                 thread = await message.create_thread(
-                    name=f"Trade Chat — {datetime.now().strftime('%b %d')}",
+                    name=build_thread_title(message.content, self.universe),
                     auto_archive_duration=1440,
                 )
             except discord.HTTPException as exc:
