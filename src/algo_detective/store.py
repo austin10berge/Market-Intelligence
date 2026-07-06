@@ -6,6 +6,17 @@ from pathlib import Path
 from ..config import settings
 
 _DDL = """
+CREATE TABLE IF NOT EXISTS detective_options (
+    date            TEXT NOT NULL,
+    ticker          TEXT NOT NULL,
+    best_iv         REAL,
+    best_volume     INTEGER,
+    occ_symbol      TEXT,
+    pcr_vol         REAL,
+    pcr_oi          REAL,
+    PRIMARY KEY (date, ticker)
+);
+
 CREATE TABLE IF NOT EXISTS detective_features (
     date                    TEXT NOT NULL,
     ticker                  TEXT NOT NULL,
@@ -110,6 +121,11 @@ _FUNDAMENTAL_COLUMNS = [
     ("fcf", "REAL"),
 ]
 
+_OPTIONS_COLUMNS = [
+    ("pcr_vol", "REAL"),
+    ("pcr_oi", "REAL"),
+]
+
 
 def ensure_tables() -> None:
     conn = _get_connection()
@@ -121,6 +137,14 @@ def ensure_tables() -> None:
             try:
                 conn.execute(
                     f"ALTER TABLE detective_features ADD COLUMN {col} {col_type}"
+                )
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
+        for col, col_type in _OPTIONS_COLUMNS:
+            try:
+                conn.execute(
+                    f"ALTER TABLE detective_options ADD COLUMN {col} {col_type}"
                 )
                 conn.commit()
             except sqlite3.OperationalError:
@@ -222,6 +246,53 @@ def get_macro_for_date(date: str) -> dict | None:
             "SELECT * FROM detective_macro WHERE date = ?", (date,)
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def upsert_options_rows(rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    conn = _get_connection()
+    try:
+        conn.executemany(
+            """
+            INSERT INTO detective_options (date, ticker, best_iv, best_volume, occ_symbol, pcr_vol, pcr_oi)
+            VALUES (:date, :ticker, :best_iv, :best_volume, :occ_symbol,
+                    :pcr_vol, :pcr_oi)
+            ON CONFLICT(date, ticker) DO UPDATE SET
+                best_iv = excluded.best_iv,
+                best_volume = excluded.best_volume,
+                occ_symbol = excluded.occ_symbol,
+                pcr_vol = COALESCE(excluded.pcr_vol, detective_options.pcr_vol),
+                pcr_oi  = COALESCE(excluded.pcr_oi,  detective_options.pcr_oi)
+            """,
+            [
+                {**r, "pcr_vol": r.get("pcr_vol"), "pcr_oi": r.get("pcr_oi")}
+                for r in rows
+            ],
+        )
+        conn.commit()
+        return len(rows)
+    finally:
+        conn.close()
+
+
+def get_options_index() -> dict[tuple[str, str], dict]:
+    """Return {(date, ticker): {best_iv, best_volume, occ_symbol}} for all stored rows."""
+    conn = _get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM detective_options").fetchall()
+        return {(r["date"], r["ticker"]): dict(r) for r in rows}
+    finally:
+        conn.close()
+
+
+def get_computed_options_pairs() -> set[tuple[str, str]]:
+    conn = _get_connection()
+    try:
+        rows = conn.execute("SELECT date, ticker FROM detective_options").fetchall()
+        return {(r["date"], r["ticker"]) for r in rows}
     finally:
         conn.close()
 

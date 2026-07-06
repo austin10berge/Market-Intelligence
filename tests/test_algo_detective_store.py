@@ -36,6 +36,9 @@ from src.algo_detective.store import (
     get_all_features,
     get_macro_for_date,
     get_feature_counts,
+    upsert_options_rows,
+    get_options_index,
+    get_computed_options_pairs,
 )
 
 
@@ -144,3 +147,82 @@ def test_upsert_and_retrieve_macro_row():
 def test_get_macro_for_missing_date_returns_none():
     ensure_tables()
     assert get_macro_for_date("1990-01-01") is None
+
+
+def _make_options_row(date="2026-06-18", ticker="NVDA", **overrides):
+    row = {
+        "date": date,
+        "ticker": ticker,
+        "best_iv": 0.42,
+        "best_volume": 1500,
+        "occ_symbol": f"{ticker}260619P00120000",
+        "pcr_vol": 1.15,
+        "pcr_oi": 0.95,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_ensure_tables_creates_detective_options():
+    ensure_tables()
+    conn = sqlite3.connect(_tmp_db_path)
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    conn.close()
+    assert "detective_options" in {r[0] for r in rows}
+
+
+def test_get_options_index_empty():
+    ensure_tables()
+    assert get_options_index() == {}
+
+
+def test_get_computed_options_pairs_empty():
+    ensure_tables()
+    assert get_computed_options_pairs() == set()
+
+
+def test_upsert_and_retrieve_options_row():
+    ensure_tables()
+    row = _make_options_row(ticker="AAPL")
+    count = upsert_options_rows([row])
+    assert count == 1
+
+    index = get_options_index()
+    stored = index[("2026-06-18", "AAPL")]
+    assert stored["best_iv"] == 0.42
+    assert stored["pcr_vol"] == 1.15
+    assert stored["pcr_oi"] == 0.95
+    assert ("2026-06-18", "AAPL") in get_computed_options_pairs()
+
+
+def test_upsert_options_rows_empty_list_is_noop():
+    ensure_tables()
+    assert upsert_options_rows([]) == 0
+
+
+def test_upsert_options_coalesces_null_pcr_without_clobbering_existing():
+    """A later upsert with pcr fields unset (e.g. a backfill row) must not
+    erase pcr values a previous snapshot already stored — this is the whole
+    point of the COALESCE in the ON CONFLICT clause."""
+    ensure_tables()
+    ticker = "MSFT"
+    upsert_options_rows([_make_options_row(ticker=ticker, pcr_vol=1.2, pcr_oi=0.8)])
+
+    # Second write (e.g. IV-only update) omits pcr fields — should preserve them
+    upsert_options_rows([_make_options_row(ticker=ticker, best_iv=0.55, pcr_vol=None, pcr_oi=None)])
+
+    stored = get_options_index()[("2026-06-18", ticker)]
+    assert stored["best_iv"] == 0.55
+    assert stored["pcr_vol"] == 1.2
+    assert stored["pcr_oi"] == 0.8
+
+
+def test_upsert_options_rows_idempotent():
+    ensure_tables()
+    row = _make_options_row(ticker="GOOG")
+    upsert_options_rows([row])
+    upsert_options_rows([row])
+    matching = [
+        pair for pair in get_computed_options_pairs() if pair == ("2026-06-18", "GOOG")
+    ]
+    assert len(matching) == 1
