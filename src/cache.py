@@ -22,9 +22,10 @@ from __future__ import annotations
 import json
 import logging
 import zoneinfo
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
+import holidays
 import redis.asyncio as aioredis
 
 from .config import settings
@@ -37,6 +38,13 @@ ET = zoneinfo.ZoneInfo("America/New_York")
 
 MARKET_OPEN = (9, 30)  # 9:30 AM ET
 MARKET_CLOSE = (16, 0)  # 4:00 PM ET
+
+_NYSE_HOLIDAYS = holidays.financial_holidays("NYSE")
+
+
+def is_trading_day(d: date) -> bool:
+    """Return True if `d` is a US equities trading day (Mon-Fri, non-NYSE-holiday)."""
+    return d.weekday() < 5 and d not in _NYSE_HOLIDAYS
 
 
 def market_is_open() -> bool:

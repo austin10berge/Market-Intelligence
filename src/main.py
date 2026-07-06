@@ -6,7 +6,7 @@ import asyncio
 import logging
 import sys
 
-from datetime import date
+from datetime import datetime
 
 from .config import settings
 from .fetchers.base import close_http_client
@@ -37,14 +37,18 @@ from .screener.stocks import screen_stocks
 from .synthesis.llm import synthesize
 from .synthesis.prompts import build_synthesis_prompt
 from .cache import (
+    ET,
     KEY_SCREENER_CSP,
     KEY_SCREENER_STOCKS,
     cache_get,
     cache_set,
     invalidate_market_posture,
+    is_trading_day,
     screener_ttl,
 )
 from . import db
+from .algo_detective.options_chain import fetch_snapshot_pcr
+from .algo_detective.store import get_all_features as _get_detective_features
 
 import argparse
 import json
@@ -81,14 +85,14 @@ FETCHERS = [
 
 async def run_pipeline(output_mode: str = "notify") -> dict | None:
     """Execute the full evening market sentiment pipeline."""
-    today = date.today()
+    today = datetime.now(ET).date()
     logger.info(f"{'=' * 60}")
     logger.info(f"📊 Evening Market Sentiment Pipeline — {today.isoformat()}")
     logger.info(f"{'=' * 60}")
 
     try:
         # ── Step 1: Fetch all signals in parallel ────────────────
-        logger.info("Step 1/4: Fetching market data...")
+        logger.info("Step 1/5: Fetching market data...")
         signals = await _fetch_all()
 
         if not signals:
@@ -103,7 +107,7 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
         logger.info(f"Fetched {len(signals)}/{len(FETCHERS)} signals successfully")
 
         # ── Step 2: Score signals ────────────────────────────────
-        logger.info("Step 2/4: Scoring signals...")
+        logger.info("Step 2/5: Scoring signals...")
 
         # Build cross-signal context for regime-aware scorers.
         # VIX is fetched independently of the signal being scored, so we
@@ -161,7 +165,7 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
             logger.warning("CSP candidate fetch for LLM failed: %s", exc)
 
         # ── Step 3: Synthesize via LLM ───────────────────────────
-        logger.info("Step 3/4: Synthesizing digest...")
+        logger.info("Step 3/5: Synthesizing digest...")
         composite = compute_composite_score(scored_signals)
         posture = determine_posture(composite, scored_signals)
         extreme_count = sum(1 for s in scored_signals if s.extreme)
@@ -260,7 +264,7 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
         logger.info(f"Composite score: {composite:+.3f} | Posture: {posture.value}")
 
         # ── Step 4: Notify ───────────────────────────────────────
-        logger.info("Step 4/4: Sending notification...")
+        logger.info("Step 4/5: Sending notification...")
         if output_mode == "notify":
             # Send signals digest first (keeps ntfy body under attachment threshold)
             await _notify(
@@ -284,6 +288,17 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
                     composite_score=composite,
                     tags="robot",
                 )
+
+        # ── Step 5: Algo-detective options snapshot ──────────────
+        logger.info("Step 5/5: Collecting algo-detective options snapshot...")
+        try:
+            _features = await asyncio.to_thread(_get_detective_features)
+            _prime = sorted({f["ticker"] for f in _features if f["is_prime"] == 1})
+            if _prime:
+                stored = await asyncio.to_thread(fetch_snapshot_pcr, _prime, today.isoformat())
+                logger.info("Options snapshot: %d rows stored for %d prime tickers", stored, len(_prime))
+        except Exception as _exc:
+            logger.warning("Algo-detective options snapshot failed (non-fatal): %s", _exc)
 
         logger.info("✅ Pipeline complete!")
 
@@ -363,6 +378,11 @@ def main() -> None:
 
     logger.info(f"Schedule time configured: {settings.schedule_time}")
     logger.info(f"Run mode: {args.mode} | Output: {args.output}")
+
+    today = datetime.now(ET).date()
+    if args.mode == "scheduled" and not is_trading_day(today):
+        logger.info(f"{today.isoformat()} is not a trading day — skipping scheduled run")
+        return
 
     result = asyncio.run(run_pipeline(output_mode=args.output))
 
