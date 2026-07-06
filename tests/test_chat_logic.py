@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import src.chat as chat_module
 from src.chat import (
     TICKER_SKIP_WORDS,
     build_prompt,
@@ -10,6 +11,7 @@ from src.chat import (
     detect_tickers,
     format_options_block,
     format_screener_block,
+    gather_chat_blocks,
 )
 
 UNIVERSE = {"NVDA", "AAPL", "MSFT", "GOOG", "TSM", "QCOM", "SMCI"}
@@ -226,3 +228,75 @@ class TestFormatOptionsBlock:
         rows = [self._row(), self._row(strike=17.5, bid=0.24, ask=0.26, mid=0.25)]
         block = format_options_block("SOFI", "put", rows)
         assert " | " in block
+
+
+class TestGatherChatBlocks:
+    async def test_no_tickers_returns_empty_list(self):
+        result = await gather_chat_blocks([], "hello")
+        assert result == []
+
+    async def test_screener_only_when_no_options_intent(self, monkeypatch):
+        monkeypatch.setattr(
+            chat_module, "screen_stocks", lambda tickers, persist: [{"price": 17.8}]
+        )
+        called = {"count": 0}
+
+        def _track(*args, **kwargs):
+            called["count"] += 1
+            return []
+
+        monkeypatch.setattr(chat_module, "fetch_options_grid", _track)
+        result = await gather_chat_blocks(["SOFI"], "what do you think about SOFI")
+        assert len(result) == 1
+        assert result[0].startswith("[SOFI")
+        assert called["count"] == 0
+
+    async def test_options_block_appended_when_intent_detected(self, monkeypatch):
+        monkeypatch.setattr(
+            chat_module, "screen_stocks", lambda tickers, persist: [{"price": 17.8}]
+        )
+        monkeypatch.setattr(
+            chat_module,
+            "fetch_options_grid",
+            lambda ticker, price, option_type: [
+                {
+                    "expiration": date(2026, 7, 17),
+                    "dte": 11,
+                    "strike": 17.0,
+                    "bid": 0.19,
+                    "ask": 0.21,
+                    "mid": 0.20,
+                    "spread_pct": 10.0,
+                    "iv": 61.0,
+                    "delta": -0.18,
+                    "volume": 120,
+                }
+            ],
+        )
+        result = await gather_chat_blocks(
+            ["SOFI"], "which strike should I sell a SOFI CSP at"
+        )
+        assert len(result) == 2
+        assert "live puts chain" in result[1]
+
+    async def test_screener_failure_falls_back_to_unavailable_marker(self, monkeypatch):
+        def _raise(tickers, persist):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(chat_module, "screen_stocks", _raise)
+        result = await gather_chat_blocks(["SOFI"], "SOFI CSP")
+        assert result == ["[SOFI: data unavailable]"]
+
+    async def test_no_options_fetch_when_price_missing(self, monkeypatch):
+        monkeypatch.setattr(
+            chat_module, "screen_stocks", lambda tickers, persist: [{"price": "N/A"}]
+        )
+        called = {"count": 0}
+
+        def _track(*args, **kwargs):
+            called["count"] += 1
+            return []
+
+        monkeypatch.setattr(chat_module, "fetch_options_grid", _track)
+        await gather_chat_blocks(["SOFI"], "SOFI CSP strike")
+        assert called["count"] == 0

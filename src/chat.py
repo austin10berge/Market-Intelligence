@@ -6,6 +6,9 @@ import asyncio
 import logging
 import re
 
+from .screener.options_lookup import detect_options_intent, fetch_options_grid
+from .screener.stocks import screen_stocks
+
 logger = logging.getLogger(__name__)
 
 TICKER_SKIP_WORDS: frozenset[str] = frozenset({
@@ -252,6 +255,53 @@ def format_options_block(ticker: str, option_type: str, rows: list[dict]) -> str
         )
 
     return "\n".join(lines)
+
+
+async def gather_chat_blocks(tickers: list[str], message_content: str) -> list[str]:
+    """Fetch screener data, and live options grid data when relevant, per ticker.
+
+    Returns formatted blocks ready for injection via build_prompt(). Options
+    data is only fetched for tickers whose screener call succeeded and
+    returned a usable numeric price — fetch_options_grid() needs the live
+    price to size its strike window — and only when detect_options_intent()
+    finds options-related language in the message.
+    """
+    if not tickers:
+        return []
+
+    blocks: list[str] = []
+    prices: dict[str, float] = {}
+
+    screener_results = await asyncio.gather(
+        *[asyncio.to_thread(screen_stocks, [t], False) for t in tickers],
+        return_exceptions=True,
+    )
+    for ticker, result in zip(tickers, screener_results):
+        if isinstance(result, Exception) or not result:
+            blocks.append(f"[{ticker}: data unavailable]")
+            continue
+        data = result[0]
+        blocks.append(format_screener_block(ticker, data))
+        price = data.get("price")
+        if isinstance(price, int | float) and price > 0:
+            prices[ticker] = float(price)
+
+    options_intent = detect_options_intent(message_content)
+    if options_intent and prices:
+        grid_tickers = list(prices.keys())
+        grid_results = await asyncio.gather(
+            *[
+                asyncio.to_thread(fetch_options_grid, t, prices[t], options_intent)
+                for t in grid_tickers
+            ],
+            return_exceptions=True,
+        )
+        for ticker, rows in zip(grid_tickers, grid_results):
+            if isinstance(rows, Exception):
+                continue
+            blocks.append(format_options_block(ticker, options_intent, rows))
+
+    return blocks
 
 
 def build_prompt(

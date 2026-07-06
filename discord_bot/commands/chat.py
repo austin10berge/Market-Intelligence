@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from src.chat import (
     build_thread_title,
     call_claude_chat,
     detect_tickers,
-    format_screener_block,
+    gather_chat_blocks,
 )
 from src.db import (
     get_stock_watchlist,
@@ -25,7 +24,6 @@ from src.db import (
     save_trade_chat_message,
     set_trade_chat_channel_id,
 )
-from src.screener.stocks import screen_stocks
 from src.synthesis.llm import synthesize
 
 logger = logging.getLogger(__name__)
@@ -130,21 +128,7 @@ class TradeChatCog(commands.Cog):
 
         async with thread.typing():
             tickers = detect_tickers(message.content, self.universe)
-
-            screener_blocks: list[str] = []
-            if tickers:
-                results = await asyncio.gather(
-                    *[
-                        asyncio.to_thread(screen_stocks, [t], False)
-                        for t in tickers
-                    ],
-                    return_exceptions=True,
-                )
-                for ticker, result in zip(tickers, results):
-                    if isinstance(result, Exception) or not result:
-                        screener_blocks.append(f"[{ticker}: data unavailable]")
-                    else:
-                        screener_blocks.append(format_screener_block(ticker, result[0]))
+            screener_blocks = await gather_chat_blocks(tickers, message.content)
 
             history = get_trade_chat_history(thread_id)
             prompt = build_prompt(
