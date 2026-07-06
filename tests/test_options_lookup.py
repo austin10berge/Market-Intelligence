@@ -1,7 +1,20 @@
 """Unit tests for src.screener.options_lookup."""
 from __future__ import annotations
 
-from src.screener.options_lookup import detect_options_intent
+from datetime import date
+
+import httpx
+import pytest
+import respx
+
+from src.config import settings
+from src.screener.options_lookup import detect_options_intent, fetch_options_grid
+
+
+@pytest.fixture(autouse=True)
+def _alpaca_creds(monkeypatch):
+    monkeypatch.setattr(settings, "alpaca_api_key", "test-key")
+    monkeypatch.setattr(settings, "alpaca_api_secret", "test-secret")
 
 
 class TestDetectOptionsIntent:
@@ -72,3 +85,107 @@ class TestDetectOptionsIntent:
     def test_still_match_wheel_full_word(self):
         """'wheel' as a full word should still trigger."""
         assert detect_options_intent("thinking about the wheel on SOFI") == "put"
+
+
+class TestFetchOptionsGrid:
+    @respx.mock
+    def test_parses_put_contract_row(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "SOFI260717P00017000": {
+                            "latestQuote": {"bp": 0.19, "ap": 0.21},
+                            "greeks": {"delta": -0.18},
+                            "impliedVolatility": 0.61,
+                            "dailyBar": {"v": 120},
+                        }
+                    }
+                },
+            )
+        )
+        rows = fetch_options_grid("SOFI", 17.8, "put")
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["strike"] == 17.0
+        assert row["bid"] == 0.19
+        assert row["ask"] == 0.21
+        assert row["mid"] == 0.20
+        assert row["delta"] == -0.18
+        assert row["iv"] == 61.0
+        assert row["volume"] == 120
+        assert row["expiration"] == date(2026, 7, 17)
+
+    @respx.mock
+    def test_filters_out_wrong_option_type(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "SOFI260717C00019000": {
+                            "latestQuote": {"bp": 0.30, "ap": 0.35},
+                        }
+                    }
+                },
+            )
+        )
+        rows = fetch_options_grid("SOFI", 17.8, "put")
+        assert rows == []
+
+    @respx.mock
+    def test_drops_contracts_with_no_live_quote(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            return_value=httpx.Response(
+                200,
+                json={"snapshots": {"SOFI260717P00017000": {"dailyBar": {"v": 5}}}},
+            )
+        )
+        rows = fetch_options_grid("SOFI", 17.8, "put")
+        assert rows == []
+
+    @respx.mock
+    def test_paginates_through_next_page_token(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "snapshots": {
+                            "SOFI260717P00017000": {
+                                "latestQuote": {"bp": 0.19, "ap": 0.21},
+                            }
+                        },
+                        "next_page_token": "abc123",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "snapshots": {
+                            "SOFI260724P00017000": {
+                                "latestQuote": {"bp": 0.29, "ap": 0.31},
+                            }
+                        }
+                    },
+                ),
+            ]
+        )
+        rows = fetch_options_grid("SOFI", 17.8, "put")
+        assert len(rows) == 2
+        assert rows[0]["expiration"] < rows[1]["expiration"]
+
+    @respx.mock
+    def test_network_error_returns_empty_list(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            side_effect=httpx.ConnectError("boom")
+        )
+        assert fetch_options_grid("SOFI", 17.8, "put") == []
+
+    def test_missing_credentials_returns_empty_list(self, monkeypatch):
+        monkeypatch.setattr(settings, "alpaca_api_key", "")
+        assert fetch_options_grid("SOFI", 17.8, "put") == []
+
+    def test_non_positive_price_returns_empty_list(self):
+        assert fetch_options_grid("SOFI", 0.0, "put") == []
