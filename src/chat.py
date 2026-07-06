@@ -216,6 +216,44 @@ def format_screener_block(ticker: str, data: dict) -> str:
     return "\n".join(lines)
 
 
+def format_options_block(ticker: str, option_type: str, rows: list[dict]) -> str:
+    """Render a compact live options grid for injection into the LLM prompt."""
+    from datetime import date
+
+    if not rows:
+        return f"[{ticker}: no options data available]"
+
+    suffix = "C" if option_type == "call" else "P"
+    label = "calls" if option_type == "call" else "puts"
+
+    lines = [f"[{ticker} — live {label} chain, {date.today()}]"]
+
+    by_expiration: dict[date, list[dict]] = {}
+    for row in rows:
+        by_expiration.setdefault(row["expiration"], []).append(row)
+
+    for expiration in sorted(by_expiration):
+        exp_rows = by_expiration[expiration]
+        dte = exp_rows[0]["dte"]
+        contract_parts = []
+        for row in exp_rows:
+            strike_str = f"{row['strike']:g}{suffix}"
+            part = f"{strike_str} {row['bid']:.2f}/{row['ask']:.2f} (mid {row['mid']:.2f})"
+            if row.get("iv") is not None:
+                part += f" IV {row['iv']:.0f}%"
+            if row.get("delta") is not None:
+                part += f" Δ{row['delta']:.2f}"
+            if row.get("spread_pct") is not None and row["spread_pct"] > 20:
+                part += " (wide spread)"
+            contract_parts.append(part)
+        lines.append(
+            f"Exp {expiration.month}/{expiration.day} ({dte} DTE): "
+            + " | ".join(contract_parts)
+        )
+
+    return "\n".join(lines)
+
+
 def build_prompt(
     system_prompt: str,
     history: list[dict],

@@ -1,11 +1,14 @@
 """Unit tests for src.chat — ticker detection, formatting, prompt building."""
 from __future__ import annotations
 
+from datetime import date
+
 from src.chat import (
     TICKER_SKIP_WORDS,
     build_prompt,
     build_thread_title,
     detect_tickers,
+    format_options_block,
     format_screener_block,
 )
 
@@ -156,3 +159,70 @@ class TestBuildPrompt:
     def test_empty_screener_blocks_not_added(self):
         result = build_prompt("sys", [], "Hello?", [])
         assert "live data" not in result
+
+
+class TestFormatOptionsBlock:
+    def _row(self, **overrides) -> dict:
+        base = {
+            "expiration": date(2026, 7, 17),
+            "dte": 11,
+            "strike": 17.0,
+            "bid": 0.19,
+            "ask": 0.21,
+            "mid": 0.20,
+            "spread_pct": 10.0,
+            "iv": 61.0,
+            "delta": -0.18,
+            "volume": 120,
+        }
+        base.update(overrides)
+        return base
+
+    def test_no_rows_returns_unavailable_message(self):
+        assert format_options_block("SOFI", "put", []) == "[SOFI: no options data available]"
+
+    def test_includes_header_with_puts_label(self):
+        block = format_options_block("SOFI", "put", [self._row()])
+        assert block.startswith("[SOFI — live puts chain")
+
+    def test_includes_calls_label_and_suffix(self):
+        block = format_options_block("SOFI", "call", [self._row(strike=19.0)])
+        assert "19C" in block
+        assert "live calls chain" in block
+
+    def test_includes_expiration_and_dte(self):
+        block = format_options_block("SOFI", "put", [self._row()])
+        assert "Exp 7/17 (11 DTE)" in block
+
+    def test_includes_bid_ask_mid(self):
+        block = format_options_block("SOFI", "put", [self._row()])
+        assert "0.19/0.21 (mid 0.20)" in block
+
+    def test_includes_iv_and_delta(self):
+        block = format_options_block("SOFI", "put", [self._row()])
+        assert "IV 61%" in block
+        assert "Δ-0.18" in block
+
+    def test_omits_iv_and_delta_when_missing(self):
+        block = format_options_block("SOFI", "put", [self._row(iv=None, delta=None)])
+        assert "IV" not in block
+        assert "Δ" not in block
+
+    def test_wide_spread_marker_above_threshold(self):
+        block = format_options_block("SOFI", "put", [self._row(spread_pct=25.0)])
+        assert "(wide spread)" in block
+
+    def test_no_wide_spread_marker_below_threshold(self):
+        block = format_options_block("SOFI", "put", [self._row(spread_pct=5.0)])
+        assert "(wide spread)" not in block
+
+    def test_groups_multiple_expirations_on_separate_lines(self):
+        rows = [self._row(), self._row(expiration=date(2026, 7, 24), dte=18, strike=17.5)]
+        block = format_options_block("SOFI", "put", rows)
+        exp_lines = [line for line in block.split("\n") if line.startswith("Exp")]
+        assert len(exp_lines) == 2
+
+    def test_multiple_strikes_same_expiration_joined_with_pipe(self):
+        rows = [self._row(), self._row(strike=17.5, bid=0.24, ask=0.26, mid=0.25)]
+        block = format_options_block("SOFI", "put", rows)
+        assert " | " in block
