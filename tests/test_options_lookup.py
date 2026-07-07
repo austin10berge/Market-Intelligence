@@ -1,14 +1,15 @@
 """Unit tests for src.screener.options_lookup."""
+
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import pytest
 import respx
 
 from src.config import settings
-from src.screener.options_lookup import detect_options_intent, fetch_options_grid
+from src.screener.options_lookup import MIN_DTE, detect_options_intent, fetch_options_grid
 
 
 @pytest.fixture(autouse=True)
@@ -189,3 +190,119 @@ class TestFetchOptionsGrid:
 
     def test_non_positive_price_returns_empty_list(self):
         assert fetch_options_grid("SOFI", 0.0, "put") == []
+
+
+class TestExpirationWindow:
+    @respx.mock
+    def test_expiration_gte_uses_min_dte_floor(self):
+        route = respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            return_value=httpx.Response(200, json={"snapshots": {}})
+        )
+        fetch_options_grid("SOFI", 17.8, "put")
+
+        request = route.calls[0].request
+        params = dict(httpx.QueryParams(request.url.query))
+        expected_gte = (date.today() + timedelta(days=MIN_DTE)).isoformat()
+        assert params["expiration_date_gte"] == expected_gte
+        assert MIN_DTE == 4
+
+
+class TestDeltaFloorTrimming:
+    @respx.mock
+    def test_trims_calls_beyond_delta_floor_but_keeps_boundary_strike(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "SOFI260717C00018000": {
+                            "latestQuote": {"bp": 1.50, "ap": 1.55},
+                            "greeks": {"delta": 0.45},
+                        },
+                        "SOFI260717C00020000": {
+                            "latestQuote": {"bp": 0.60, "ap": 0.65},
+                            "greeks": {"delta": 0.20},
+                        },
+                        "SOFI260717C00022000": {
+                            "latestQuote": {"bp": 0.10, "ap": 0.15},
+                            "greeks": {"delta": 0.08},
+                        },
+                    }
+                },
+            )
+        )
+        rows = fetch_options_grid("SOFI", 17.8, "call")
+        assert [r["strike"] for r in rows] == [18.0, 20.0]
+
+    @respx.mock
+    def test_trims_puts_beyond_delta_floor_but_keeps_boundary_strike(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "SOFI260717P00019000": {
+                            "latestQuote": {"bp": 1.20, "ap": 1.25},
+                            "greeks": {"delta": -0.45},
+                        },
+                        "SOFI260717P00017000": {
+                            "latestQuote": {"bp": 0.55, "ap": 0.60},
+                            "greeks": {"delta": -0.20},
+                        },
+                        "SOFI260717P00015000": {
+                            "latestQuote": {"bp": 0.08, "ap": 0.12},
+                            "greeks": {"delta": -0.05},
+                        },
+                    }
+                },
+            )
+        )
+        rows = fetch_options_grid("SOFI", 20.0, "put")
+        assert [r["strike"] for r in rows] == [17.0, 19.0]
+
+    @respx.mock
+    def test_keeps_all_strikes_when_delta_never_crosses_floor(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "SOFI260717C00018000": {
+                            "latestQuote": {"bp": 1.50, "ap": 1.55},
+                            "greeks": {"delta": 0.45},
+                        },
+                        "SOFI260717C00020000": {
+                            "latestQuote": {"bp": 0.60, "ap": 0.65},
+                            "greeks": {"delta": 0.30},
+                        },
+                    }
+                },
+            )
+        )
+        rows = fetch_options_grid("SOFI", 17.8, "call")
+        assert [r["strike"] for r in rows] == [18.0, 20.0]
+
+    @respx.mock
+    def test_missing_delta_does_not_trigger_early_trim(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/SOFI").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "SOFI260717C00018000": {
+                            "latestQuote": {"bp": 1.50, "ap": 1.55},
+                        },
+                        "SOFI260717C00020000": {
+                            "latestQuote": {"bp": 0.60, "ap": 0.65},
+                            "greeks": {"delta": 0.20},
+                        },
+                        "SOFI260717C00022000": {
+                            "latestQuote": {"bp": 0.10, "ap": 0.15},
+                            "greeks": {"delta": 0.08},
+                        },
+                    }
+                },
+            )
+        )
+        rows = fetch_options_grid("SOFI", 17.8, "call")
+        assert [r["strike"] for r in rows] == [18.0, 20.0]

@@ -15,10 +15,20 @@ from .stocks import (
 
 _CALL_WORDS = frozenset({"call", "calls", "cc", "covered call", "covered calls"})
 _PUT_WORDS = frozenset({"put", "puts", "csp", "csps"})
-_GENERIC_WORDS = frozenset({
-    "wheel", "strike", "strikes", "premium", "expiration", "expiring",
-    "dte", "sell", "option", "options",
-})
+_GENERIC_WORDS = frozenset(
+    {
+        "wheel",
+        "strike",
+        "strikes",
+        "premium",
+        "expiration",
+        "expiring",
+        "dte",
+        "sell",
+        "option",
+        "options",
+    }
+)
 
 _CALL_SHORTHAND_RE = re.compile(r"\b\d{1,4}(?:\.\d+)?c\b", re.IGNORECASE)
 _PUT_SHORTHAND_RE = re.compile(r"\b\d{1,4}(?:\.\d+)?p\b", re.IGNORECASE)
@@ -67,8 +77,12 @@ def detect_options_intent(text: str) -> str | None:
     has_date_shorthand = bool(_DATE_SHORTHAND_RE.search(text))
 
     any_intent = (
-        has_call_word or has_put_word or has_generic_word
-        or has_call_shorthand or has_put_shorthand or has_date_shorthand
+        has_call_word
+        or has_put_word
+        or has_generic_word
+        or has_call_shorthand
+        or has_put_shorthand
+        or has_date_shorthand
     )
     if not any_intent:
         return None
@@ -79,20 +93,26 @@ def detect_options_intent(text: str) -> str | None:
     return "put"
 
 
+MIN_DTE = 4
 MAX_DTE = 47
-STRIKE_RANGE_PUT_LOW = 0.18    # scan puts from close × (1 - 0.18)
-STRIKE_RANGE_PUT_HIGH = 0.02   # to close × (1 + 0.02)
-STRIKE_RANGE_CALL_LOW = 0.02   # scan calls from close × (1 - 0.02)
-STRIKE_RANGE_CALL_HIGH = 0.12  # to close × (1 + 0.12)
+DELTA_FLOOR = 0.20  # trim each expiration's wing once |delta| reaches this
+STRIKE_RANGE_PUT_LOW = 0.40  # scan puts from close × (1 - 0.40)
+STRIKE_RANGE_PUT_HIGH = 0.02  # to close × (1 + 0.02)
+STRIKE_RANGE_CALL_LOW = 0.02  # scan calls from close × (1 - 0.02)
+STRIKE_RANGE_CALL_HIGH = 0.40  # to close × (1 + 0.40)
 _GRID_PAGE_LIMIT = 200
 
 
 def fetch_options_grid(ticker: str, close_price: float, option_type: str) -> list[dict]:
     """Fetch a live grid of near-money option contracts for `ticker`.
 
-    Pulls all `option_type` ("put" or "call") contracts expiring within the
-    next MAX_DTE days, within the strike window used elsewhere in this
-    codebase for CSP/covered-call scanning. Returns one row per contract,
+    Pulls all `option_type` ("put" or "call") contracts expiring between
+    MIN_DTE and MAX_DTE days out. The initial strike window is intentionally
+    wide (STRIKE_RANGE_*) since the strike that reaches DELTA_FLOOR moves
+    further from spot as DTE and IV grow; results are then trimmed per
+    expiration to the actual DELTA_FLOOR crossing (see _trim_to_delta_floor),
+    so the grid reliably reaches a ~0.20-delta strike on both sides without
+    over-returning thin, far-OTM contracts. Returns one row per contract,
     sorted by expiration then strike. Returns [] on any failure, missing
     credentials, or a non-positive close_price.
     """
@@ -117,7 +137,7 @@ def fetch_options_grid(ticker: str, close_price: float, option_type: str) -> lis
         "feed": "indicative",
         "limit": _GRID_PAGE_LIMIT,
         "type": option_type,
-        "expiration_date_gte": (today + timedelta(days=1)).isoformat(),
+        "expiration_date_gte": (today + timedelta(days=MIN_DTE)).isoformat(),
         "expiration_date_lte": (today + timedelta(days=MAX_DTE)).isoformat(),
         "strike_price_gte": round(strike_lo, 2),
         "strike_price_lte": round(strike_hi, 2),
@@ -132,9 +152,7 @@ def fetch_options_grid(ticker: str, close_price: float, option_type: str) -> lis
             if next_page_token:
                 request_params["page_token"] = next_page_token
 
-            response = client.get(
-                f"/v1beta1/options/snapshots/{ticker}", params=request_params
-            )
+            response = client.get(f"/v1beta1/options/snapshots/{ticker}", params=request_params)
             response.raise_for_status()
             payload = response.json()
             snapshots = payload.get("snapshots", {})
@@ -152,8 +170,27 @@ def fetch_options_grid(ticker: str, close_price: float, option_type: str) -> lis
     finally:
         client.close()
 
+    rows = _trim_to_delta_floor(rows, close_price)
     rows.sort(key=lambda r: (r["expiration"], r["strike"]))
     return rows
+
+
+def _trim_to_delta_floor(rows: list[dict], close_price: float) -> list[dict]:
+    """Per expiration, keep contracts out to the first one whose |delta|
+    reaches DELTA_FLOOR moving away from spot, dropping farther-OTM contracts
+    beyond it. Contracts with unknown delta never trigger a cutoff.
+    """
+    by_expiration: dict[date, list[dict]] = {}
+    for row in rows:
+        by_expiration.setdefault(row["expiration"], []).append(row)
+
+    kept: list[dict] = []
+    for exp_rows in by_expiration.values():
+        for row in sorted(exp_rows, key=lambda r: abs(r["strike"] - close_price)):
+            kept.append(row)
+            if row["delta"] is not None and abs(row["delta"]) <= DELTA_FLOOR:
+                break
+    return kept
 
 
 def _parse_snapshot_row(
