@@ -31,6 +31,7 @@ from ..cache import (
     invalidate_market_posture,
     invalidate_screener_cache,
     market_is_open,
+    market_overview_ttl,
     market_status_label,
     scanner_ttl,
     screener_ttl,
@@ -52,7 +53,7 @@ from ..db import (
     update_stock_watchlist,
     update_watchlist,
 )
-from ..fetchers.market_overview import fetch_market_overview
+from ..fetchers.market_overview import fetch_market_overview, has_partial_failure
 from ..main import run_pipeline
 from ..market_data.refresh import refresh_universe
 from ..market_data.store import ensure_tables as ensure_market_data_tables
@@ -318,6 +319,9 @@ async def market_overview_endpoint():
     """Return live market overview: sectors, VIX, GEX, and breadth.
 
     Cached in Redis with a market-hours-aware TTL (same as screener endpoints).
+    If any independent sub-fetch failed, the result is cached for only 60s
+    instead so a transient failure self-heals quickly rather than being
+    stuck for hours. Use DELETE /api/market-overview to force a fresh fetch.
     """
     envelope = await cache_get(KEY_MARKET_OVERVIEW)
     if envelope is not None:
@@ -327,7 +331,7 @@ async def market_overview_endpoint():
 
     try:
         data = await fetch_market_overview()
-        ttl = screener_ttl()
+        ttl = market_overview_ttl(has_partial_failure(data))
         await cache_set(KEY_MARKET_OVERVIEW, data, ttl=ttl)
         now_iso = datetime.now(timezone.utc).isoformat()
         data.update(_cache_meta(None, cached_at=now_iso))
@@ -335,6 +339,13 @@ async def market_overview_endpoint():
     except Exception as e:
         logger.exception("Market overview fetch failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/market-overview")
+async def invalidate_market_overview_cache():
+    """Bust the cached market overview so the next GET performs a fresh fetch."""
+    await cache_delete(KEY_MARKET_OVERVIEW)
+    return {"status": "success"}
 
 
 # ── Screener: CSP ─────────────────────────────────────────────────────────────
