@@ -144,6 +144,34 @@ services:
     profiles:
       - test
 
+  # ── YouTube summary pipeline (runs once then exits, triggered by cron) ───────
+  # Cron entries (LXC host, UTC):
+  #   30 13 * * * cd /home/dev/workspace/Market-Intelligence && docker compose run --rm youtube-summarizer >> /home/dev/workspace/Market-Intelligence/youtube-pipeline/logs/cron.log 2>&1
+  #   30 18 * * * cd /home/dev/workspace/Market-Intelligence && docker compose run --rm youtube-summarizer >> /home/dev/workspace/Market-Intelligence/youtube-pipeline/logs/cron.log 2>&1
+  #   0 23 * * *  cd /home/dev/workspace/Market-Intelligence && docker compose run --rm youtube-summarizer >> /home/dev/workspace/Market-Intelligence/youtube-pipeline/logs/cron.log 2>&1
+  #   30 2 * * *  cd /home/dev/workspace/Market-Intelligence && docker compose run --rm youtube-summarizer >> /home/dev/workspace/Market-Intelligence/youtube-pipeline/logs/cron.log 2>&1
+  # Dry run:
+  #   docker compose run --rm youtube-summarizer python3 main.py --dry-run
+  # Single channel:
+  #   docker compose run --rm youtube-summarizer python3 main.py --channel "Fireship"
+  youtube-summarizer:
+    build:
+      context: .
+      dockerfile: Dockerfile.youtube
+    container_name: market-intelligence-youtube
+    environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_YOUTUBE_WEBHOOK_URL}
+      HOME: /root
+    volumes:
+      - ~/.claude:/root/.claude:ro
+      - /home/dev/.local/bin/claude:/usr/local/bin/claude:ro
+      - ./youtube-pipeline/data:/app/data
+      - ./youtube-pipeline/logs:/app/logs
+      - ./youtube-pipeline/config.yaml:/app/config.yaml:ro
+    restart: "no"
+    profiles:
+      - youtube
+
   # ── Market data refresh (daily OHLCV + fundamentals, profile=refresh) ───────
   # Cron entry (LXC host, ET timezone):
   #   30 16 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm market-data-refresh
