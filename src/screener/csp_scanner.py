@@ -40,6 +40,7 @@ from ..market_data.store import (
     ensure_tables,
 )
 from ..db import get_watchlist
+from ..indicators import compute_adr20_pct
 
 logger = logging.getLogger(__name__)
 
@@ -782,11 +783,8 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
         # ADR20 — average daily range as % of close
         adr20_pct: float | None = None
         if len(hist) >= 20:
-            hi20 = hist["High"].iloc[-20:]
-            lo20 = hist["Low"].iloc[-20:]
-            cl20 = hist["Close"].iloc[-20:]
-            if (cl20 > 0).all():
-                adr20_pct = round(float(((hi20 - lo20) / cl20).mean() * 100), 2)
+            adr20_raw = compute_adr20_pct(hist["High"].iloc[-20:], hist["Low"].iloc[-20:], hist["Close"].iloc[-20:])
+            adr20_pct = round(adr20_raw, 2) if adr20_raw is not None else None
 
         # RSI(14)
         rsi: float | None = None
@@ -928,6 +926,7 @@ def apply_technical_conditions(
             rv20_val = row.get("rv20")
             if rv20_val is not None and rv20_val > params.rv20_max:
                 logger.debug("rv20_max failed for %s: %.1f > %.1f", symbol, rv20_val, params.rv20_max)
+                row["technical_conditions"] = {}
                 continue
 
         # Try local store first (504 trading days ≈ 2y)

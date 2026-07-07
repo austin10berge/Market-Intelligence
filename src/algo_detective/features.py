@@ -6,6 +6,8 @@ import math
 import pandas as pd
 import pandas_ta as ta
 
+from ..indicators import compute_adr20_pct
+
 logger = logging.getLogger(__name__)
 
 _MIN_BARS = 210  # enough for EMA200 + warmup
@@ -111,8 +113,8 @@ def compute_features(
     # ── ADR-20 (20-day average daily range as % of close) ────────────────────
     adr20_pct = None
     if len(df) >= 20:
-        daily_range_pct = (high.iloc[-20:] - low.iloc[-20:]) / close.iloc[-20:]
-        adr20_pct = round(float(daily_range_pct.mean() * 100), 4)
+        adr20_raw = compute_adr20_pct(high.iloc[-20:], low.iloc[-20:], close.iloc[-20:])
+        adr20_pct = round(adr20_raw, 4) if adr20_raw is not None else None
 
     # ── Volume ratio vs 20-day avg (excluding today) ──────────────────────────
     volume_ratio = None

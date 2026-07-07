@@ -727,6 +727,13 @@ class TestRv20MaxGate:
         tickers, _ = apply_technical_conditions(rows, ScannerParams(**_NEUTRAL, rv20_max=45.0))
         assert "TEST" not in tickers
 
+    def test_excluded_row_has_consistent_shape(self):
+        """A row excluded by rv20_max must still get technical_conditions set,
+        like every other exclusion path in apply_technical_conditions."""
+        rows = [{"symbol": "TEST", "rv20": 60.0}]
+        apply_technical_conditions(rows, ScannerParams(**_NEUTRAL, rv20_max=45.0))
+        assert rows[0]["technical_conditions"] == {}
+
     def test_boundary_at_exact_max_passes(self):
         from unittest.mock import MagicMock, patch
         with patch("src.screener.csp_scanner.get_ohlcv", return_value=MagicMock(empty=False)), \

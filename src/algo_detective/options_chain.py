@@ -32,6 +32,7 @@ from datetime import date, timedelta
 import httpx
 
 from ..config import settings
+from ..screener.stocks import _parse_occ_symbol
 from .store import (
     _get_connection,
     ensure_tables,
@@ -226,15 +227,8 @@ def _fetch_snapshots_batch(underlying_symbols: list[str]) -> dict[str, dict]:
 
 def _option_type_from_occ(occ_symbol: str) -> str:
     """Extract 'P' or 'C' from an OCC symbol string."""
-    # OCC format: TICKER(6)YYMMDD(6)TYPE(1)STRIKE(8) = 21+ chars
-    # Find the first P or C after the expiry date (position ≥ ticker_len + 6)
-    for i, ch in enumerate(occ_symbol):
-        if ch in ("P", "C") and i > 0:
-            # Verify: remaining chars are all digits (strike)
-            remaining = occ_symbol[i + 1:]
-            if remaining.isdigit():
-                return ch
-    return "?"
+    parsed = _parse_occ_symbol(occ_symbol)
+    return parsed[1] if parsed is not None else "?"
 
 
 # ── Historical backfill ───────────────────────────────────────────────────────

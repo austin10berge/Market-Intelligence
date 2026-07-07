@@ -14,6 +14,7 @@ from collections import defaultdict
 
 import pandas as pd
 
+from ..indicators import compute_adr20_pct
 from .store import _get_connection, ensure_tables
 from .universe import load_ohlcv_batch_for_date
 
@@ -31,12 +32,8 @@ def _compute_adr20(df: pd.DataFrame, as_of_date: str) -> float | None:
     df = df[df.index <= cutoff]
     if len(df) < 20:
         return None
-    high = df["High"].iloc[-20:]
-    low = df["Low"].iloc[-20:]
-    close = df["Close"].iloc[-20:]
-    if (close == 0).any():
-        return None
-    return round(float(((high - low) / close).mean() * 100), 4)
+    adr = compute_adr20_pct(df["High"].iloc[-20:], df["Low"].iloc[-20:], df["Close"].iloc[-20:])
+    return round(adr, 4) if adr is not None else None
 
 
 def run_backfill() -> None:

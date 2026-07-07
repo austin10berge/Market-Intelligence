@@ -14,6 +14,7 @@ import yfinance as yf
 
 from ..config import settings
 from ..db import get_stock_iv_history, get_stock_watchlist, store_stock_iv_snapshot
+from ..indicators import compute_adr20_pct
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +65,8 @@ def _calculate_adr20(hist: pd.DataFrame) -> float | None:
     """Compute 20-day average daily range as % of close (ADR)."""
     if len(hist) < 20:
         return None
-    high = hist["High"].iloc[-20:]
-    low = hist["Low"].iloc[-20:]
-    close = hist["Close"].iloc[-20:]
-    if (close == 0).any():
-        return None
-    adr = float(((high - low) / close).mean() * 100)
-    return round(adr, 2)
+    adr = compute_adr20_pct(hist["High"].iloc[-20:], hist["Low"].iloc[-20:], hist["Close"].iloc[-20:])
+    return round(adr, 2) if adr is not None else None
 
 
 def _calculate_volume_ratio(hist: pd.DataFrame) -> float | None:
