@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import discord
@@ -29,6 +30,7 @@ from src.synthesis.llm import synthesize
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT_PATH = Path(__file__).parent.parent / "trade_system_prompt.txt"
+_UNIVERSE_TTL_SECONDS = 300  # re-check the watchlist periodically instead of caching forever
 
 
 def _load_system_prompt() -> str:
@@ -55,6 +57,7 @@ class TradeChatCog(commands.Cog):
         self.system_prompt = _load_system_prompt()
         self.trade_channel_id: int | None = None
         self._universe: set[str] | None = None
+        self._universe_loaded_at: float | None = None
 
     async def cog_load(self) -> None:
         channel_id = get_trade_chat_channel_id()
@@ -66,9 +69,13 @@ class TradeChatCog(commands.Cog):
 
     @property
     def universe(self) -> set[str]:
-        """Lazy-load the screener ticker universe for bare-word detection."""
-        if self._universe is None:
+        """Screener ticker universe for bare-word detection, refreshed every
+        _UNIVERSE_TTL_SECONDS so new watchlist tickers show up without a bot restart."""
+        now = time.monotonic()
+        stale = self._universe_loaded_at is None or (now - self._universe_loaded_at) > _UNIVERSE_TTL_SECONDS
+        if stale:
             self._universe = set(get_stock_watchlist())
+            self._universe_loaded_at = now
         return self._universe
 
     @app_commands.command(
