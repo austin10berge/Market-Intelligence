@@ -15,6 +15,10 @@
         conditions: [],
         min_fcf_b: 0, max_debt_to_equity: 2.0, min_revenue_growth: -0.10,
         min_earnings_growth: null, min_dividend_yield: null,
+        max_forward_pe: null, max_dividend_yield: null,
+        rv20_max: null, bb_width_pct_min: null, bb_width_pct_max: null,
+        volume_ratio_max: null, pct_from_52wk_high_max: null,
+        adr20_pct_max: null, price_vs_ema200_pct_min: null,
         restrict_to_watchlist_universe: false, sectors: [],
     };
 
@@ -39,6 +43,7 @@
     // ── Param config — drives badge rendering ─────────────────────────────────────
 
     const PARAM_CONFIG = [
+        // Universe — indices 0–9 (non-nullable, rendered in Universe section)
         { key: 'min_cap',   label: 'Cap >',      suffix: 'B',  min: 1,   max: 500,  step: 1,   decimals: 0 },
         { key: 'max_price', label: 'Price <',    suffix: '$',  min: 10,  max: 500,  step: 5,   decimals: 0, prefix: '$' },
         { key: 'min_beta',  label: 'Beta min',   suffix: '',   min: 0.1, max: 3.0,  step: 0.1, decimals: 1 },
@@ -49,11 +54,22 @@
         { key: 'adx_max',   label: 'ADX ≤',      suffix: '',   min: 0,   max: 100,  step: 1,   decimals: 0 },
         { key: 'dte_min',   label: 'DTE ≥',      suffix: 'd',  min: 1,   max: 90,   step: 1,   decimals: 0 },
         { key: 'dte_max',   label: 'DTE ≤',      suffix: 'd',  min: 1,   max: 180,  step: 1,   decimals: 0 },
-        { key: 'min_fcf_b',          label: 'FCF >',  suffix: 'B',  min: -50,  max: 500,  step: 1,   decimals: 1, nullable: true },
-        { key: 'max_debt_to_equity',  label: 'D/E <',  suffix: '',   min: 0,    max: 500,  step: 1,   decimals: 0, nullable: true },
-        { key: 'min_revenue_growth',  label: 'Rev >',  suffix: '%',  min: -100, max: 100,  step: 1,   decimals: 0, scale: 100, nullable: true },
-        { key: 'min_earnings_growth', label: 'EPS >',  suffix: '%',  min: -100, max: 100,  step: 1,   decimals: 0, scale: 100, nullable: true },
-        { key: 'min_dividend_yield',  label: 'Div >',  suffix: '%',  min: 0,    max: 20,   step: 0.1, decimals: 1, scale: 100, nullable: true },
+        // Fundamentals — indices 10–16 (nullable, some with scale; rendered in Fundamentals section)
+        { key: 'min_fcf_b',           label: 'FCF >',       suffix: 'B',  min: -50,  max: 500,  step: 1,    decimals: 1, nullable: true },
+        { key: 'max_debt_to_equity',  label: 'D/E <',       suffix: '',   min: 0,    max: 500,  step: 1,    decimals: 0, nullable: true },
+        { key: 'min_revenue_growth',  label: 'Rev >',       suffix: '%',  min: -100, max: 100,  step: 1,    decimals: 0, scale: 100, nullable: true },
+        { key: 'min_earnings_growth', label: 'EPS >',       suffix: '%',  min: -100, max: 100,  step: 1,    decimals: 0, scale: 100, nullable: true },
+        { key: 'min_dividend_yield',  label: 'Div Yield >',  suffix: '%', min: 0,    max: 20,   step: 0.1,  decimals: 1, scale: 100, nullable: true },
+        { key: 'max_forward_pe',      label: 'Fwd PE <',    suffix: '',   min: 5,    max: 200,  step: 1,    decimals: 0, nullable: true },
+        { key: 'max_dividend_yield',  label: 'Div Yield <', suffix: '%',  min: 0,    max: 20,   step: 0.1,  decimals: 1, scale: 100, nullable: true },
+        // Technical numeric — indices 17–23 (nullable; rendered in Technical Numeric section)
+        { key: 'rv20_max',                label: 'RV20 <',      suffix: '%', min: 10,  max: 100, step: 1,    decimals: 0, nullable: true },
+        { key: 'bb_width_pct_min',        label: 'BB Width >',  suffix: '%', min: 0,   max: 50,  step: 0.5,  decimals: 1, nullable: true },
+        { key: 'bb_width_pct_max',        label: 'BB Width <',  suffix: '%', min: 0,   max: 100, step: 0.5,  decimals: 1, nullable: true },
+        { key: 'volume_ratio_max',        label: 'Vol Ratio <', suffix: 'x', min: 0.5, max: 5,   step: 0.05, decimals: 2, nullable: true },
+        { key: 'pct_from_52wk_high_max',  label: '52W Below <', suffix: '%', min: 0,   max: 50,  step: 1,    decimals: 0, nullable: true },
+        { key: 'adr20_pct_max',           label: 'ADR20 <',     suffix: '%', min: 0,   max: 20,  step: 0.5,  decimals: 1, nullable: true },
+        { key: 'price_vs_ema200_pct_min', label: 'EMA200 >',    suffix: '%', min: -50, max: 50,  step: 1,    decimals: 0, nullable: true },
     ];
 
     // ── localStorage helpers ──────────────────────────────────────────────────────
@@ -80,6 +96,15 @@
             if (typeof saved.min_revenue_growth  === 'number' || saved.min_revenue_growth  === null) p.min_revenue_growth  = saved.min_revenue_growth;
             if (typeof saved.min_earnings_growth === 'number' || saved.min_earnings_growth === null) p.min_earnings_growth = saved.min_earnings_growth;
             if (typeof saved.min_dividend_yield  === 'number' || saved.min_dividend_yield  === null) p.min_dividend_yield  = saved.min_dividend_yield;
+            if (typeof saved.max_forward_pe      === 'number' || saved.max_forward_pe      === null) p.max_forward_pe      = saved.max_forward_pe;
+            if (typeof saved.max_dividend_yield  === 'number' || saved.max_dividend_yield  === null) p.max_dividend_yield  = saved.max_dividend_yield;
+            if (typeof saved.rv20_max                === 'number' || saved.rv20_max                === null) p.rv20_max                = saved.rv20_max;
+            if (typeof saved.bb_width_pct_min        === 'number' || saved.bb_width_pct_min        === null) p.bb_width_pct_min        = saved.bb_width_pct_min;
+            if (typeof saved.bb_width_pct_max        === 'number' || saved.bb_width_pct_max        === null) p.bb_width_pct_max        = saved.bb_width_pct_max;
+            if (typeof saved.volume_ratio_max        === 'number' || saved.volume_ratio_max        === null) p.volume_ratio_max        = saved.volume_ratio_max;
+            if (typeof saved.pct_from_52wk_high_max  === 'number' || saved.pct_from_52wk_high_max  === null) p.pct_from_52wk_high_max  = saved.pct_from_52wk_high_max;
+            if (typeof saved.adr20_pct_max           === 'number' || saved.adr20_pct_max           === null) p.adr20_pct_max           = saved.adr20_pct_max;
+            if (typeof saved.price_vs_ema200_pct_min === 'number' || saved.price_vs_ema200_pct_min === null) p.price_vs_ema200_pct_min = saved.price_vs_ema200_pct_min;
             if (Array.isArray(saved.conditions)) p.conditions = saved.conditions;
             if (typeof saved.restrict_to_watchlist_universe === 'boolean') p.restrict_to_watchlist_universe = saved.restrict_to_watchlist_universe;
             if (Array.isArray(saved.sectors)) p.sectors = saved.sectors;
@@ -140,6 +165,15 @@
         if (p.min_revenue_growth  !== null && p.min_revenue_growth  !== undefined) qs.set('min_revenue_growth',  p.min_revenue_growth);
         if (p.min_earnings_growth !== null && p.min_earnings_growth !== undefined) qs.set('min_earnings_growth', p.min_earnings_growth);
         if (p.min_dividend_yield  !== null && p.min_dividend_yield  !== undefined) qs.set('min_dividend_yield',  p.min_dividend_yield);
+        if (p.max_forward_pe      !== null && p.max_forward_pe      !== undefined) qs.set('max_forward_pe',      p.max_forward_pe);
+        if (p.max_dividend_yield  !== null && p.max_dividend_yield  !== undefined) qs.set('max_dividend_yield',  p.max_dividend_yield);
+        if (p.rv20_max                !== null && p.rv20_max                !== undefined) qs.set('rv20_max',                p.rv20_max);
+        if (p.bb_width_pct_min        !== null && p.bb_width_pct_min        !== undefined) qs.set('bb_width_pct_min',        p.bb_width_pct_min);
+        if (p.bb_width_pct_max        !== null && p.bb_width_pct_max        !== undefined) qs.set('bb_width_pct_max',        p.bb_width_pct_max);
+        if (p.volume_ratio_max        !== null && p.volume_ratio_max        !== undefined) qs.set('volume_ratio_max',        p.volume_ratio_max);
+        if (p.pct_from_52wk_high_max  !== null && p.pct_from_52wk_high_max  !== undefined) qs.set('pct_from_52wk_high_max',  p.pct_from_52wk_high_max);
+        if (p.adr20_pct_max           !== null && p.adr20_pct_max           !== undefined) qs.set('adr20_pct_max',           p.adr20_pct_max);
+        if (p.price_vs_ema200_pct_min !== null && p.price_vs_ema200_pct_min !== undefined) qs.set('price_vs_ema200_pct_min', p.price_vs_ema200_pct_min);
         if (_state.params.restrict_to_watchlist_universe) qs.set('restrict_to_watchlist_universe', 'true');
         if (_state.params.sectors && _state.params.sectors.length) qs.set('sectors', _state.params.sectors.join(','));
         return qs.toString();
@@ -421,8 +455,8 @@
             </div>`;
         }).join('');
 
-        // Fundamentals inputs (PARAM_CONFIG[10..14]) — apply scale for display
-        const fundFields = PARAM_CONFIG.slice(10).map(cfg => {
+        // Fundamentals inputs (PARAM_CONFIG[10..16]) — apply scale for display
+        const _nullableField = cfg => {
             const raw = p[cfg.key];
             const val = raw == null ? '' : raw * (cfg.scale || 1);
             return `<div class="scn-field">
@@ -432,7 +466,9 @@
                     min="${cfg.min}" max="${cfg.max}" step="${cfg.step}"
                     placeholder="any">
             </div>`;
-        }).join('');
+        };
+        const fundFields     = PARAM_CONFIG.slice(10, 17).map(_nullableField).join('');
+        const techNumFields  = PARAM_CONFIG.slice(17).map(_nullableField).join('');
 
         // Condition chips
         const condChips = _state.availableConditions.map(cond => {
@@ -465,6 +501,10 @@
                 <div class="scn-sheet-section">
                     <div class="scn-sheet-section-title">Fundamentals</div>
                     ${fundFields}
+                </div>
+                <div class="scn-sheet-section">
+                    <div class="scn-sheet-section-title">Technical Numeric</div>
+                    ${techNumFields}
                 </div>
                 <div class="scn-sheet-section">
                     <div class="scn-sheet-section-title">Technical Conditions</div>
