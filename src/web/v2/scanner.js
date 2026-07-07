@@ -112,7 +112,11 @@
     }
 
     function _persistParams() {
-        try { window.localStorage.setItem(SCANNER_PARAMS_KEY, JSON.stringify(_state.params)); } catch {}
+        try {
+            const raw = window.localStorage.getItem(SCANNER_PARAMS_KEY);
+            const existing = raw ? JSON.parse(raw) : {};
+            window.localStorage.setItem(SCANNER_PARAMS_KEY, JSON.stringify({ ...existing, ..._state.params }));
+        } catch {}
     }
 
     // ── State-only data loaders (no DOM writes) ───────────────────────────────────

@@ -73,7 +73,12 @@ const _state = {
 
 function _persistParams() {
     try {
-        window.localStorage.setItem(SCANNER_PARAMS_KEY, JSON.stringify(_state.params));
+        // Merge onto whatever is already stored so fields this page has no UI
+        // for (e.g. the v2 scanner's technical-numeric gates) survive a save
+        // made from this page, instead of being silently wiped.
+        const raw = window.localStorage.getItem(SCANNER_PARAMS_KEY);
+        const existing = raw ? JSON.parse(raw) : {};
+        window.localStorage.setItem(SCANNER_PARAMS_KEY, JSON.stringify({ ...existing, ..._state.params }));
     } catch { /* storage unavailable — ignore */ }
 }
 
