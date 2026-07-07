@@ -217,6 +217,29 @@ def test_upsert_options_coalesces_null_pcr_without_clobbering_existing():
     assert stored["pcr_oi"] == 0.8
 
 
+def test_upsert_options_coalesces_null_iv_without_clobbering_existing():
+    """A retried snapshot fetch that comes back empty/partial for a ticker
+    (best_iv/best_volume/occ_symbol all None) must not erase IV data a
+    previous successful snapshot already stored."""
+    ensure_tables()
+    ticker = "AAPL"
+    upsert_options_rows(
+        [_make_options_row(ticker=ticker, best_iv=0.55, best_volume=1000, occ_symbol="AAPL260101C00100000")]
+    )
+
+    # Retry after a partial-failure batch: IV fields come back None
+    upsert_options_rows(
+        [_make_options_row(ticker=ticker, best_iv=None, best_volume=None, occ_symbol=None, pcr_vol=1.3, pcr_oi=0.9)]
+    )
+
+    stored = get_options_index()[("2026-06-18", ticker)]
+    assert stored["best_iv"] == 0.55
+    assert stored["best_volume"] == 1000
+    assert stored["occ_symbol"] == "AAPL260101C00100000"
+    assert stored["pcr_vol"] == 1.3
+    assert stored["pcr_oi"] == 0.9
+
+
 def test_upsert_options_rows_idempotent():
     ensure_tables()
     row = _make_options_row(ticker="GOOG")

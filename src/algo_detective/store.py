@@ -263,9 +263,9 @@ def upsert_options_rows(rows: list[dict]) -> int:
             VALUES (:date, :ticker, :best_iv, :best_volume, :occ_symbol,
                     :pcr_vol, :pcr_oi)
             ON CONFLICT(date, ticker) DO UPDATE SET
-                best_iv = excluded.best_iv,
-                best_volume = excluded.best_volume,
-                occ_symbol = excluded.occ_symbol,
+                best_iv = COALESCE(excluded.best_iv, detective_options.best_iv),
+                best_volume = COALESCE(excluded.best_volume, detective_options.best_volume),
+                occ_symbol = COALESCE(excluded.occ_symbol, detective_options.occ_symbol),
                 pcr_vol = COALESCE(excluded.pcr_vol, detective_options.pcr_vol),
                 pcr_oi  = COALESCE(excluded.pcr_oi,  detective_options.pcr_oi)
             """,
