@@ -48,12 +48,9 @@ def is_trading_day(d: date) -> bool:
 
 
 def market_is_open() -> bool:
-    """Return True if US equities market is currently open (Mon–Fri, 9:30–16:00 ET).
-
-    Does NOT account for market holidays — weekday schedule is sufficient for this use case.
-    """
+    """Return True if US equities market is currently open (trading day, 9:30–16:00 ET)."""
     now = datetime.now(ET)
-    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+    if not is_trading_day(now.date()):
         return False
     t = (now.hour, now.minute)
     return MARKET_OPEN <= t < MARKET_CLOSE
@@ -78,8 +75,8 @@ def seconds_until_next_open() -> int:
     if candidate <= now:
         candidate += timedelta(days=1)
 
-    # Skip Saturday (5) and Sunday (6)
-    while candidate.weekday() >= 5:
+    # Skip weekends and NYSE holidays
+    while not is_trading_day(candidate.date()):
         candidate += timedelta(days=1)
 
     delta = (candidate - now).total_seconds()
@@ -99,6 +96,20 @@ def screener_ttl() -> int:
     secs = seconds_until_next_open()
     four_hours = 4 * 3600
     return min(secs, four_hours)
+
+
+def market_overview_ttl(has_partial_failure: bool) -> int:
+    """TTL (seconds) for the market-overview cache entry.
+
+    If any independent sub-fetch (sectors, VIX, GEX, breadth, themes) failed,
+    cache briefly (60s) so a transient failure self-heals on the next request
+    instead of being locked in for up to 4 hours via screener_ttl() when the
+    market is closed. On a full success, use the same market-hours-aware TTL
+    as other screener endpoints.
+    """
+    if has_partial_failure:
+        return 60
+    return screener_ttl()
 
 
 def scanner_ttl() -> int:

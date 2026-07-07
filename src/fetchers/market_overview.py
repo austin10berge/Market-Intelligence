@@ -347,6 +347,18 @@ async def _fetch_themes() -> dict:
     return {"singles": singles, "baskets": baskets}
 
 
+_INDEPENDENT_FETCH_FIELDS = ("sectors", "vix", "gex", "breadth", "themes")
+
+
+def has_partial_failure(data: dict) -> bool:
+    """Return True if any independent sub-fetch in a market-overview payload failed.
+
+    Excludes 'rotation', which is derived from sectors and can legitimately
+    be None (no clear defensive/cyclical split) even when every fetch succeeds.
+    """
+    return any(data.get(field) is None for field in _INDEPENDENT_FETCH_FIELDS)
+
+
 async def fetch_market_overview() -> dict:
     sectors_res, vix_res, gex_res, breadth_res, themes_res = await asyncio.gather(
         _fetch_sectors(),

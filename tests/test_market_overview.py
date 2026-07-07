@@ -20,6 +20,7 @@ from src.fetchers.market_overview import (
     _gex_bucket,
     _gex_trend,
     fetch_market_overview,
+    has_partial_failure,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -455,3 +456,40 @@ class TestCoordinator:
         assert result["vix"] is None
         assert result["gex"] is None
         assert result["breadth"] is None
+
+
+# ── has_partial_failure ───────────────────────────────────────────────────────
+
+class TestHasPartialFailure:
+    def _full_success(self, **overrides) -> dict:
+        data = {
+            "sectors": {"XLK": {}}, "rotation": "Neutral (no clear rotation)",
+            "vix": {"spot": 18.4}, "gex": {"value_b": 7.0},
+            "breadth": {"pct_above_200ma": 60.0}, "themes": {"singles": {}},
+        }
+        data.update(overrides)
+        return data
+
+    def test_false_when_everything_succeeded(self):
+        assert has_partial_failure(self._full_success()) is False
+
+    def test_true_when_vix_failed(self):
+        assert has_partial_failure(self._full_success(vix=None)) is True
+
+    def test_true_when_sectors_failed(self):
+        assert has_partial_failure(self._full_success(sectors=None)) is True
+
+    def test_true_when_themes_failed(self):
+        assert has_partial_failure(self._full_success(themes=None)) is True
+
+    def test_true_when_everything_failed(self):
+        data = {
+            "sectors": None, "rotation": None, "vix": None,
+            "gex": None, "breadth": None, "themes": None,
+        }
+        assert has_partial_failure(data) is True
+
+    def test_null_rotation_alone_is_not_a_failure(self):
+        """rotation can legitimately be None (no clear sector split) even
+        when every independent fetch succeeded — must not count as a failure."""
+        assert has_partial_failure(self._full_success(rotation=None)) is False
