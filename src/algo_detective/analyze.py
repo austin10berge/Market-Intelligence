@@ -193,6 +193,48 @@ def _apply_criteria(row: dict, criteria: dict) -> bool:
                 rsi = row.get("rsi")
                 if rsi is not None and rsi > val:
                     return False
+        elif key == "industrials_rsi_max":
+            if row.get("sector") == "Industrials":
+                rsi = row.get("rsi")
+                if rsi is not None and rsi > val:
+                    return False
+        elif key == "healthcare_rsi_max":
+            if row.get("sector") == "Healthcare":
+                rsi = row.get("rsi")
+                if rsi is not None and rsi > val:
+                    return False
+        elif key == "price_vs_ema200_pct_min":
+            # Defer to CC-specific override when present; apply globally otherwise.
+            if (
+                row.get("sector") == "Consumer Cyclical"
+                and "consumer_cyclical_price_vs_ema200_pct_min" in criteria
+            ):
+                pass  # handled by the CC-specific key below
+            else:
+                v = row.get("price_vs_ema200_pct")
+                if v is None or v < val:
+                    return False
+        elif key == "consumer_cyclical_price_vs_ema200_pct_min":
+            if row.get("sector") == "Consumer Cyclical":
+                v = row.get("price_vs_ema200_pct")
+                if v is None or v < val:
+                    return False
+        elif key == "price_vs_sma150_pct_min":
+            # Defer to CC-specific override when present; apply globally otherwise.
+            if (
+                row.get("sector") == "Consumer Cyclical"
+                and "consumer_cyclical_price_vs_sma150_pct_min" in criteria
+            ):
+                pass  # handled by the CC-specific key below
+            else:
+                v = row.get("price_vs_sma150_pct")
+                if v is None or v < val:
+                    return False
+        elif key == "consumer_cyclical_price_vs_sma150_pct_min":
+            if row.get("sector") == "Consumer Cyclical":
+                v = row.get("price_vs_sma150_pct")
+                if v is None or v < val:
+                    return False
         elif key.endswith("_min"):
             feat = key[:-4]
             if row.get(feat) is None or row[feat] < val:

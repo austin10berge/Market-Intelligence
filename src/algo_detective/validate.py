@@ -7,16 +7,34 @@ from collections import Counter
 from pathlib import Path
 
 from .analyze import _apply_criteria
-from .store import get_all_features
+from .store import _get_connection, get_all_features, get_options_index
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def validate_criteria(criteria: dict, features: list[dict] | None = None) -> dict:
-    """Score a criteria dict against detective_features. Returns precision/recall report."""
+def validate_criteria(
+    criteria: dict,
+    features: list[dict] | None = None,
+    join_options: bool = False,
+) -> dict:
+    """Score a criteria dict against detective_features. Returns precision/recall report.
+
+    Args:
+        join_options: If True (or if criteria contains 'options_iv_min'), merge
+            detective_options data (best_iv) into each feature row before evaluation.
+    """
     if features is None:
         features = get_all_features()
+
+    needs_options = join_options or "options_iv_min" in criteria
+    if needs_options:
+        options_idx = get_options_index()
+        enriched = []
+        for f in features:
+            opt = options_idx.get((f["date"], f["ticker"]), {})
+            enriched.append({**f, "best_iv": opt.get("best_iv")})
+        features = enriched
 
     prime = [f for f in features if f["is_prime"] == 1]
     control = [f for f in features if f["is_prime"] == 0]
@@ -73,12 +91,30 @@ def print_report(report: dict) -> None:
     print()
 
 
+def _get_sp500_features() -> list[dict]:
+    features = get_all_features()
+    conn = _get_connection()
+    try:
+        sp500 = {r["symbol"] for r in conn.execute(
+            "SELECT symbol FROM universe_fundamentals WHERE universes LIKE '%sp500%'"
+        ).fetchall()}
+    finally:
+        conn.close()
+    return [f for f in features if f["is_prime"] == 1 or f["ticker"] in sp500]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate criteria against the feature matrix")
     parser.add_argument(
         "--criteria",
         required=True,
         help='JSON string or path to .json file. E.g. \'{"rsi_min": 42, "price_above_ema50": true}\'',
+    )
+    parser.add_argument(
+        "--universe",
+        choices=["sp500", "full"],
+        default="sp500",
+        help="Universe to evaluate against (default: sp500)",
     )
     args = parser.parse_args()
 
@@ -88,5 +124,6 @@ if __name__ == "__main__":
     else:
         criteria = json.loads(criteria_input)
 
-    report = validate_criteria(criteria)
+    features = _get_sp500_features() if args.universe == "sp500" else None
+    report = validate_criteria(criteria, features=features)
     print_report(report)
