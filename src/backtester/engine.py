@@ -38,8 +38,11 @@ class OpenPosition:
     entry_underlying_price: float
     shares: float
     entry_bar_idx: int
-    highest_since_entry: float = 0.0  # For trailing stop (long)
+    highest_since_entry: float = 0.0  # For trailing stop (long) — tracks option price for options
     lowest_since_entry: float = float("inf")  # For trailing stop (short)
+    # Underlying price highs/lows — used for pyramiding pullback reference
+    highest_underlying_since_entry: float = 0.0
+    lowest_underlying_since_entry: float = float("inf")
     # Options data
     is_option: bool = False
     option_type: str | None = None
@@ -102,8 +105,10 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
 
             if pos.direction == "long":
                 pos.highest_since_entry = max(pos.highest_since_entry, pos_high)
+                pos.highest_underlying_since_entry = max(pos.highest_underlying_since_entry, high)
             else:
                 pos.lowest_since_entry = min(pos.lowest_since_entry, pos_low)
+                pos.lowest_underlying_since_entry = min(pos.lowest_underlying_since_entry, low)
 
             reason = _check_exit(pos, exit_config, exit_tree, df, i, close, pos_high, pos_low)
             
@@ -151,28 +156,43 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
 
         # Check entry
         can_enter = True
+        scale_in_active = False  # True when we're adding to an existing position
         if state.positions:
             if not pyr.enabled or len(state.positions) >= pyr.max_positions:
                 can_enter = False
             else:
+                scale_in_active = True
                 last_pos = state.positions[-1]
-                if pyr.scale_in_trigger == "pullback" and pyr.scale_in_value:
-                    ref_price = last_pos.entry_underlying_price if last_pos.is_option else last_pos.entry_price
-                    if strategy.direction in (Direction.LONG, Direction.BOTH):
-                        drop = ((ref_price - close) / ref_price) * 100
-                        if drop < pyr.scale_in_value:
-                            can_enter = False
+                trigger = pyr.trigger_mode  # "pullback_only", "entry_signal", "both"
+
+                if trigger in ("pullback_only", "both"):
+                    if pyr.pullback_pct is None:
+                        can_enter = False
                     else:
-                        rise = ((close - ref_price) / ref_price) * 100
-                        if rise < pyr.scale_in_value:
-                            can_enter = False
-                elif pyr.scale_in_trigger == "entry_signal":
-                    # Must evaluate tree again
-                    pass
+                        # Determine reference price from the underlying (not the option price)
+                        if pyr.pullback_reference == "rolling":
+                            ref_long = last_pos.highest_underlying_since_entry
+                            ref_short = last_pos.lowest_underlying_since_entry
+                        else:  # "entry"
+                            ref_long = last_pos.entry_underlying_price
+                            ref_short = last_pos.entry_underlying_price
+
+                        if strategy.direction in (Direction.LONG, Direction.BOTH):
+                            drop = ((ref_long - close) / ref_long * 100) if ref_long > 0 else 0.0
+                            if drop < pyr.pullback_pct:
+                                can_enter = False
+                        else:
+                            rise = ((close - ref_short) / ref_short * 100) if ref_short > 0 else 0.0
+                            if rise < pyr.pullback_pct:
+                                can_enter = False
 
         if can_enter:
-            if state.positions and pyr.enabled and pyr.scale_in_trigger == "pullback":
-                # Unconditional scale-in based strictly on the pullback drop
+            # For pure pullback-only scale-ins, skip re-evaluating the entry signal
+            is_pullback_scalein = (
+                scale_in_active
+                and pyr.trigger_mode == "pullback_only"
+            )
+            if is_pullback_scalein:
                 should_enter_long = strategy.direction in (Direction.LONG, Direction.BOTH)
                 should_enter_short = strategy.direction in (Direction.SHORT, Direction.BOTH)
             else:
@@ -340,6 +360,8 @@ def _open_position(
             entry_bar_idx=bar_idx,
             highest_since_entry=init_high,
             lowest_since_entry=init_low,
+            highest_underlying_since_entry=float(df["High"].iloc[bar_idx]),
+            lowest_underlying_since_entry=float(df["Low"].iloc[bar_idx]),
             is_option=True,
             option_type=opt_conf.type,
             option_strike=strike,
@@ -356,6 +378,8 @@ def _open_position(
             entry_bar_idx=bar_idx,
             highest_since_entry=float(df["High"].iloc[bar_idx]),
             lowest_since_entry=float(df["Low"].iloc[bar_idx]),
+            highest_underlying_since_entry=float(df["High"].iloc[bar_idx]),
+            lowest_underlying_since_entry=float(df["Low"].iloc[bar_idx]),
         )
 
     state.positions.append(pos)

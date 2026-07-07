@@ -146,10 +146,12 @@ class OptionsConfig(BaseModel):
 class PyramidingConfig(BaseModel):
     enabled: bool = False
     max_positions: int = 1
-    # If "entry_signal", we buy again if the entry tree evaluates to True on a new bar.
-    # If "pullback", we buy again if price drops X% from the last fill price.
-    scale_in_trigger: str = "entry_signal"  
-    scale_in_value: float | None = None  # e.g., 10.0 for 10% pullback
+    # "pullback_only" — scale in when underlying drops pullback_pct% from reference
+    # "entry_signal"  — scale in when entry conditions fire again
+    # "both"          — both pullback AND entry signal must be true
+    trigger_mode: str = "entry_signal"
+    pullback_pct: float | None = None       # e.g. 20.0 for 20% pullback
+    pullback_reference: str = "entry"       # "entry" or "rolling"
 
 
 # ── Strategy Definition ──────────────────────────────────────────────────────

@@ -229,7 +229,7 @@
           <span class="scn-field-label">Trigger Mode</span>
           <select id="bkt-pyr-trigger-mode" class="scn-field-input" onchange="BacktesterView._updatePyrFieldVisibility()">
             <option value="pullback_only">Pullback Only</option>
-            <option value="signal_only">Entry Signal</option>
+            <option value="entry_signal">Entry Signal</option>
             <option value="both">Both</option>
           </select>
         </div>
@@ -518,7 +518,7 @@
         if (pyrOn) {
             const max = document.getElementById('bkt-pyr-max')?.value;
             if (pyrMode === 'pullback_only') pyrPhrase = `scale-in ×${max} on ${pullbackPct}% pullbacks`;
-            else if (pyrMode === 'signal_only') pyrPhrase = `scale-in ×${max} on entry signal`;
+            else if (pyrMode === 'entry_signal') pyrPhrase = `scale-in ×${max} on entry signal`;
             else pyrPhrase = `scale-in ×${max} on pullbacks + signal`;
         }
         summaryEl.innerHTML = `<strong>${ticker}</strong> · ${assetLabel} · ${pyrPhrase}`;
@@ -1219,7 +1219,7 @@
         if (pyrEnabled) pyrEnabled.checked = !!pyr.enabled;
         if (pyr.max_positions != null) { const el = document.getElementById('bkt-pyr-max'); if (el) el.value = pyr.max_positions; }
         let triggerMode = pyr.trigger_mode;
-        if (!triggerMode && pyr.scale_in_trigger) triggerMode = pyr.scale_in_trigger === 'pullback' ? 'pullback_only' : 'signal_only';
+        if (!triggerMode && pyr.scale_in_trigger) triggerMode = pyr.scale_in_trigger === 'pullback' ? 'pullback_only' : 'entry_signal';
         if (triggerMode) { const el = document.getElementById('bkt-pyr-trigger-mode'); if (el) el.value = triggerMode; }
         const pullbackPct = pyr.pullback_pct ?? pyr.scale_in_value;
         if (pullbackPct != null) { const el = document.getElementById('bkt-pyr-pullback-pct'); if (el) el.value = pullbackPct; }

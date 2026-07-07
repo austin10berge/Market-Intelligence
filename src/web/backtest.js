@@ -408,8 +408,9 @@ function buildStrategyPayload() {
         pyramiding: {
             enabled: document.getElementById("pyr-enabled").checked,
             max_positions: parseInt(document.getElementById("pyr-max").value) || 3,
-            scale_in_trigger: document.getElementById("pyr-trigger").value,
-            scale_in_value: parseFloat(document.getElementById("pyr-value").value) || null
+            trigger_mode: document.getElementById("pyr-trigger").value === "pullback" ? "pullback_only" : "entry_signal",
+            pullback_pct: parseFloat(document.getElementById("pyr-value").value) || null,
+            pullback_reference: "entry"
         },
         direction: "long"
     };
