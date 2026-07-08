@@ -633,14 +633,19 @@ def save_trade_chat_message(thread_id: str, role: str, content: str) -> None:
         conn.close()
 
 
-def get_trade_chat_history(thread_id: str) -> list[dict]:
-    """Return all messages for a thread in chronological order."""
+_TRADE_CHAT_HISTORY_LIMIT = 40  # cap LLM prompt growth on long-running threads
+
+
+def get_trade_chat_history(thread_id: str, limit: int = _TRADE_CHAT_HISTORY_LIMIT) -> list[dict]:
+    """Return the most recent `limit` messages for a thread, in chronological order."""
     conn = _get_connection()
     try:
         rows = conn.execute(
-            "SELECT role, content FROM trade_chat_history"
-            " WHERE thread_id = ? ORDER BY id ASC",
-            (thread_id,),
+            "SELECT role, content FROM ("
+            "  SELECT id, role, content FROM trade_chat_history"
+            "  WHERE thread_id = ? ORDER BY id DESC LIMIT ?"
+            ") ORDER BY id ASC",
+            (thread_id, limit),
         ).fetchall()
         return [{"role": row["role"], "content": row["content"]} for row in rows]
     finally:

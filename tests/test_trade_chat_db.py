@@ -73,6 +73,24 @@ def test_history_isolated_by_thread_id():
     assert len(get_trade_chat_history("thread_y")) == 1
 
 
+def test_history_is_capped_to_most_recent_messages():
+    """A long-running thread must not grow the LLM prompt unbounded — only
+    the most recent `limit` messages come back, still in chronological order."""
+    for i in range(50):
+        save_trade_chat_message("long_thread", "user", f"message {i}")
+    history = get_trade_chat_history("long_thread", limit=10)
+    assert len(history) == 10
+    assert history[0]["content"] == "message 40"
+    assert history[-1]["content"] == "message 49"
+
+
+def test_history_default_limit_covers_small_threads_fully():
+    for i in range(5):
+        save_trade_chat_message("short_thread", "user", f"message {i}")
+    history = get_trade_chat_history("short_thread")
+    assert len(history) == 5
+
+
 def test_is_trade_chat_thread_returns_false_for_new_thread():
     assert is_trade_chat_thread("brand_new_thread") is False
 
