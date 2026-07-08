@@ -109,6 +109,13 @@ class TradeChatCog(commands.Cog):
             not isinstance(channel, discord.Thread)
             and channel.id == self.trade_channel_id
         ):
+            if is_trade_chat_thread(str(channel.id)):
+                # An earlier create_thread() call for this channel already failed
+                # and fell back to replying directly in it — keep using that
+                # fallback session instead of retrying create_thread (which would
+                # just orphan the history saved under this channel's id again).
+                await self._handle_message(channel, message)  # type: ignore[arg-type]
+                return
             try:
                 thread = await message.create_thread(
                     name=build_thread_title(message.content, self.universe),
