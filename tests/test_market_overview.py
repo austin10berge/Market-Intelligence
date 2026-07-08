@@ -13,6 +13,7 @@ import pytest
 import respx  # noqa: F401
 
 from src.fetchers.market_overview import (
+    SECTOR_ETFS,
     _fetch_breadth,
     _fetch_gex,
     _fetch_sectors,
@@ -463,7 +464,8 @@ class TestCoordinator:
 class TestHasPartialFailure:
     def _full_success(self, **overrides) -> dict:
         data = {
-            "sectors": {"XLK": {}}, "rotation": "Neutral (no clear rotation)",
+            "sectors": {ticker: {} for ticker in SECTOR_ETFS},
+            "rotation": "Neutral (no clear rotation)",
             "vix": {"spot": 18.4}, "gex": {"value_b": 7.0},
             "breadth": {"pct_above_200ma": 60.0}, "themes": {"singles": {}},
         }
@@ -478,6 +480,12 @@ class TestHasPartialFailure:
 
     def test_true_when_sectors_failed(self):
         assert has_partial_failure(self._full_success(sectors=None)) is True
+
+    def test_true_when_sectors_partially_missing(self):
+        """A sectors dict that isn't None but is short a few tickers (e.g. a
+        partial yfinance batch-download failure) must still count as a
+        partial failure so it gets the short self-healing TTL."""
+        assert has_partial_failure(self._full_success(sectors={"XLK": {}, "XLV": {}})) is True
 
     def test_true_when_themes_failed(self):
         assert has_partial_failure(self._full_success(themes=None)) is True

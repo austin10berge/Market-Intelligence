@@ -355,8 +355,18 @@ def has_partial_failure(data: dict) -> bool:
 
     Excludes 'rotation', which is derived from sectors and can legitimately
     be None (no clear defensive/cyclical split) even when every fetch succeeds.
+
+    A `sectors` dict with fewer than all expected tickers also counts as a
+    partial failure — _fetch_sectors() skips individual tickers it can't parse
+    out of the batch download rather than failing the whole fetch, so a
+    short-staffed sectors payload wouldn't otherwise be caught here.
     """
-    return any(data.get(field) is None for field in _INDEPENDENT_FETCH_FIELDS)
+    if any(data.get(field) is None for field in _INDEPENDENT_FETCH_FIELDS):
+        return True
+    sectors = data.get("sectors")
+    if isinstance(sectors, dict) and len(sectors) < len(SECTOR_ETFS):
+        return True
+    return False
 
 
 async def fetch_market_overview() -> dict:
