@@ -71,9 +71,9 @@ def _calculate_adr20(hist: pd.DataFrame) -> float | None:
 
 def _calculate_volume_ratio(hist: pd.DataFrame) -> float | None:
     """Compute current day volume relative to 20-day average volume."""
-    if len(hist) < 20:
+    if len(hist) < 21:
         return None
-    avg_vol_20d = hist["Volume"].iloc[-20:-1].mean()
+    avg_vol_20d = hist["Volume"].iloc[-21:-1].mean()
     current_vol = hist["Volume"].iloc[-1]
     if pd.isna(avg_vol_20d) or avg_vol_20d <= 0 or pd.isna(current_vol):
         return None
@@ -792,6 +792,12 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 high_52wk = _to_float(info.get("fiftyTwoWeekHigh"))
                 pct_from_52wk_high_val: float | None = None
                 if high_52wk and high_52wk > 0 and not pd.isna(current_price):
+                    # NOTE: negative = below high, positive = above high — this is
+                    # the opposite sign convention from csp_scanner.py/features.py's
+                    # pct_from_52wk_high (positive = below high), by design: this
+                    # value only feeds chat.py's signed "+/-X.X%" human-readable
+                    # display. Do not wire this field into a pct_from_52wk_high_max
+                    # gate without flipping the sign to match the scanner convention.
                     pct_from_52wk_high_val = round(
                         ((float(current_price) - high_52wk) / high_52wk) * 100, 1
                     )

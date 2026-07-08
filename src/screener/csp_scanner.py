@@ -773,7 +773,9 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
             if avg_vol_20 > 0 and last_vol >= 0:
                 volume_ratio = round(last_vol / avg_vol_20, 3)
 
-        # % below 52-week high (positive = below high)
+        # % below 52-week high (positive = below high — used as a pct_from_52wk_high_max
+        # gate threshold; this is the opposite sign convention from stocks.py's
+        # chat-display-only field of the same name, which is negative-when-below).
         pct_from_52wk_high: float | None = None
         if len(hist) >= 252:
             high_52w = float(close.tail(252).max())
