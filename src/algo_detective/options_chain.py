@@ -1,8 +1,9 @@
 """Fetch full options chain data to compute per-ticker PCR (put/call ratio).
 
 Two modes:
-  1. Snapshot (live/current): Alpaca /v1beta1/options/snapshots endpoint.
-     Returns PCR_VOL and PCR_OI for today. Used in daily pipeline.
+  1. Snapshot (live/current): Alpaca /v1beta1/options/snapshots/{symbol}
+     endpoint, one request per underlying. Returns PCR_VOL for today.
+     Used in daily pipeline.
 
   2. Historical bars backfill: Alpaca /v1beta1/options/bars endpoint.
      Enumerates all likely puts+calls (±15% of close, next 2 expirations)
@@ -13,7 +14,9 @@ Two modes:
 PCR interpretation for CSP sellers:
   PCR_VOL > 1.0 = more put volume than call volume = elevated put buying
   PCR_VOL elevated relative to ticker's own history → IV premium exists → CSP attractive
-  PCR_OI  > 1.0 = more open put contracts than calls = sustained bearish hedging
+  PCR_OI is currently always None — Alpaca's feed=indicative snapshots don't
+  include an openInterest field, so open-interest-based PCR can't be computed
+  from either mode. The column is kept for a future paid-feed upgrade.
 
 Run historical backfill:
   docker compose run --rm pipeline python -m src.algo_detective.options_chain --backfill
@@ -152,36 +155,64 @@ def _fetch_bars_batch(occ_symbols: list[str], start: str, end: str) -> dict[str,
         return {}
 
 
+def _fetch_symbol_snapshots(underlying: str) -> dict[str, dict]:
+    """Fetch all option contract snapshots for one underlying ticker, paginating.
+
+    Uses the per-symbol path endpoint (/v1beta1/options/snapshots/{symbol}) —
+    the collection endpoint with an `underlying_symbols` query param returns a
+    live HTTP 400 (confirmed against the API; see
+    docs/superpowers/specs/2026-07-06-live-options-chain-lookup-design.md).
+    """
+    contracts: dict[str, dict] = {}
+    params = {"feed": "indicative", "limit": 1000}
+    next_page_token: str | None = None
+
+    while True:
+        request_params = dict(params)
+        if next_page_token:
+            request_params["page_token"] = next_page_token
+        try:
+            resp = httpx.get(
+                f"{settings.alpaca_data_url}/v1beta1/options/snapshots/{underlying}",
+                headers=_alpaca_headers(),
+                params=request_params,
+                timeout=60,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("Alpaca snapshots failed for %s: %s", underlying, exc)
+            return contracts
+
+        payload = resp.json()
+        contracts.update(payload.get("snapshots", {}))
+        next_page_token = payload.get("next_page_token")
+        if not next_page_token:
+            return contracts
+
+
 def _fetch_snapshots_batch(underlying_symbols: list[str]) -> dict[str, dict]:
     """Fetch current options snapshots for multiple underlying tickers.
 
     Returns {underlying_symbol: {pcr_vol, pcr_oi, best_iv, best_volume, occ_symbol}}
+
+    pcr_oi is always None: Alpaca's feed=indicative snapshots don't include an
+    openInterest field (confirmed against the API; see the design doc referenced
+    in _fetch_symbol_snapshots), so open-interest-based PCR can't be computed
+    from this feed — same limitation as the historical-bars backfill path below.
     """
     if not underlying_symbols:
         return {}
-    try:
-        resp = httpx.get(
-            f"{settings.alpaca_data_url}/v1beta1/options/snapshots",
-            headers=_alpaca_headers(),
-            params={
-                "underlying_symbols": ",".join(underlying_symbols),
-                "feed": "indicative",
-                "limit": 10000,
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-        data = resp.json().get("snapshots", {})
-    except Exception as exc:
-        logger.warning("Alpaca snapshots failed for %s: %s", underlying_symbols[:3], exc)
-        return {}
 
     results: dict[str, dict] = {}
-    for underlying, contracts in data.items():
+    for i, underlying in enumerate(underlying_symbols):
+        contracts = _fetch_symbol_snapshots(underlying)
+        if i + 1 < len(underlying_symbols):
+            time.sleep(_REQUEST_SLEEP)
+        if not contracts:
+            continue
+
         put_vol = 0.0
         call_vol = 0.0
-        put_oi = 0.0
-        call_oi = 0.0
         best_iv: float | None = None
         best_volume = 0
         best_occ: str | None = None
@@ -191,7 +222,6 @@ def _fetch_snapshots_batch(underlying_symbols: list[str]) -> dict[str, dict]:
             option_type = _option_type_from_occ(occ_symbol)
             day_data = snap.get("dailyBar") or snap.get("latestQuote") or {}
             volume = float(day_data.get("v", 0) or 0)
-            oi = float(snap.get("openInterest", 0) or 0)
             iv = snap.get("impliedVolatility") or snap.get("greeks", {}).get("iv")
             try:
                 iv = float(iv) if iv is not None else None
@@ -200,10 +230,8 @@ def _fetch_snapshots_batch(underlying_symbols: list[str]) -> dict[str, dict]:
 
             if option_type == "P":
                 put_vol += volume
-                put_oi += oi
             elif option_type == "C":
                 call_vol += volume
-                call_oi += oi
 
             # Track best IV across puts (for CSP we care about put IV)
             if option_type == "P" and iv is not None and iv > (best_iv or 0):
@@ -212,11 +240,10 @@ def _fetch_snapshots_batch(underlying_symbols: list[str]) -> dict[str, dict]:
                 best_occ = occ_symbol
 
         pcr_vol = round(put_vol / call_vol, 4) if call_vol > 0 else None
-        pcr_oi  = round(put_oi  / call_oi,  4) if call_oi  > 0 else None
 
         results[underlying] = {
             "pcr_vol": pcr_vol,
-            "pcr_oi": pcr_oi,
+            "pcr_oi": None,
             "best_iv": best_iv,
             "best_volume": best_volume,
             "occ_symbol": best_occ,

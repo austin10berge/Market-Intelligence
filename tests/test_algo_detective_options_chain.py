@@ -100,46 +100,66 @@ class TestBuildChainSymbols:
 
 
 class TestFetchSnapshotsBatch:
+    """_fetch_snapshots_batch hits the per-symbol path endpoint
+    (/v1beta1/options/snapshots/{symbol}), one request per underlying — the
+    collection endpoint with `underlying_symbols` returns a live 400 (see the
+    module docstring / docs/superpowers/specs/2026-07-06-live-options-chain-lookup-design.md).
+    """
+
     @respx.mock
-    def test_aggregates_put_call_volume_and_oi_into_pcr(self):
-        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots").mock(
+    def test_aggregates_put_call_volume_into_pcr_vol(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/AAPL").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "snapshots": {
-                        "AAPL": {
-                            "AAPL260619P00190000": {
-                                "dailyBar": {"v": 300},
-                                "openInterest": 1000,
-                                "impliedVolatility": 0.40,
-                            },
-                            "AAPL260619C00195000": {
-                                "dailyBar": {"v": 100},
-                                "openInterest": 500,
-                            },
-                        }
+                        "AAPL260619P00190000": {
+                            "dailyBar": {"v": 300},
+                            "openInterest": 1000,
+                            "impliedVolatility": 0.40,
+                        },
+                        "AAPL260619C00195000": {
+                            "dailyBar": {"v": 100},
+                            "openInterest": 500,
+                        },
                     }
                 },
             )
         )
         result = _fetch_snapshots_batch(["AAPL"])
         assert result["AAPL"]["pcr_vol"] == 3.0
-        assert result["AAPL"]["pcr_oi"] == 2.0
         assert result["AAPL"]["best_iv"] == 0.4
 
     @respx.mock
-    def test_missing_call_volume_yields_none_pcr(self):
-        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots").mock(
+    def test_pcr_oi_is_always_none(self):
+        """openInterest isn't present under feed=indicative in practice, but
+        even if the mock includes it, pcr_oi must stay None — it's not
+        computed from this feed at all."""
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/AAPL").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "snapshots": {
-                        "MSFT": {
-                            "MSFT260619P00300000": {
-                                "dailyBar": {"v": 50},
-                                "openInterest": 200,
-                            },
-                        }
+                        "AAPL260619P00190000": {"dailyBar": {"v": 300}, "openInterest": 1000},
+                        "AAPL260619C00195000": {"dailyBar": {"v": 100}, "openInterest": 500},
+                    }
+                },
+            )
+        )
+        result = _fetch_snapshots_batch(["AAPL"])
+        assert result["AAPL"]["pcr_oi"] is None
+
+    @respx.mock
+    def test_missing_call_volume_yields_none_pcr(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/MSFT").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "MSFT260619P00300000": {
+                            "dailyBar": {"v": 50},
+                            "openInterest": 200,
+                        },
                     }
                 },
             )
@@ -149,11 +169,53 @@ class TestFetchSnapshotsBatch:
         assert result["MSFT"]["pcr_oi"] is None
 
     @respx.mock
-    def test_network_error_returns_empty_dict(self):
-        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots").mock(
+    def test_network_error_skips_that_symbol(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/AAPL").mock(
             side_effect=httpx.ConnectError("boom")
         )
         assert _fetch_snapshots_batch(["AAPL"]) == {}
+
+    @respx.mock
+    def test_paginates_via_next_page_token(self):
+        route = respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/AAPL")
+        route.side_effect = [
+            httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "AAPL260619P00190000": {"dailyBar": {"v": 100}},
+                    },
+                    "next_page_token": "page2",
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "snapshots": {
+                        "AAPL260619C00195000": {"dailyBar": {"v": 50}},
+                    }
+                },
+            ),
+        ]
+        result = _fetch_snapshots_batch(["AAPL"])
+        assert result["AAPL"]["pcr_vol"] == 2.0
+
+    @respx.mock
+    def test_fetches_each_underlying_independently(self):
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/AAPL").mock(
+            return_value=httpx.Response(
+                200,
+                json={"snapshots": {"AAPL260619P00190000": {"dailyBar": {"v": 300}}}},
+            )
+        )
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/MSFT").mock(
+            return_value=httpx.Response(
+                200,
+                json={"snapshots": {"MSFT260619C00300000": {"dailyBar": {"v": 40}}}},
+            )
+        )
+        result = _fetch_snapshots_batch(["AAPL", "MSFT"])
+        assert set(result.keys()) == {"AAPL", "MSFT"}
 
     def test_empty_symbol_list_short_circuits(self):
         assert _fetch_snapshots_batch([]) == {}
