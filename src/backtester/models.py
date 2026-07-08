@@ -6,7 +6,7 @@ from datetime import date
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -152,6 +152,29 @@ class PyramidingConfig(BaseModel):
     trigger_mode: str = "entry_signal"
     pullback_pct: float | None = None       # e.g. 20.0 for 20% pullback
     pullback_reference: str = "entry"       # "entry" or "rolling"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_legacy_scale_in_fields(cls, data: Any) -> Any:
+        """Map pre-rename field names (scale_in_trigger/scale_in_value) onto
+        trigger_mode/pullback_pct so strategies saved before this rename don't
+        silently validate with defaults instead of their saved values.
+
+        Mirrors the mapping already applied client-side in
+        src/web/v2/backtester.js's applyStrategyToForm().
+        """
+        if not isinstance(data, dict):
+            return data
+        if "trigger_mode" not in data and "scale_in_trigger" in data:
+            data = {
+                **data,
+                "trigger_mode": (
+                    "pullback_only" if data["scale_in_trigger"] == "pullback" else "entry_signal"
+                ),
+            }
+        if "pullback_pct" not in data and "scale_in_value" in data:
+            data = {**data, "pullback_pct": data["scale_in_value"]}
+        return data
 
 
 # ── Strategy Definition ──────────────────────────────────────────────────────

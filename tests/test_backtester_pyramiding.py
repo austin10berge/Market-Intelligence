@@ -133,3 +133,40 @@ class TestPullbackReference:
         )
         trades = _run(closes, _always_true_entry(), pyr)
         assert len(trades) == 2
+
+
+class TestLegacyFieldBackwardCompat:
+    """PyramidingConfig renamed scale_in_trigger/scale_in_value to
+    trigger_mode/pullback_pct. Strategies saved before that rename (in
+    backtest_strategies or a direct API caller) still use the old names —
+    Pydantic's default extra="ignore" would otherwise silently drop them."""
+
+    def test_scale_in_trigger_pullback_maps_to_pullback_only(self):
+        pyr = PyramidingConfig(scale_in_trigger="pullback", scale_in_value=15.0)
+        assert pyr.trigger_mode == "pullback_only"
+        assert pyr.pullback_pct == 15.0
+
+    def test_scale_in_trigger_entry_signal_maps_to_entry_signal(self):
+        pyr = PyramidingConfig(scale_in_trigger="entry_signal")
+        assert pyr.trigger_mode == "entry_signal"
+
+    def test_new_field_names_take_precedence_over_legacy_ones(self):
+        pyr = PyramidingConfig(
+            trigger_mode="both", pullback_pct=20.0,
+            scale_in_trigger="pullback", scale_in_value=5.0,
+        )
+        assert pyr.trigger_mode == "both"
+        assert pyr.pullback_pct == 20.0
+
+    def test_legacy_fields_absent_keeps_defaults(self):
+        pyr = PyramidingConfig()
+        assert pyr.trigger_mode == "entry_signal"
+        assert pyr.pullback_pct is None
+
+    def test_legacy_mapping_runs_end_to_end_in_backtest(self):
+        """A strategy saved with the old field names should still scale in
+        on a pullback, not silently fall back to entry_signal-only behavior."""
+        closes = [100, 100, 100, 80, 80]
+        pyr = PyramidingConfig(enabled=True, max_positions=2, scale_in_trigger="pullback", scale_in_value=15.0)
+        trades = _run(closes, _always_true_entry(), pyr)
+        assert len(trades) == 2
