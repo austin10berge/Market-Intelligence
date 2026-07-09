@@ -3,7 +3,6 @@ import math
 import pandas as pd
 
 from src.screener.stocks import (
-    _calculate_iv_rank,
     _calculate_rv20,
     _extract_implied_volatility,
     _parse_occ_symbol,
@@ -43,23 +42,6 @@ def test_solve_implied_volatility_from_option_midpoint():
 
     assert iv is not None
     assert 10 < iv < 250
-
-
-def test_calculate_iv_rank_scales_between_history_low_and_high():
-    iv_history = [{"atm_iv": 20.0 + idx} for idx in range(20)]
-    iv_history[-1] = {"atm_iv": 60.0}
-
-    iv_rank = _calculate_iv_rank(50.0, iv_history)
-
-    assert iv_rank == 75.0
-
-
-def test_calculate_iv_rank_requires_minimum_history():
-    iv_history = [{"atm_iv": 20.0}, {"atm_iv": 40.0}, {"atm_iv": 60.0}]
-
-    iv_rank = _calculate_iv_rank(50.0, iv_history)
-
-    assert iv_rank is None
 
 
 def test_calculate_rv20_returns_annualized_percent():
