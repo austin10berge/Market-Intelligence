@@ -1,0 +1,28 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# ca-certificates for outbound HTTPS (YouTube, Discord); ffmpeg for yt-dlp
+# audio/transcript extraction
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python deps (yt-dlp, httpx, pyyaml, python-dotenv)
+COPY youtube-pipeline/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy pipeline source (flat module — no package structure)
+COPY youtube-pipeline/channels.py .
+COPY youtube-pipeline/db.py .
+COPY youtube-pipeline/discord_poster.py .
+COPY youtube-pipeline/main.py .
+COPY youtube-pipeline/models.py .
+COPY youtube-pipeline/summarizer.py .
+COPY youtube-pipeline/transcripts.py .
+
+# Data directory for the SQLite state DB (overridden by bind-mount at runtime)
+RUN mkdir -p /app/data
+
+# Default entrypoint — docker compose run --rm youtube-summarizer
+CMD ["python3", "main.py"]

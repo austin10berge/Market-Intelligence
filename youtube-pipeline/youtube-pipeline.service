@@ -1,0 +1,18 @@
+[Unit]
+Description=YouTube Summary Pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=automation_user
+WorkingDirectory=/opt/youtube-pipeline
+EnvironmentFile=/opt/youtube-pipeline/.env
+# Systemd strips PATH; restore it so `claude` and `yt-dlp` resolve.
+# Adjust if `which claude` returns a different prefix on your LXC.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# `claude -p` auth lives in ~/.claude — make sure HOME points there.
+Environment=HOME=/home/automation_user
+ExecStart=/opt/youtube-pipeline/venv/bin/python main.py
+StandardOutput=journal
+StandardError=journal
