@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     discord_bot_token: str = Field(default="", description="Discord bot token")
     discord_channel_id: str = Field(default="", description="Default Discord channel ID for scan results")
     discord_digest_webhook_url: str = Field(default="", description="Discord webhook URL for nightly digest delivery")
+    discord_youtube_webhook_url: str = Field(default="", description="Discord webhook URL for youtube-summarizer service")
 
     # ── Logging ──────────────────────────────────────────
     log_level: str = Field(default="INFO", description="Logging level")
