@@ -80,12 +80,12 @@ def print_report(report: dict) -> None:
     print(f"Missed primes : {report['false_negatives']}")
 
     if report["fp_by_sector"]:
-        print(f"\nFalse positives by sector:")
+        print("\nFalse positives by sector:")
         for sector, count in list(report["fp_by_sector"].items())[:10]:
             print(f"  {sector:<30} {count}")
 
     if report["missed_primes"]:
-        print(f"\nMissed prime tickers (first 20):")
+        print("\nMissed prime tickers (first 20):")
         for r in report["missed_primes"][:20]:
             print(f"  {r['date']}  {r['ticker']:<8}  RSI={r['rsi']}  ADX={r['adx']}  EMA50+={r['price_above_ema50']}  BB%B={r['bb_pct_b']}")
     print()

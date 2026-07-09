@@ -25,22 +25,21 @@ import logging
 import math
 import re
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import TypedDict
 
 import pandas as pd
 import yfinance as yf
 
-from .options import screen_csp_candidates
-from ..market_data.store import (
-    get_all_fundamentals,
-    get_available_sectors,
-    get_ohlcv,
-    get_store_status,
-    ensure_tables,
-)
 from ..db import get_watchlist
 from ..indicators import compute_adr20_pct
+from ..market_data.store import (
+    ensure_tables,
+    get_all_fundamentals,
+    get_ohlcv,
+    get_store_status,
+)
+from .options import screen_csp_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +222,7 @@ class ScannerParams:
         price_vs_ema200_pct_min: float | None = None,
         restrict_to_watchlist_universe: bool = False,
         sectors: str | None = None,
-    ) -> "ScannerParams":
+    ) -> ScannerParams:
         """Build ScannerParams from API query parameters (all optional)."""
         parsed_conditions: list[str] = []
         if conditions:
@@ -878,7 +877,7 @@ def _check_conditions(indicators: dict, conditions: list[str]) -> tuple[bool, di
 
 def apply_technical_conditions(
     vol_rows: list[dict],
-    params: "ScannerParams",
+    params: ScannerParams,
 ) -> tuple[list[str], list[dict]]:
     """Apply stacked technical conditions plus RSI, ADX, and numeric range gates.
 

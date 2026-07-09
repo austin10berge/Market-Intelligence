@@ -14,7 +14,7 @@ import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
-from ..db import get_stock_watchlist, get_congressional_cache, set_congressional_cache
+from ..db import get_congressional_cache, get_stock_watchlist, set_congressional_cache
 from ..models import Signal, SignalSource
 from .base import BaseFetcher, get_http_client
 

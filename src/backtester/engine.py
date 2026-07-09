@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import date, timedelta
 
 import pandas as pd
 
@@ -23,8 +22,8 @@ from .models import (
     PyramidingExitMode,
     Trade,
 )
-from .stats import compute_stats
 from .options import black_scholes_price, get_strike_for_delta
+from .stats import compute_stats
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +110,7 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
                 pos.lowest_underlying_since_entry = min(pos.lowest_underlying_since_entry, low)
 
             reason = _check_exit(pos, exit_config, exit_tree, df, i, close, pos_high, pos_low)
-            
+
             # Additional option expiration check
             if reason is None and pos.is_option and pos.option_dte_entry is not None:
                 if days_held >= pos.option_dte_entry:
@@ -300,13 +299,13 @@ def _open_position(
         # Approximate option pricing
         iv = float(df["rv20"].iloc[bar_idx]) if "rv20" in df and not pd.isna(df["rv20"].iloc[bar_idx]) else 0.30
         iv = max(iv, 0.10) # Floor IV at 10%
-        
+
         target_delta = opt_conf.target_delta
         if direction == "short" and opt_conf.type == "call":
             target_delta = -target_delta # Selling call is negative delta
         elif direction == "long" and opt_conf.type == "put":
             target_delta = -target_delta # Buying put is negative delta
-            
+
         strike = get_strike_for_delta(price, target_delta, max(opt_conf.target_dte/365.0, 0.001), 0.045, iv, opt_conf.type)
         fill_price = _get_option_price(price, strike, opt_conf.target_dte, iv, opt_conf.type)
         fill_price_cost = fill_price * 100 # Per contract
@@ -350,7 +349,7 @@ def _open_position(
         else:
             init_high = _get_option_price(init_low_stock, strike, opt_conf.target_dte, iv, opt_conf.type)
             init_low = _get_option_price(init_high_stock, strike, opt_conf.target_dte, iv, opt_conf.type)
-            
+
         pos = OpenPosition(
             direction=direction,
             entry_date=bar_date,
@@ -395,7 +394,7 @@ def _close_position(
     request: BacktestRequest,
 ) -> None:
     fill_price = price
-    
+
     if pos.is_option:
         days_held = bar_idx - pos.entry_bar_idx
         remaining_dte = max(pos.option_dte_entry - days_held, 0)
@@ -428,7 +427,7 @@ def _close_position(
         pnl = (fill_price - pos.entry_price) * pos.shares * 100
         pnl -= request.commission
         pnl_pct = (pnl / (pos.entry_price * pos.shares * 100)) * 100.0 if pos.entry_price > 0 else 0.0
-        
+
         proceeds = (pos.shares * fill_price * 100) - request.commission
     else:
         if pos.direction == "long":
@@ -438,7 +437,7 @@ def _close_position(
 
         pnl -= request.commission
         pnl_pct = (pnl / (pos.entry_price * pos.shares)) * 100.0 if pos.entry_price > 0 else 0.0
-        
+
         proceeds = pos.shares * fill_price - request.commission if pos.direction == "long" else \
                    pos.shares * (2 * pos.entry_price - fill_price) - request.commission
 

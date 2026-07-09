@@ -2,40 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import json
 import logging
-import sys
-
 from datetime import datetime
 
-from .config import settings
-from .fetchers.base import close_http_client
-from .fetchers.fear_greed import FearGreedFetcher
-from .fetchers.gex import GexFetcher
-from .fetchers.credit_spreads import CreditSpreadsFetcher
-from .fetchers.liquidity import LiquidityFetcher
-from .fetchers.put_call import PutCallFetcher
-from .fetchers.sector_etf import SectorEtfFetcher
-from .fetchers.vix import VixFetcher
-from .fetchers.insider_trading import InsiderTradingFetcher
-from .fetchers.congressional_trades import CongressionalTradesFetcher
-from .fetchers.unusual_volume import UnusualVolumeFetcher
-from .fetchers.news import NewsFetcher
-from .fetchers.thematic_etf import ThematicEtfFetcher
-from .fetchers.treasury_yields import TreasuryYieldsFetcher
-from .fetchers.cme_fedwatch import CmeFedWatchFetcher
-from .fetchers.policy_news import PolicyNewsFetcher
-from .fetchers.earnings_calendar import EarningsCalendarFetcher
-from .models import ScoredSignal, Signal
-from .notify.discord import send_discord_digest
-from .notify.home_assistant import send_ha_notification
-from .notify.ntfy import send_ntfy
-from .processing.preprocessor import compute_composite_score, determine_posture
-from .processing.scorer import score_signal, check_convergence
-from .screener.options import screen_csp_candidates
-from .screener.stocks import screen_stocks
-from .synthesis.llm import synthesize
-from .synthesis.prompts import build_synthesis_prompt
+from . import db
 from .cache import (
     ET,
     KEY_SCREENER_CSP,
@@ -46,10 +19,34 @@ from .cache import (
     is_trading_day,
     screener_ttl,
 )
-from . import db
-
-import argparse
-import json
+from .config import settings
+from .fetchers.base import close_http_client
+from .fetchers.cme_fedwatch import CmeFedWatchFetcher
+from .fetchers.congressional_trades import CongressionalTradesFetcher
+from .fetchers.credit_spreads import CreditSpreadsFetcher
+from .fetchers.earnings_calendar import EarningsCalendarFetcher
+from .fetchers.fear_greed import FearGreedFetcher
+from .fetchers.gex import GexFetcher
+from .fetchers.insider_trading import InsiderTradingFetcher
+from .fetchers.liquidity import LiquidityFetcher
+from .fetchers.news import NewsFetcher
+from .fetchers.policy_news import PolicyNewsFetcher
+from .fetchers.put_call import PutCallFetcher
+from .fetchers.sector_etf import SectorEtfFetcher
+from .fetchers.thematic_etf import ThematicEtfFetcher
+from .fetchers.treasury_yields import TreasuryYieldsFetcher
+from .fetchers.unusual_volume import UnusualVolumeFetcher
+from .fetchers.vix import VixFetcher
+from .models import Signal
+from .notify.discord import send_discord_digest
+from .notify.home_assistant import send_ha_notification
+from .notify.ntfy import send_ntfy
+from .processing.preprocessor import compute_composite_score, determine_posture
+from .processing.scorer import check_convergence, score_signal
+from .screener.options import screen_csp_candidates
+from .screener.stocks import screen_stocks
+from .synthesis.llm import synthesize
+from .synthesis.prompts import build_synthesis_prompt
 
 # Configure logging
 logging.basicConfig(

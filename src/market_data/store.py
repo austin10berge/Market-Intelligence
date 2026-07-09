@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import math
 import sqlite3
-from datetime import datetime, date, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd

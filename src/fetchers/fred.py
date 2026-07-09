@@ -20,18 +20,18 @@ async def fetch_fred_series(client: httpx.AsyncClient, series_id: str) -> float 
         "limit": 1,
         "sort_order": "desc",
     }
-    
+
     resp = await client.get(url, params=params)
     resp.raise_for_status()
-    
+
     data = resp.json()
     observations = data.get("observations", [])
     if not observations:
         return None
-        
+
     # Some older FRED series return "." for missing values
     val_str = observations[0].get("value", "")
     if val_str == ".":
         return None
-        
+
     return float(val_str)

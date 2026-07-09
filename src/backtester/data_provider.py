@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 

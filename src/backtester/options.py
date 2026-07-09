@@ -1,5 +1,6 @@
 import math
 
+
 def _norm_cdf(value: float) -> float:
     """Normal CDF used for Black-Scholes pricing."""
     return 0.5 * (1.0 + math.erf(value / math.sqrt(2.0)))
@@ -36,7 +37,7 @@ def _norm_ppf(p: float) -> float:
     """Approximate Inverse Normal CDF (quantile function)."""
     if p <= 0.0: return -10.0
     if p >= 1.0: return 10.0
-    
+
     a1 = -3.969683028665376e+01
     a2 =  2.209460984245205e+02
     a3 = -2.759285104469687e+02
@@ -89,7 +90,7 @@ def get_strike_for_delta(
     else: # put
         if target_delta >= 0.0 or target_delta <= -1.0: return spot
         z = _norm_ppf(target_delta + 1.0)
-    
+
     sqrt_t = math.sqrt(time_to_expiry_years)
     k = spot * math.exp(-z * volatility * sqrt_t + (risk_free_rate + 0.5 * volatility**2) * time_to_expiry_years)
     return round(k, 2)

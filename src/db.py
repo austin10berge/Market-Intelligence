@@ -224,7 +224,7 @@ def get_watchlist() -> list[str]:
         row = conn.execute("SELECT value FROM app_config WHERE key = 'watchlist'").fetchone()
         if row:
             return json.loads(row["value"])
-            
+
         # Defaults
         return [
             "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "AMD",
@@ -316,7 +316,7 @@ def get_stock_watchlist() -> list[str]:
         row = conn.execute("SELECT value FROM app_config WHERE key = 'stock_watchlist'").fetchone()
         if row:
             return json.loads(row["value"])
-            
+
         # Defaults
         return ["NBIS", "WULF", "IONQ", "MARA", "QUBT", "AAPL", "MSFT"]
     finally:

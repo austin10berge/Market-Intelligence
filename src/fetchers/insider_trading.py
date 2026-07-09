@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from ..config import settings
-from ..db import get_stock_watchlist, get_insider_cache, set_insider_cache
+from ..db import get_insider_cache, get_stock_watchlist, set_insider_cache
 from ..models import Signal, SignalSource
 from .base import BaseFetcher, get_http_client
 

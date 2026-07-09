@@ -15,16 +15,20 @@ import math
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
 
-from ..screener.csp_scanner import fetch_sp500_tickers, fetch_nasdaq100_tickers, fetch_nasdaq_large_cap_tickers, fetch_nyse_large_cap_tickers
+from ..screener.csp_scanner import (
+    fetch_nasdaq100_tickers,
+    fetch_nasdaq_large_cap_tickers,
+    fetch_nyse_large_cap_tickers,
+    fetch_sp500_tickers,
+)
 from .store import (
-    ensure_tables,
-    bulk_upsert_ohlcv_multi,
     bulk_upsert_fundamentals,
+    bulk_upsert_ohlcv_multi,
+    ensure_tables,
     get_store_status,
     get_universe_tickers,
     prune_stale_fundamentals,

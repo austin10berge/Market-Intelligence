@@ -22,15 +22,15 @@ class CreditSpreadsFetcher(BaseFetcher):
     async def fetch(self) -> Signal:
         """Fetch the latest HY spread from FRED."""
         logger.info(f"Fetching {self.name} ({self.series_id}) from FRED...")
-        
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             spread = await fetch_fred_series(client, self.series_id)
-            
+
         if spread is None:
             raise ValueError(f"No data returned for {self.series_id}")
 
         # Spread is presented in percent (e.g. 5.12).
-        
+
         # Determine summary trend
         signal_state = "Neutral"
         if spread > 5.0:
@@ -39,9 +39,9 @@ class CreditSpreadsFetcher(BaseFetcher):
             signal_state = "Tight (Risk-on / Complacency)"
         else:
             signal_state = "Moderate (Normal)"
-            
+
         summary = f"Credit Spreads: {spread:.2f}% — {signal_state}"
-        
+
         return Signal(
             source=SignalSource.CREDIT_SPREADS,
             value=spread,

@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import math
 import time
 from datetime import date, timedelta
 
@@ -37,7 +36,6 @@ import httpx
 from ..config import settings
 from ..screener.stocks import _parse_occ_symbol
 from .store import (
-    _get_connection,
     ensure_tables,
     get_all_features,
     get_options_index,
