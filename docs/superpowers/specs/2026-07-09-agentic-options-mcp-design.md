@@ -13,6 +13,8 @@ This is made possible by wiring the bot's `claude -p` call in `src/chat.py::call
 
 **Threat model note:** the trade chat Discord is private with a single user (the operator) with access. The standing rule from prior discord-bot hardening work — isolate config, hardcode minimal tool grants, no bot-writable settings.json — was written for a threat model of untrusted multi-user chat input reaching a tool-enabled prompt. That threat model doesn't apply here; the operator explicitly accepted the residual risk of agentic tool use for this single-user bot. The existing isolated-config pattern for the discord-bot service is kept regardless, since it costs nothing and remains good practice independent of the injection question.
 
+**Post-implementation correction (2026-07-10):** the original design below specified `stdio` transport, with `claude -p` spawning a fresh `alpaca-mcp-server` process per invocation. Live verification found this never actually worked: `claude -p` dispatches its first API request without waiting for `--mcp-config` servers to finish connecting ("running fully async, nonblocking" per `--debug` output), and a fresh `alpaca-mcp-server` process takes ~5s to boot (Python + FastMCP + alpaca-py imports) — well past the ~1.3s the model needs to produce a first-turn response. The tool was reliably never available by the time it mattered; the model always answered as if it only had `WebSearch`. Root-caused via direct `claude -p --debug-file` reproduction, confirmed via a control run where the connection incidentally completed in time (`Successfully connected... in 4992ms`, matching capabilities `hasTools:true`) and still lost the race against a ~2.7s total session. Fix: `alpaca-mcp-server` now runs as its own persistent `streamable-http` service (`alpaca-mcp` in `docker-compose.yml`, always-on, already connected), and `alpaca-mcp.json` points at it over HTTP instead of spawning it. HTTP connection time to an already-running server measured at ~104ms — confirmed via the same reproduction method, including an end-to-end tool call returning real live SOFI option data. The "Components" and "Error Handling" sections below are updated to reflect this; the "Architecture" and code-sample sections retain their original stdio-era wording where it doesn't affect correctness, since the CLI flags in `call_claude_chat` (`--mcp-config`, `--strict-mcp-config`, `--allowedTools`) are unchanged — only `alpaca-mcp.json`'s contents and the addition of the `alpaca-mcp` service changed.
+
 ---
 
 ## Architecture
@@ -35,31 +37,51 @@ No change to `src/screener/options_lookup.py` or `src/screener/stocks.py` — th
 
 ## Components
 
-### 1. `discord_bot/alpaca-mcp.json` (new)
+### 1. `alpaca-mcp` service (`docker-compose.yml`, new) + `discord_bot/alpaca-mcp.json` (new)
 
-Committed to git. Safe to commit because secrets are expanded from environment variables at launch via Claude Code's `${VAR}` / `${VAR:-default}` syntax, not hardcoded in the file.
+**Corrected from the original stdio design** — see the post-implementation note above. `alpaca-mcp-server` now runs as its own always-on service, built from the `base` Docker target (already has the package installed via `pyproject.toml`), started with `--transport streamable-http --host 0.0.0.0 --port 8001`:
+
+```yaml
+alpaca-mcp:
+  build:
+    context: .
+    target: base
+  env_file: .env
+  environment:
+    ALPACA_SECRET_KEY: ${ALPACA_API_SECRET}
+    ALPACA_PAPER_TRADE: "true"
+    ALPACA_TOOLSETS: "options-data,assets,stock-data"
+  command: alpaca-mcp-server --transport streamable-http --host 0.0.0.0 --port 8001
+  expose:
+    - "8001"
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8001/mcp"]
+    interval: 15s
+    timeout: 5s
+    retries: 3
+    start_period: 10s
+```
+
+`discord-bot` gains `alpaca-mcp` as a `depends_on: condition: service_healthy` dependency. `discord_bot/alpaca-mcp.json` (committed; no secrets — the service holds them, not this file) now just points at the running service over HTTP:
 
 ```json
 {
   "mcpServers": {
     "alpaca": {
-      "command": "alpaca-mcp-server",
-      "env": {
-        "ALPACA_API_KEY": "${ALPACA_API_KEY}",
-        "ALPACA_SECRET_KEY": "${ALPACA_API_SECRET}",
-        "ALPACA_PAPER_TRADE": "true",
-        "ALPACA_TOOLSETS": "options-data,assets,stock-data"
-      },
+      "type": "http",
+      "url": "http://alpaca-mcp:8001/mcp",
       "timeout": 30000
     }
   }
 }
 ```
 
-- **Env var name bridge:** the repo's existing secret is named `ALPACA_API_SECRET` (see `.env.example`); the Alpaca MCP server expects `ALPACA_SECRET_KEY`. Mapped here rather than renaming the repo-wide variable.
+- **Env var name bridge:** the repo's existing secret is named `ALPACA_API_SECRET` (see `.env.example`); the Alpaca MCP server expects `ALPACA_SECRET_KEY`. Mapped in the service's `environment:` block (Docker Compose's own `${VAR}` substitution from the project's `.env` file — the same pattern already used by `youtube-summarizer`'s `DISCORD_WEBHOOK_URL` in this compose file), not by renaming the repo-wide variable.
 - **`ALPACA_PAPER_TRADE=true`:** set for defense-in-depth even though the `trading` toolset (order placement) is not enabled — see Toolset Scope below.
 - **`ALPACA_TOOLSETS=options-data,assets,stock-data`:** restricts the server to read-only market-data tools. Excludes `trading`, `positions`, `account`, `watchlists`, `crypto-data`, `news`, `fixed-income-data`, `index-data`, `corporate-actions`, and locate-related toolsets.
-- **`timeout: 30000`:** per-server hard wall-clock limit (30s) per tool call, so one slow Alpaca call can't consume the full 120s budget on `call_claude_chat`.
+- **Healthcheck has no `-f`:** the MCP streamable-http endpoint returns 406 on a bare GET without the protocol's `Accept` header, even when the server is fully healthy — confirmed during implementation. The healthcheck only needs to confirm the port accepts connections, not that a specific status code comes back.
+- **`timeout: 30000`** in `alpaca-mcp.json`: per-tool-call wall-clock limit, so one slow Alpaca call can't consume the full 120s budget on `call_claude_chat`. No longer doubles as a connection-startup allowance now that the server is already running.
 
 ### 2. Toolset Scope
 
@@ -111,7 +133,8 @@ Per message inside a trade chat thread (`_handle_message`, unchanged):
 
 ## Error Handling
 
-- **MCP server fails to launch** (bad credentials, package not installed, etc.): to be verified during implementation — the expectation is that `claude -p` degrades by treating the Alpaca tools as unavailable rather than failing the entire call, since `WebSearch` isn't dependent on the Alpaca server. If verification shows the whole call fails hard instead, the existing Gemini fallback in `_handle_message` (triggered whenever `call_claude_chat` returns `None`) still covers total failure.
+- **MCP server unreachable** (service down, `docker compose` dependency not yet healthy, etc.): `claude -p` degrades by treating the Alpaca tools as unavailable rather than failing the entire call — confirmed during implementation (this is also exactly the failure mode that made the original stdio design silently non-functional: from the model's perspective, "MCP server not ready yet" and "MCP server down" look identical). `WebSearch` isn't dependent on the Alpaca server and still works. If the whole call fails hard for an unrelated reason, the existing Gemini fallback in `_handle_message` (triggered whenever `call_claude_chat` returns `None`) still covers total failure — also confirmed during implementation, separately, when the discord-bot's isolated Claude Code session had no valid credentials (`Not logged in`) and every `claude -p` call failed outright.
+- **`discord-bot` starts before `alpaca-mcp` is ready:** guarded by `depends_on: alpaca-mcp: condition: service_healthy` in `docker-compose.yml` — Compose won't start `discord-bot` until the healthcheck passes.
 - **Slow/hung tool call:** bounded by the per-server `timeout: 30000` in `alpaca-mcp.json`, nested inside the existing 120s timeout on the overall `call_claude_chat` call.
 - **No rate limiting or cost caps added.** Single-user private use; the prefetch remains bounded at one Alpaca call per ticker per message as before, but the model could in principle make several tool calls in one turn. Alpaca's own API rate limits are the natural backstop. Not addressed further in v1 — revisit if it becomes a problem in practice.
 

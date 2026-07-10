@@ -54,6 +54,37 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Alpaca MCP server (persistent HTTP; backs the trade chat bot's on-demand
+  # options/stock data tool calls). Runs as its own always-on service rather
+  # than being spawned per-call over stdio: a fresh `alpaca-mcp-server`
+  # process takes ~5s to boot (Python + FastMCP + alpaca-py imports), but
+  # `claude -p` dispatches its first request without waiting for MCP servers
+  # to finish connecting — a stdio cold-start reliably lost that race and the
+  # tool was silently never available. A pre-warm persistent HTTP connection
+  # completes in ~100ms, well inside that window. ──────────────────────────
+  alpaca-mcp:
+    build:
+      context: .
+      target: base
+    container_name: market-intelligence-alpaca-mcp
+    env_file: .env
+    environment:
+      ALPACA_SECRET_KEY: ${ALPACA_API_SECRET}
+      ALPACA_PAPER_TRADE: "true"
+      ALPACA_TOOLSETS: "options-data,assets,stock-data"
+    command: alpaca-mcp-server --transport streamable-http --host 0.0.0.0 --port 8001
+    expose:
+      - "8001"  # Internal only — discord-bot reaches it via the Docker network
+    restart: unless-stopped
+    healthcheck:
+      # No -f: the MCP endpoint 406s a bare GET (wrong Accept header) even when
+      # healthy — this only needs to confirm the server is accepting connections.
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8001/mcp"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # ── Discord bot ──────────────────────────────────────────────────────────────
   discord-bot:
     build:
@@ -86,6 +117,8 @@ services:
       - ./discord_bot/trade_system_prompt.txt:/app/discord_bot/trade_system_prompt.txt:ro
     depends_on:
       api:
+        condition: service_healthy
+      alpaca-mcp:
         condition: service_healthy
     restart: unless-stopped
 

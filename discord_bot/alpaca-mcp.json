@@ -1,13 +1,8 @@
 {
   "mcpServers": {
     "alpaca": {
-      "command": "alpaca-mcp-server",
-      "env": {
-        "ALPACA_API_KEY": "${ALPACA_API_KEY}",
-        "ALPACA_SECRET_KEY": "${ALPACA_API_SECRET}",
-        "ALPACA_PAPER_TRADE": "true",
-        "ALPACA_TOOLSETS": "options-data,assets,stock-data"
-      },
+      "type": "http",
+      "url": "http://alpaca-mcp:8001/mcp",
       "timeout": 30000
     }
   }
