@@ -1,6 +1,7 @@
 """Unit tests for src.chat — ticker detection, formatting, prompt building."""
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import src.chat as chat_module
@@ -300,3 +301,40 @@ class TestGatherChatBlocks:
         monkeypatch.setattr(chat_module, "fetch_options_grid", _track)
         await gather_chat_blocks(["SOFI"], "SOFI CSP strike")
         assert called["count"] == 0
+
+
+class TestCallClaudeChatMcpWiring:
+    async def test_invokes_claude_with_mcp_config_and_alpaca_tools(self, monkeypatch):
+        captured = {}
+
+        class _FakeProcess:
+            returncode = 0
+
+            async def communicate(self, input=None):
+                return b"ok", b""
+
+        async def _fake_create_subprocess_exec(*args, **kwargs):
+            captured["args"] = args
+            return _FakeProcess()
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+
+        result = await chat_module.call_claude_chat("some prompt")
+
+        assert result == "ok"
+        argv = captured["args"]
+        assert argv[0] == "claude"
+        assert "-p" in argv
+        assert "--strict-mcp-config" in argv
+
+        mcp_config_idx = argv.index("--mcp-config")
+        assert argv[mcp_config_idx + 1].replace("\\", "/").endswith("discord_bot/alpaca-mcp.json")
+
+        allowed_idx = argv.index("--allowedTools")
+        allowed = argv[allowed_idx + 1:]
+        assert "WebSearch" in allowed
+        assert "mcp__alpaca__get_option_chain" in allowed
+        assert "mcp__alpaca__get_option_snapshot" in allowed
+        assert "mcp__alpaca__get_stock_snapshot" in allowed
+        assert "mcp__alpaca__get_option_contracts" in allowed
+        assert len(allowed) == 25  # WebSearch + 24 Alpaca tools

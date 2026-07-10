@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from pathlib import Path
 
 from .screener.options_lookup import detect_options_intent, fetch_options_grid
 from .screener.stocks import screen_stocks
@@ -330,11 +331,51 @@ def build_prompt(
     return "\n\n".join(parts)
 
 
+_MCP_CONFIG_PATH = Path(__file__).parent.parent / "discord_bot" / "alpaca-mcp.json"
+
+# Must stay in sync with ALPACA_TOOLSETS=options-data,assets,stock-data in
+# discord_bot/alpaca-mcp.json — --allowedTools has no MCP wildcard support
+# (mcp__alpaca__* is not accepted), so every enabled tool is listed by name.
+_ALPACA_ALLOWED_TOOLS: tuple[str, ...] = (
+    # options-data toolset
+    "mcp__alpaca__get_option_chain",
+    "mcp__alpaca__get_option_snapshot",
+    "mcp__alpaca__get_option_latest_quote",
+    "mcp__alpaca__get_option_latest_trade",
+    "mcp__alpaca__get_option_bars",
+    "mcp__alpaca__get_option_trades",
+    "mcp__alpaca__get_option_exchange_codes",
+    # assets toolset
+    "mcp__alpaca__get_option_contracts",
+    "mcp__alpaca__get_option_contract",
+    "mcp__alpaca__get_all_assets",
+    "mcp__alpaca__get_asset",
+    "mcp__alpaca__get_calendar",
+    "mcp__alpaca__get_clock",
+    "mcp__alpaca__get_corporate_action_announcements",
+    "mcp__alpaca__get_corporate_action_announcement",
+    # stock-data toolset
+    "mcp__alpaca__get_stock_bars",
+    "mcp__alpaca__get_stock_quotes",
+    "mcp__alpaca__get_stock_trades",
+    "mcp__alpaca__get_stock_latest_bar",
+    "mcp__alpaca__get_stock_latest_quote",
+    "mcp__alpaca__get_stock_latest_trade",
+    "mcp__alpaca__get_stock_snapshot",
+    "mcp__alpaca__get_most_active_stocks",
+    "mcp__alpaca__get_market_movers",
+)
+
+
 async def call_claude_chat(prompt: str, timeout: int = 120) -> str | None:
     """Call `claude -p` with the assembled prompt. Returns None on any failure."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "claude", "-p", "--tools", "WebSearch", "--allowedTools", "WebSearch",
+            "claude", "-p",
+            "--mcp-config", str(_MCP_CONFIG_PATH),
+            "--strict-mcp-config",
+            "--tools", "WebSearch",
+            "--allowedTools", "WebSearch", *_ALPACA_ALLOWED_TOOLS,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
