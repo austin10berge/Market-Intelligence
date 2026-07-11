@@ -47,7 +47,8 @@ bloating the main image with yt-dlp.
 
 | Mount | Purpose |
 |-------|---------|
-| `~/.claude:/root/.claude:ro` | Claude CLI auth (read-only) |
+| `~/.claude:/root/.claude:ro` | Claude CLI session dir (read-only) |
+| `~/.claude.json:/root/.claude.json:ro` | Claude CLI top-level config (sibling file, NOT inside `~/.claude/` — the CLI reads `$HOME/.claude.json` directly and treats it as missing/corrupt without this mount) |
 | `/usr/local/bin/claude:/usr/local/bin/claude:ro` | Claude CLI binary |
 | `./youtube-pipeline/data:/app/data` | SQLite state DB (persists across runs) |
 | `./youtube-pipeline/config.yaml:/app/config.yaml:ro` | Channel config (edit without rebuild) |
