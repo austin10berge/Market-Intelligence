@@ -27,11 +27,21 @@ docker-compose.yml defines 4 services:
 ```
 
 **Cron trigger for nightly pipeline (on LXC host):**
-Redirect stdout+stderr to a log file so failures/tracebacks are captured — `src/main.py`
-only configures `logging.basicConfig` (console handler), so nothing is written to disk
-without this redirection (`mkdir -p /root/market-intelligence/logs` first):
 ```
-0 19 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm pipeline >> /root/market-intelligence/logs/pipeline.log 2>&1
+0 17 * * 1-5,7 docker compose -f /root/market-intelligence/docker-compose.yml run -T --rm pipeline >> /var/log/mi-pipeline.log 2>&1
+```
+Runs 5 PM ET Mon–Fri plus Sunday. `src/main.py` only configures `logging.basicConfig`
+(console handler, no file target of its own) — the `>> ... 2>&1` redirection above is
+what actually captures its output to disk.
+
+**Cron trigger for market-data-refresh (daily OHLCV + fundamentals store, on LXC host):**
+```
+30 16 * * 1-5 docker compose -f /root/market-intelligence/docker-compose.yml run -T --rm market-data-refresh >> /var/log/mi-market-data-refresh.log 2>&1
+```
+
+**Cron trigger for cache pre-warm (on LXC host):**
+```
+25 9 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm prewarm >> /var/log/mi-prewarm.log 2>&1
 ```
 
 **Dockerfile** uses multi-stage builds. All Python services (api, discord-bot, pipeline) share a
