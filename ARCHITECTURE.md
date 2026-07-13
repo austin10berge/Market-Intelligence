@@ -27,8 +27,11 @@ docker-compose.yml defines 4 services:
 ```
 
 **Cron trigger for nightly pipeline (on LXC host):**
+Redirect stdout+stderr to a log file so failures/tracebacks are captured — `src/main.py`
+only configures `logging.basicConfig` (console handler), so nothing is written to disk
+without this redirection (`mkdir -p /root/market-intelligence/logs` first):
 ```
-0 19 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm pipeline
+0 19 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm pipeline >> /root/market-intelligence/logs/pipeline.log 2>&1
 ```
 
 **Dockerfile** uses multi-stage builds. All Python services (api, discord-bot, pipeline) share a

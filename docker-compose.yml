@@ -207,8 +207,9 @@ services:
       - youtube
 
   # ── Market data refresh (daily OHLCV + fundamentals, profile=refresh) ───────
-  # Cron entry (LXC host, ET timezone):
-  #   30 16 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm market-data-refresh
+  # Cron entry (LXC host, ET timezone). Redirect stdout+stderr to a log file so
+  # failures/tracebacks are captured (mkdir -p /root/market-intelligence/logs first):
+  #   30 16 * * 1-5  docker compose -f /root/market-intelligence/docker-compose.yml run --rm market-data-refresh >> /root/market-intelligence/logs/market-data-refresh.log 2>&1
   # Initial backfill (2 years, run once manually):
   #   docker compose run --rm market-data-refresh python3 -m src.market_data.refresh --full
   market-data-refresh:
