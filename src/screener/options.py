@@ -12,6 +12,7 @@ from dateutil.relativedelta import relativedelta  # noqa: F401 — kept for any 
 
 from ..config import settings as app_settings
 from ..db import get_csp_settings, get_watchlist
+from ._yf_timeout import call_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,10 @@ def _compute_technicals(symbol: str) -> dict | None:
     """
     try:
         ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="3mo")  # ~63 trading days
-        if hist.empty or len(hist) < 30:
-            logger.debug("Insufficient history for %s (%d bars)", symbol, len(hist))
+        hist = call_with_timeout(lambda: ticker.history(period="3mo"), label=f"history:{symbol}")
+        if hist is None or hist.empty or len(hist) < 30:  # ~63 trading days expected
+            bars = len(hist) if hist is not None else 0
+            logger.debug("Insufficient history for %s (%d bars)", symbol, bars)
             return None
 
         # pandas-ta expects a clean DatetimeIndex with tz stripped
@@ -296,8 +298,12 @@ def screen_csp_candidates(
     for symbol in qualifying_tickers:
         try:
             ticker = yf.Ticker(symbol)
-            expirations = ticker.options
-            current_price = ticker.fast_info.last_price
+            expirations = call_with_timeout(lambda: ticker.options, label=f"options:{symbol}")
+            current_price = call_with_timeout(
+                lambda: ticker.fast_info.last_price, label=f"fast_info:{symbol}"
+            )
+            if expirations is None or current_price is None:
+                continue
 
             valid_exps = _get_valid_expirations(
                 expirations, settings["min_dte"], settings["max_dte"]
@@ -311,7 +317,12 @@ def screen_csp_candidates(
 
             for exp_str in valid_exps:
                 try:
-                    chain = ticker.option_chain(exp_str)
+                    chain = call_with_timeout(
+                        lambda exp_str=exp_str: ticker.option_chain(exp_str),
+                        label=f"option_chain:{symbol}:{exp_str}",
+                    )
+                    if chain is None:
+                        continue
                     puts = chain.puts
                 except Exception as e:
                     logger.debug("Could not fetch chain for %s %s: %s", symbol, exp_str, e)
@@ -591,7 +602,9 @@ def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365
     for symbol in tickers:
         try:
             ticker = yf.Ticker(symbol)
-            expirations = ticker.options
+            expirations = call_with_timeout(lambda: ticker.options, label=f"options:{symbol}")
+            if expirations is None:
+                continue
 
             # Find an expiration roughly 1+ year out
             # Reusing original target helper but just checking minimum dates manually
@@ -610,11 +623,15 @@ def screen_leaps_candidates(tickers: list[str] | None = None, min_dte: int = 365
             if not target_exp:
                 continue
 
-            chain = ticker.option_chain(target_exp)
+            chain = call_with_timeout(
+                lambda: ticker.option_chain(target_exp), label=f"option_chain:{symbol}:{target_exp}"
+            )
+            current_price = call_with_timeout(
+                lambda: ticker.fast_info.last_price, label=f"fast_info:{symbol}"
+            )
+            if chain is None or current_price is None:
+                continue
             calls = chain.calls
-
-            # Get current price
-            current_price = ticker.fast_info.last_price
 
             # Real LEAPS delta target is ~0.80. As proxy, look ~20% ITM.
             target_strike = current_price * 0.80

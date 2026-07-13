@@ -15,6 +15,7 @@ import yfinance as yf
 from ..config import settings
 from ..db import get_stock_iv_history, get_stock_watchlist, store_stock_iv_snapshot
 from ..indicators import compute_adr20_pct
+from ._yf_timeout import call_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -463,9 +464,11 @@ def _build_underlying_history(symbol: str, days: int) -> pd.DataFrame:
     """Fetch enough underlying history to support IV backfill date selection."""
     buffer_days = days + ALPACA_MAX_DTE + 30
     ticker = yf.Ticker(symbol)
-    hist = ticker.history(period=f"{buffer_days}d")
-    if hist.empty:
-        return hist
+    hist = call_with_timeout(
+        lambda: ticker.history(period=f"{buffer_days}d"), label=f"history:{symbol}"
+    )
+    if hist is None or hist.empty:
+        return pd.DataFrame()
 
     hist = hist.copy()
     hist.index = pd.to_datetime(hist.index).tz_localize(None)
@@ -665,11 +668,13 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
         for symbol in tickers:
             try:
                 ticker = yf.Ticker(symbol)
-                info = ticker.info
+                info = call_with_timeout(lambda: ticker.info, label=f"info:{symbol}")
 
                 # 1 year gives enough history for 200 SMA (needs ~200 trading days).
-                hist = ticker.history(period="1y")
-                if hist.empty:
+                hist = call_with_timeout(
+                    lambda: ticker.history(period="1y"), label=f"history:{symbol}"
+                )
+                if info is None or hist is None or hist.empty:
                     continue
 
                 current_price = hist["Close"].iloc[-1]

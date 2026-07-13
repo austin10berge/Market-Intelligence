@@ -39,6 +39,7 @@ from ..market_data.store import (
     get_ohlcv,
     get_store_status,
 )
+from ._yf_timeout import call_with_timeout
 from .options import screen_csp_candidates
 
 logger = logging.getLogger(__name__)
@@ -605,7 +606,9 @@ def _fundamental_filter_from_yfinance(
 
         for symbol in batch:
             try:
-                info = yf.Ticker(symbol).info
+                info = call_with_timeout(lambda: yf.Ticker(symbol).info, label=f"info:{symbol}")
+                if info is None:
+                    continue
                 if info.get("quoteType", "").upper() != "EQUITY":
                     continue
 
@@ -667,8 +670,10 @@ def apply_vol_filter(
             hist = get_ohlcv(symbol, lookback_days=30)
             if hist.empty:
                 # Fallback to yfinance
-                hist = yf.Ticker(symbol).history(period="1mo")
-            if not hist.empty:
+                hist = call_with_timeout(
+                    lambda: yf.Ticker(symbol).history(period="1mo"), label=f"history:{symbol}"
+                )
+            if hist is not None and not hist.empty:
                 rv20 = _calculate_rv20(hist)
         except Exception as exc:
             logger.warning("RV-20 fetch failed for %s: %s", symbol, exc)
@@ -934,7 +939,12 @@ def apply_technical_conditions(
         hist = get_ohlcv(symbol, lookback_days=504)
         if hist.empty:
             try:
-                hist = yf.Ticker(symbol).history(period="2y")
+                hist = call_with_timeout(
+                    lambda: yf.Ticker(symbol).history(period="2y"), label=f"history:{symbol}"
+                )
+                if hist is None:
+                    row["technical_conditions"] = {}
+                    continue
             except Exception as exc:
                 logger.warning("History fetch failed for %s — excluding: %s", symbol, exc)
                 row["technical_conditions"] = {}
