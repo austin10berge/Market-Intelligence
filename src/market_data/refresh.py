@@ -29,6 +29,7 @@ from .store import (
     bulk_upsert_fundamentals,
     bulk_upsert_ohlcv_multi,
     ensure_tables,
+    get_stale_fundamental_tickers,
     get_store_status,
     get_universe_tickers,
     prune_stale_fundamentals,
@@ -48,6 +49,10 @@ _FUNDAMENTAL_TICKER_SLEEP_S = 0.3  # between individual .info calls to avoid rat
 
 # yf.download batch size — avoids URL-length limits on huge ticker lists
 _OHLCV_DOWNLOAD_BATCH_SIZE = 100
+
+# Fundamentals older than this after a refresh run are flagged as permanently
+# stuck (7 days — several missed daily runs).
+_STALE_FUNDAMENTAL_WARN_HOURS = 168
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -264,6 +269,20 @@ def refresh_universe(full: bool = False) -> dict:
     if pruned > 0:
         logger.info("Pruned %d fundamentals rows for tickers removed from universe", pruned)
 
+    # 4b. Surface any tickers that are still in the universe but never got a fresh
+    #     write this run (delisted / renamed / reclassified so they fail the
+    #     quoteType == "EQUITY" check and get silently skipped every run). These
+    #     are the zombie rows that used to make the whole store look ancient.
+    stale_tickers = get_stale_fundamental_tickers(threshold_hours=_STALE_FUNDAMENTAL_WARN_HOURS)
+    if stale_tickers:
+        logger.warning(
+            "%d fundamentals ticker(s) still stale beyond %dh (likely permanently "
+            "failing their fetch): %s",
+            len(stale_tickers),
+            _STALE_FUNDAMENTAL_WARN_HOURS,
+            ", ".join(f"{t['symbol']}({t['updated_at']})" for t in stale_tickers),
+        )
+
     total_elapsed = round(time.time() - t0, 1)
 
     # 5. Summary
@@ -278,6 +297,7 @@ def refresh_universe(full: bool = False) -> dict:
         "total_elapsed_s": total_elapsed,
         "mode": "full" if full else "incremental",
         "new_tickers": len(new_tickers),
+        "stuck_tickers": [t["symbol"] for t in stale_tickers],
         "store_status": status,
     }
     logger.info(

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pandas as pd
@@ -47,9 +47,23 @@ from src.market_data.store import (
     get_ohlcv,
     get_all_fundamentals,
     get_fundamentals_for_tickers,
+    get_stale_fundamental_tickers,
     get_store_status,
     get_universe_tickers,
 )
+
+
+def _set_updated_at(symbol: str, iso_ts: str) -> None:
+    """Directly override a fundamentals row's updated_at (simulates a stale row)."""
+    conn = sqlite3.connect(_tmp_db_path)
+    try:
+        conn.execute(
+            "UPDATE universe_fundamentals SET updated_at = ? WHERE symbol = ?",
+            (iso_ts, symbol),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -307,3 +321,85 @@ class TestUniversesColumn:
         match = next((r for r in result if r["symbol"] == "ZVZZT2"), None)
         assert match is not None
         assert match["universes"] == ""
+
+
+# ── Staleness metric (MAX-based) ──────────────────────────────────────────────
+
+class TestStalenessMetric:
+    def test_one_ancient_row_does_not_pin_freshness(self):
+        """A single very-old (stuck) row must NOT make the whole store look stale."""
+        ensure_tables()
+        # Many fresh rows (bulk_upsert stamps updated_at = now)
+        fresh = [
+            {"symbol": f"FRESH{i}", "market_cap_b": 10.0, "price": 50.0,
+             "beta": 1.0, "iv_pct": None}
+            for i in range(20)
+        ]
+        bulk_upsert_fundamentals(fresh)
+        # One permanently-stuck row, 36 days old (the observed prod failure mode)
+        bulk_upsert_fundamentals(
+            [{"symbol": "STUCKROW", "market_cap_b": 1.0, "price": 5.0, "beta": 1.0, "iv_pct": None}]
+        )
+        ancient = (datetime.now(timezone.utc) - timedelta(days=36)).isoformat()
+        _set_updated_at("STUCKROW", ancient)
+
+        status = get_store_status()
+        # MAX(updated_at) is fresh, so store is NOT stale despite the ancient row.
+        assert status["is_stale"] is False
+        assert status["stale_hours"] is not None
+        assert status["stale_hours"] < 48
+
+
+# ── get_stale_fundamental_tickers ─────────────────────────────────────────────
+
+class TestStaleFundamentalTickers:
+    def test_returns_only_rows_older_than_threshold(self):
+        ensure_tables()
+        bulk_upsert_fundamentals([
+            {"symbol": "STALE_A", "market_cap_b": 1.0, "price": 5.0, "beta": 1.0, "iv_pct": None},
+            {"symbol": "STALE_B", "market_cap_b": 1.0, "price": 5.0, "beta": 1.0, "iv_pct": None},
+            {"symbol": "FRESH_C", "market_cap_b": 1.0, "price": 5.0, "beta": 1.0, "iv_pct": None},
+        ])
+        _set_updated_at("STALE_A", (datetime.now(timezone.utc) - timedelta(days=40)).isoformat())
+        _set_updated_at("STALE_B", (datetime.now(timezone.utc) - timedelta(days=8)).isoformat())
+        # FRESH_C keeps its now() timestamp
+
+        symbols = [t["symbol"] for t in get_stale_fundamental_tickers(threshold_hours=168)]
+        assert "STALE_A" in symbols
+        assert "STALE_B" in symbols
+        assert "FRESH_C" not in symbols
+
+    def test_rows_include_updated_at(self):
+        ensure_tables()
+        bulk_upsert_fundamentals(
+            [{"symbol": "STALE_TS", "market_cap_b": 1.0, "price": 5.0, "beta": 1.0, "iv_pct": None}]
+        )
+        ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        _set_updated_at("STALE_TS", ts)
+        result = get_stale_fundamental_tickers(threshold_hours=168)
+        match = next((t for t in result if t["symbol"] == "STALE_TS"), None)
+        assert match is not None
+        assert match["updated_at"] == ts
+
+    def test_ordered_oldest_first(self):
+        ensure_tables()
+        bulk_upsert_fundamentals([
+            {"symbol": "ORD_OLDER", "market_cap_b": 1.0, "price": 5.0, "beta": 1.0, "iv_pct": None},
+            {"symbol": "ORD_NEWER", "market_cap_b": 1.0, "price": 5.0, "beta": 1.0, "iv_pct": None},
+        ])
+        _set_updated_at("ORD_OLDER", (datetime.now(timezone.utc) - timedelta(days=50)).isoformat())
+        _set_updated_at("ORD_NEWER", (datetime.now(timezone.utc) - timedelta(days=9)).isoformat())
+        symbols = [t["symbol"] for t in get_stale_fundamental_tickers(threshold_hours=168)]
+        assert symbols.index("ORD_OLDER") < symbols.index("ORD_NEWER")
+
+    def test_status_surfaces_stuck_tickers(self):
+        ensure_tables()
+        bulk_upsert_fundamentals(
+            [{"symbol": "STUCK_ST", "market_cap_b": 1.0, "price": 5.0, "beta": 1.0, "iv_pct": None}]
+        )
+        old = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+        _set_updated_at("STUCK_ST", old)
+        status = get_store_status()
+        assert "stuck_tickers" in status
+        assert "STUCK_ST" in status["stuck_tickers"]
+        assert len(status["stuck_tickers"]) <= 10

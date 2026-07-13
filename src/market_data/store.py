@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import math
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -414,6 +414,14 @@ def get_available_sectors() -> list[str]:
 
 # ── Store metadata ────────────────────────────────────────────────────────────
 
+# Age (hours) past which the store's freshest fundamentals write is considered stale.
+_STALE_THRESHOLD_HOURS = 48
+
+# Age (hours) past which an individual ticker's row is treated as permanently
+# stuck (never re-written) and surfaced in the status payload. 7 days.
+_STUCK_THRESHOLD_HOURS = 168
+
+
 def get_store_status() -> dict:
     """Return metadata about the local data store for the API/UI.
 
@@ -439,16 +447,19 @@ def get_store_status() -> dict:
         fund_count = conn.execute(
             "SELECT COUNT(*) as cnt FROM universe_fundamentals"
         ).fetchone()
+        # Use MAX(updated_at) — the most recent successful write — as the freshness
+        # signal, NOT MIN. A handful of permanently-failing tickers (delisted /
+        # reclassified / renamed) never get re-written, so their ancient updated_at
+        # would pin MIN forever and make the whole store look stale even when ~all
+        # other tickers refreshed today. See get_stale_fundamental_tickers() for a
+        # way to surface those stuck rows.
         fund_updated = conn.execute(
-            "SELECT MIN(updated_at) as oldest FROM universe_fundamentals"
+            "SELECT MAX(updated_at) as newest FROM universe_fundamentals"
         ).fetchone()
 
         latest_date = ohlcv_latest["latest"] if ohlcv_latest else None
-        fund_updated_at = fund_updated["oldest"] if fund_updated else None
+        fund_updated_at = fund_updated["newest"] if fund_updated else None
 
-        # Staleness check: use count-based threshold (90% of fundamentals updated
-        # within 48h) rather than MIN(updated_at), so single-ticker yfinance
-        # failures don't keep the stale flag forever.
         is_stale = False
         stale_hours: float | None = None
         if fund_updated_at:
@@ -456,19 +467,23 @@ def get_store_status() -> dict:
                 updated_dt = datetime.fromisoformat(fund_updated_at.replace("Z", "+00:00"))
                 age_hours = (datetime.now(timezone.utc) - updated_dt).total_seconds() / 3600
                 stale_hours = round(age_hours, 1)
-
-                total = fund_count["cnt"] if fund_count else 0
-                recent = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM universe_fundamentals"
-                    " WHERE updated_at > datetime('now', '-48 hours')"
-                ).fetchone()
-                recent_count = recent["cnt"] if recent else 0
-                fresh_ratio = recent_count / total if total > 0 else 0.0
-                is_stale = fresh_ratio < 0.90
+                is_stale = age_hours > _STALE_THRESHOLD_HOURS
             except Exception:
                 is_stale = True
 
-        return {
+        # Surface up to 10 permanently-stuck tickers (older than 7 days) so the
+        # "one zombie row" case is visible in the API/UI without log-diving.
+        stuck_cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=_STUCK_THRESHOLD_HOURS)
+        ).isoformat()
+        stuck_rows = conn.execute(
+            "SELECT symbol FROM universe_fundamentals"
+            " WHERE updated_at < ? ORDER BY updated_at ASC LIMIT 10",
+            (stuck_cutoff,),
+        ).fetchall()
+        stuck_tickers = [r["symbol"] for r in stuck_rows]
+
+        status = {
             "ohlcv_ticker_count": ohlcv_tickers["cnt"] if ohlcv_tickers else 0,
             "ohlcv_row_count": ohlcv_rows["cnt"] if ohlcv_rows else 0,
             "ohlcv_latest_date": latest_date,
@@ -477,6 +492,9 @@ def get_store_status() -> dict:
             "is_stale": is_stale,
             "stale_hours": stale_hours,
         }
+        if stuck_tickers:
+            status["stuck_tickers"] = stuck_tickers
+        return status
     finally:
         conn.close()
 
@@ -512,5 +530,40 @@ def prune_stale_fundamentals(current_universe: list[str]) -> int:
         )
         conn.commit()
         return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def get_stale_fundamental_tickers(threshold_hours: int = 168) -> list[dict]:
+    """Return fundamentals rows whose updated_at is older than threshold_hours.
+
+    These are tickers that keep failing their yfinance fetch every refresh run
+    (e.g. delisted, renamed, or reclassified so they no longer pass the
+    quoteType == "EQUITY" check) yet remain nominally in the universe, so
+    prune_stale_fundamentals() never removes them. Surfacing them makes the
+    "one stuck row" problem diagnosable without a live production investigation.
+
+    Args:
+        threshold_hours: age cutoff; rows older than this are returned. Default
+            168h (7 days).
+
+    Returns:
+        list of {"symbol": str, "updated_at": str}, oldest first.
+    """
+    # Compute the cutoff in Python so it matches the stored ISO-8601 format
+    # (T separator, +00:00 offset) exactly — a lexicographic string compare then
+    # equals a chronological compare, avoiding SQLite's space-separated
+    # datetime('now') format mismatching at same-day boundaries.
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=threshold_hours)).isoformat()
+    conn = _get_connection()
+    try:
+        conn.executescript(_DDL)
+        rows = conn.execute(
+            "SELECT symbol, updated_at FROM universe_fundamentals"
+            " WHERE updated_at < ?"
+            " ORDER BY updated_at ASC",
+            (cutoff,),
+        ).fetchall()
+        return [{"symbol": r["symbol"], "updated_at": r["updated_at"]} for r in rows]
     finally:
         conn.close()

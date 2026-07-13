@@ -7,7 +7,9 @@ temp file using the same pattern as test_market_data_store.py.
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -575,6 +577,52 @@ class TestRefreshUniverseDownloadErrorHandling:
             "fundamentals_elapsed_s",
             "total_elapsed_s",
             "mode",
+            "stuck_tickers",
             "store_status",
         }
         assert expected_keys.issubset(result.keys())
+
+
+# ── refresh_universe — stuck-ticker visibility ───────────────────────────────
+
+class TestRefreshUniverseStuckTickers:
+    """A ticker still in the universe but never re-written should be surfaced."""
+
+    def test_permanently_failing_ticker_is_reported_and_logged(self, monkeypatch, caplog):
+        ensure_tables()
+
+        # STUCKX stays in the universe (so prune won't remove it) but its
+        # fundamentals fetch always yields nothing (simulating a delisted /
+        # reclassified ticker skipped every run) — its ancient updated_at persists.
+        mod = "src.market_data.refresh."
+        monkeypatch.setattr(mod + "fetch_sp500_tickers", lambda: ["AAPL", "STUCKX"])
+        monkeypatch.setattr(mod + "fetch_nasdaq100_tickers", lambda: [])
+        monkeypatch.setattr(mod + "fetch_nasdaq_large_cap_tickers", lambda: [])
+        monkeypatch.setattr(mod + "fetch_nyse_large_cap_tickers", lambda: [])
+        monkeypatch.setattr(mod + "_download_ohlcv_batch", lambda symbols, period="5d": {})
+
+        # Seed a stale STUCKX row (40 days old) directly.
+        conn = sqlite3.connect(_tmp_db_path)
+        try:
+            ancient = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+            conn.execute(
+                "INSERT INTO universe_fundamentals (symbol, updated_at) VALUES (?, ?)"
+                " ON CONFLICT(symbol) DO UPDATE SET updated_at = excluded.updated_at",
+                ("STUCKX", ancient),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Fundamentals fetch returns rows for everything EXCEPT STUCKX (it's skipped).
+        def _mock_fundamentals(symbols):
+            return [{"symbol": s, "market_cap_b": 10.0, "price": 100.0, "beta": 1.0, "iv_pct": None}
+                    for s in symbols if s != "STUCKX"]
+        monkeypatch.setattr(mod + "_fetch_fundamentals_batch", _mock_fundamentals)
+
+        with caplog.at_level("WARNING"):
+            result = refresh_universe(full=False)
+
+        assert "STUCKX" in result["stuck_tickers"]
+        assert "AAPL" not in result["stuck_tickers"]
+        assert any("STUCKX" in rec.message for rec in caplog.records)
