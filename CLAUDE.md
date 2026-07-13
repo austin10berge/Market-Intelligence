@@ -44,6 +44,15 @@ docker compose run --rm prewarm
 - When debugging a live issue: edits must land in the main workspace. Check `docker-compose.local.yml` `x-worktree-src` before assuming a worktree is mounted.
 - **Production is a separate host** (10.0.1.21). `dev-mi.austin10berge.com` is dev only. Diagnose prod bugs against the PROD API (`market.austin10berge.com`), not local containers.
 - Claude has no SSH/prod access. Prepare exact commands for the user to run manually.
+- **Logs without SSH**: Loki is reachable directly from this dev host at `http://10.0.1.25:3100` (no VPN needed) and covers every container in the fleet, including all Market Intelligence services (`market-intelligence-api`, `market-intelligence-pipeline-run-*`, `market-intelligence-prewarm-run-*`, `market-intelligence-discord-bot`, etc. — pipeline/refresh/prewarm runs get a unique `-run-<hash>` suffix per invocation). Query before asking the user to SSH in and tail a file:
+  ```bash
+  curl -s -G "http://10.0.1.25:3100/loki/api/v1/query_range" \
+    --data-urlencode 'query={service_name="market-intelligence-api"}' \
+    --data-urlencode "start=$(($(date +%s)-300))000000000" \
+    --data-urlencode "end=$(date +%s)000000000" \
+    --data-urlencode "limit=50"
+  ```
+  List available service names: `curl -s "http://10.0.1.25:3100/loki/api/v1/label/service_name/values"`.
 
 ## Worktree → Dev Dashboard Testing
 
