@@ -85,6 +85,37 @@ services:
       retries: 3
       start_period: 10s
 
+  # ── Schwab MCP bridge (persistent HTTP; backs the trade chat bot's access to
+  # real account data — positions, orders, transactions, balances). schwab-mcp
+  # only supports stdio transport (no --transport flag, confirmed from its
+  # source), so mcp-proxy wraps it and re-exposes it over streamable-HTTP —
+  # the same fix alpaca-mcp above needed after its original per-call stdio
+  # spawn silently lost the race against claude -p's first request. Verified
+  # locally: mcp-proxy --port N -- schwab-mcp server serves a working /mcp
+  # endpoint; bare GET returns 406 (healthy) same as alpaca-mcp's endpoint. ──
+  schwab-mcp:
+    build:
+      context: .
+      target: base
+    container_name: market-intelligence-schwab-mcp
+    volumes:
+      # Read-only — only this service's container ever sees the token file;
+      # discord-bot reaches Schwab data exclusively via the HTTP endpoint
+      # below, never via filesystem access to the credential.
+      - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp:ro
+    command: mcp-proxy --port 8002 --host 0.0.0.0 -- schwab-mcp server --no-technical-tools
+    expose:
+      - "8002"  # Internal only — discord-bot reaches it via the Docker network
+    restart: unless-stopped
+    healthcheck:
+      # No -f: the MCP endpoint 406s a bare GET (wrong Accept header) even when
+      # healthy — this only needs to confirm the server is accepting connections.
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8002/mcp"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # ── Discord bot ──────────────────────────────────────────────────────────────
   discord-bot:
     build:
@@ -119,6 +150,8 @@ services:
       api:
         condition: service_healthy
       alpaca-mcp:
+        condition: service_healthy
+      schwab-mcp:
         condition: service_healthy
     restart: unless-stopped
 
