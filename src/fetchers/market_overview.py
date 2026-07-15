@@ -315,30 +315,61 @@ def _fetch_breadth() -> dict | None:
         return None
 
 
+_THEME_CHUNK_SIZE = 6
+
+
+def _chunk_tickers(items: list[str], size: int) -> list[list[str]]:
+    """Split into chunks of `size`, merging a trailing remainder of exactly 1
+    into the prior chunk.
+
+    yfinance returns a flat, non-ticker-grouped DataFrame for single-ticker
+    downloads (group_by='ticker' only takes effect with 2+ tickers), which
+    the per-ticker extraction below can't parse — so no chunk may end up
+    with exactly one ticker.
+    """
+    chunks = [items[i:i + size] for i in range(0, len(items), size)]
+    if len(chunks) > 1 and len(chunks[-1]) == 1:
+        chunks[-2].extend(chunks.pop())
+    return chunks
+
+
 async def _fetch_themes() -> dict:
     all_tickers = list(SINGLE_TICKER_THEMES.values()) + [
         t for tickers in BASKET_THEMES.values() for t in tickers
     ]
-    raw = await asyncio.to_thread(
-        yf.download,
-        " ".join(all_tickers),
-        period="30d",
-        group_by="ticker",
-        progress=False,
-        auto_adjust=True,
+    chunks = _chunk_tickers(all_tickers, _THEME_CHUNK_SIZE)
+    chunk_results = await asyncio.gather(
+        *[
+            _download_with_retry(
+                " ".join(chunk), period="30d", group_by="ticker",
+                progress=False, auto_adjust=True,
+            )
+            for chunk in chunks
+        ],
+        return_exceptions=True,
     )
 
+    closes: dict[str, object] = {}
+    for chunk, result in zip(chunks, chunk_results):
+        if isinstance(result, Exception):
+            logger.warning("Thematic ETF: chunk %s failed: %s", chunk, result)
+            continue
+        for ticker in chunk:
+            try:
+                series = result[ticker]["Close"].dropna()
+            except (KeyError, TypeError):
+                continue
+            if not series.empty:
+                closes[ticker] = series
+
     def _extract(ticker: str) -> dict | None:
-        try:
-            closes = raw[ticker]["Close"].dropna()
-        except (KeyError, TypeError):
-            return None
-        if closes.empty:
+        series = closes.get(ticker)
+        if series is None:
             return None
         return {
-            "pct_1d": _pct_change(closes, 1),
-            "pct_1w": _pct_change(closes, 5),
-            "pct_1m": _pct_change(closes, 21),
+            "pct_1d": _pct_change(series, 1),
+            "pct_1w": _pct_change(series, 5),
+            "pct_1m": _pct_change(series, 21),
         }
 
     singles: dict[str, dict] = {}

@@ -14,10 +14,12 @@ import respx  # noqa: F401
 
 from src.fetchers.market_overview import (
     SECTOR_ETFS,
+    _chunk_tickers,
     _download_with_retry,
     _fetch_breadth,
     _fetch_gex,
     _fetch_sectors,
+    _fetch_themes,
     _fetch_vix,
     _gex_bucket,
     _gex_trend,
@@ -378,6 +380,82 @@ class TestDownloadWithRetry:
         with pytest.raises(Exception, match="fail 3"):
             await _download_with_retry("^VIX ^VIX3M", period="10d")
         assert mock_dl.call_count == 3
+
+
+# ── Theme chunking ───────────────────────────────────────────────────────────
+
+class TestChunkTickers:
+    def test_even_split(self):
+        items = [f"T{i}" for i in range(12)]
+        chunks = _chunk_tickers(items, size=6)
+        assert chunks == [items[0:6], items[6:12]]
+
+    def test_remainder_larger_than_one_kept_separate(self):
+        items = [f"T{i}" for i in range(15)]  # 6, 6, 3
+        chunks = _chunk_tickers(items, size=6)
+        assert [len(c) for c in chunks] == [6, 6, 3]
+
+    def test_trailing_singleton_merged_into_prior_chunk(self):
+        items = [f"T{i}" for i in range(13)]  # naive split: 6, 6, 1
+        chunks = _chunk_tickers(items, size=6)
+        # yfinance returns a flat (non-grouped) DataFrame for single-ticker
+        # downloads, which _extract can't parse — no chunk may have size 1.
+        assert [len(c) for c in chunks] == [6, 7]
+        assert sum(len(c) for c in chunks) == 13
+
+    def test_single_item_total_stays_one_chunk(self):
+        chunks = _chunk_tickers(["ONLY"], size=6)
+        assert chunks == [["ONLY"]]
+
+
+# ── Themes ────────────────────────────────────────────────────────────────────
+
+class TestThemes:
+    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_all_themes_present_when_all_chunks_succeed(self, mock_dl, mock_sleep):
+        singles = {"SaaS": "IGV", "Semis/Memory": "SMH"}
+        baskets = {"Hyperscalers": ["AMZN", "MSFT"]}
+        with patch.dict(
+            "src.fetchers.market_overview.SINGLE_TICKER_THEMES", singles, clear=True
+        ), patch.dict(
+            "src.fetchers.market_overview.BASKET_THEMES", baskets, clear=True
+        ):
+            mock_dl.return_value = _make_yf_df(["IGV", "SMH", "AMZN", "MSFT"], n_days=30)
+            result = await _fetch_themes()
+        assert set(result["singles"].keys()) == {"SaaS", "Semis/Memory"}
+        assert set(result["baskets"].keys()) == {"Hyperscalers"}
+
+    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_one_failed_chunk_does_not_drop_other_chunks(self, mock_dl, mock_sleep):
+        # 8 single-ticker themes, chunk size 6 → two chunks: [6 tickers], [2 tickers]
+        singles = {f"Theme{i}": f"TK{i}" for i in range(8)}
+        with patch.dict(
+            "src.fetchers.market_overview.SINGLE_TICKER_THEMES", singles, clear=True
+        ), patch.dict(
+            "src.fetchers.market_overview.BASKET_THEMES", {}, clear=True
+        ):
+            chunk1_ticker_str = " ".join(f"TK{i}" for i in range(6))
+            chunk2_tickers = [f"TK{i}" for i in range(6, 8)]
+            chunk2_ticker_str = " ".join(chunk2_tickers)
+
+            # asyncio.gather runs both chunks' retry loops concurrently, so a
+            # plain list-based side_effect would have a nondeterministic
+            # consumption order across the two chunks. Route by the ticker
+            # string argument instead so each chunk's outcome is deterministic
+            # regardless of scheduling order.
+            def _routed_side_effect(tickers_arg, **kwargs):
+                if tickers_arg == chunk1_ticker_str:
+                    raise Exception("chunk 1 rate limited")
+                assert tickers_arg == chunk2_ticker_str
+                return _make_yf_df(chunk2_tickers, n_days=30)
+
+            mock_dl.side_effect = _routed_side_effect
+            result = await _fetch_themes()
+        # Chunk 1 (Theme0..Theme5) exhausted retries and failed entirely;
+        # chunk 2 (Theme6, Theme7) succeeded and must still be present.
+        assert set(result["singles"].keys()) == {"Theme6", "Theme7"}
 
 
 # ── Breadth ───────────────────────────────────────────────────────────────────
