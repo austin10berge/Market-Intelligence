@@ -83,33 +83,55 @@ async def _call_claude_cli(system_prompt: str, user_prompt: str) -> str | None:
         return None
 
 
+_GEMINI_RETRIES = 2
+_GEMINI_RETRY_BACKOFF_S = 2.0
+
+
 async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
-    """Call Gemini API for synthesis."""
-    try:
-        from google import genai
+    """Call Gemini API for synthesis, retrying transient failures.
 
-        client = genai.Client(api_key=settings.gemini_api_key)
+    Server-side errors (5xx, e.g. "high demand") and other unexpected
+    exceptions (network blips) are retried a couple of times with backoff.
+    Client errors (4xx — bad auth, exceeded quota) are not retried since
+    they won't resolve within the request lifetime.
+    """
+    from google import genai
+    from google.genai import errors as genai_errors
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=user_prompt,
-            config=genai.types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.7,
-            ),
-        )
+    client = genai.Client(api_key=settings.gemini_api_key)
 
-        text = response.text
-        if text:
-            logger.info(f"LLM: Gemini returned {len(text)} chars")
-            return text.strip()
+    for attempt in range(_GEMINI_RETRIES + 1):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=user_prompt,
+                config=genai.types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.7,
+                ),
+            )
+            text = response.text
+            if text:
+                logger.info(f"LLM: Gemini returned {len(text)} chars")
+                return text.strip()
 
-        logger.warning("LLM: Gemini returned empty response")
-        return None
+            logger.warning("LLM: Gemini returned empty response")
+            return None
 
-    except Exception as e:
-        logger.exception("LLM: Gemini call failed: %s", e)
-        return None
+        except genai_errors.ClientError as exc:
+            logger.exception("LLM: Gemini call failed with a client error (not retrying): %s", exc)
+            return None
+
+        except Exception as exc:
+            if attempt < _GEMINI_RETRIES:
+                logger.warning(
+                    "LLM: Gemini call failed (attempt %d/%d), retrying: %s",
+                    attempt + 1, _GEMINI_RETRIES + 1, exc,
+                )
+                await asyncio.sleep(_GEMINI_RETRY_BACKOFF_S * (attempt + 1))
+                continue
+            logger.exception("LLM: Gemini call failed after %d attempts: %s", _GEMINI_RETRIES + 1, exc)
+            return None
 
 
 def _fallback_summary(user_prompt: str) -> str:
