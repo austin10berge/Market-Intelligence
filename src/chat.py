@@ -366,16 +366,43 @@ _ALPACA_ALLOWED_TOOLS: tuple[str, ...] = (
     "mcp__alpaca__get_market_movers",
 )
 
+_SCHWAB_MCP_CONFIG_PATH = Path(__file__).parent.parent / "discord_bot" / "schwab-mcp.json"
+
+# Read-only account/market-data tools only — no preview_*/place_*/cancel_*
+# tool is ever listed here, regardless of what the schwab-mcp server exposes.
+# See docs/superpowers/specs/2026-07-15-schwab-mcp-trade-chat-design.md.
+_SCHWAB_ALLOWED_TOOLS: tuple[str, ...] = (
+    # positions/balances
+    "mcp__schwab__get_accounts",
+    "mcp__schwab__get_account",
+    # orders/transactions
+    "mcp__schwab__get_orders",
+    "mcp__schwab__get_order",
+    "mcp__schwab__get_transactions",
+    "mcp__schwab__get_transaction",
+    # quotes/chains
+    "mcp__schwab__get_quotes",
+    "mcp__schwab__get_option_chain",
+    "mcp__schwab__get_advanced_option_chain",
+    "mcp__schwab__get_option_expiration_chain",
+    "mcp__schwab__get_advanced_price_history",
+    "mcp__schwab__get_movers",
+    "mcp__schwab__get_market_hours",
+    "mcp__schwab__get_instruments",
+    "mcp__schwab__create_option_symbol",
+    "mcp__schwab__get_datetime",
+)
+
 
 async def call_claude_chat(prompt: str, timeout: int = 120) -> str | None:
     """Call `claude -p` with the assembled prompt. Returns None on any failure."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "claude", "-p",
-            "--mcp-config", str(_MCP_CONFIG_PATH),
+            "--mcp-config", str(_MCP_CONFIG_PATH), str(_SCHWAB_MCP_CONFIG_PATH),
             "--strict-mcp-config",
             "--tools", "WebSearch",
-            "--allowedTools", "WebSearch", *_ALPACA_ALLOWED_TOOLS,
+            "--allowedTools", "WebSearch", *_ALPACA_ALLOWED_TOOLS, *_SCHWAB_ALLOWED_TOOLS,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
