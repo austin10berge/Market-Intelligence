@@ -99,10 +99,15 @@ services:
       target: base
     container_name: market-intelligence-schwab-mcp
     volumes:
-      # Read-only — only this service's container ever sees the token file;
-      # discord-bot reaches Schwab data exclusively via the HTTP endpoint
-      # below, never via filesystem access to the credential.
-      - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp:ro
+      # Read-write — schwab-mcp needs to persist its own refreshed OAuth
+      # access token back to token.yaml (tokens are short-lived, ~30 min,
+      # and refresh on nearly every call). discord-bot never gets
+      # filesystem access to this credential at all — that's the boundary
+      # that actually matters here, not this container's own write access
+      # to its own token file. Confirmed necessary via live reproduction
+      # (2026-07-15): a :ro mount here made every real tool call fail with
+      # "Read-only file system: token.yaml".
+      - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp
     command: mcp-proxy --port 8002 --host 0.0.0.0 -- schwab-mcp server --no-technical-tools
     expose:
       - "8002"  # Internal only — discord-bot reaches it via the Docker network
