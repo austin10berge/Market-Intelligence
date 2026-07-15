@@ -54,10 +54,17 @@ schwab-mcp:
     target: base
   container_name: market-intelligence-schwab-mcp
   volumes:
-    # Read-only credentials — only this service's container ever sees them;
-    # discord-bot reaches Schwab data exclusively via the HTTP MCP endpoint below,
-    # never via filesystem access to the token file.
-    - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp:ro
+    # Read-write — only this service's container ever sees the credential;
+    # discord-bot reaches Schwab data exclusively via the HTTP MCP endpoint
+    # below, never via filesystem access to the token file, so that boundary
+    # holds regardless of this mount's write access. Must be read-write (not
+    # :ro) because schwab-mcp needs to persist its own refreshed access token
+    # back to token.yaml — Schwab access tokens are short-lived (~30 min) and
+    # get refreshed on nearly every call. Confirmed via live reproduction
+    # (2026-07-15): a :ro mount here made every real tool call fail with
+    # "[Errno 30] Read-only file system: '.../token.yaml'" — the tool
+    # connected and was called correctly, it just couldn't do its job.
+    - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp
   command: >
     mcp-proxy --port 8002 --host 0.0.0.0
     -- schwab-mcp server --no-technical-tools
@@ -74,7 +81,7 @@ schwab-mcp:
 
 - **`--no-technical-tools`**: passed to `schwab-mcp server` for defense-in-depth scope minimization at the source, matching the tool scope agreed below — exact set of tools this disables to be confirmed during implementation (not observed in the tool list captured during earlier ad-hoc verification, so it may not add much beyond what's already excluded — verify and adjust this flag if it turns out to remove tools we actually want).
 - **`mcp-proxy` flag syntax and endpoint confirmed by direct local reproduction** (2026-07-15, outside Docker): `mcp-proxy --port 8099 --host 127.0.0.1 -- /home/dev/.local/bin/schwab-mcp server` serves a working streamable-HTTP MCP endpoint at `/mcp` — a real `initialize` POST returned `{"serverInfo":{"name":"schwab-mcp","version":"1.28.1"}, ...}`, and a bare GET to `/mcp` returns `406` with curl exit `0` (no `-f`), exactly matching the existing Alpaca healthcheck's assumption. No hedge needed on this piece.
-- **`~/.local/share/schwab-mcp` read-only mount**: the same host directory already used by the operator's own `schwab-mcp` CLI setup (`[[reference_schwab_mcp]]`) — no duplicate credential file, no new secret to manage. Read-only so a compromised container can't tamper with the token file.
+- **`~/.local/share/schwab-mcp` mount**: the same host directory already used by the operator's own `schwab-mcp` CLI setup (`[[reference_schwab_mcp]]`) — no duplicate credential file, no new secret to manage. Read-write (not `:ro` — see the volumes comment above for why). The credential-isolation property this design cares about is that `discord-bot` never gets filesystem access to it at all, not that this one service's own container can't write its own token file.
 - `discord-bot` gains `schwab-mcp` as a `depends_on: condition: service_healthy` dependency, same pattern as `alpaca-mcp`.
 
 ### 2. `discord_bot/schwab-mcp.json` (new)
