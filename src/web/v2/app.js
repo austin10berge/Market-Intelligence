@@ -1375,8 +1375,9 @@ function renderGex(gex) {
     if (!el) return;
     if (!gex || gex.value_b == null) { el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
     const arrow = gex.trend === 'Rising' ? '↑' : gex.trend === 'Falling' ? '↓' : '→';
+    const sign = gex.value_b >= 0 ? 'positive' : 'negative';
     el.innerHTML = `
-        <div class="gex-value">$${gex.value_b.toFixed(1)}B</div>
+        <div class="gex-value ${sign}">$${gex.value_b.toFixed(1)}B</div>
         <div class="gex-label">${escHtml(gex.label)}</div>
         <div class="gex-avg">20d avg: $${gex.rolling_20d_avg_b.toFixed(1)}B &nbsp; ${arrow} ${escHtml(gex.trend)}</div>`;
 }
@@ -1387,13 +1388,17 @@ function renderBreadth(breadth) {
     if (!breadth) { el.innerHTML = '<span style="color:var(--tv-muted);font-size: 13px">Unavailable</span>'; return; }
     const pct = breadth.pct_above_200ma ?? 0;
     const maColor = pct >= 60 ? 'green' : pct >= 40 ? 'yellow' : 'red';
+    const ratio = breadth.ad_ratio;
+    const adAgreement = (pct > 50 && ratio != null && ratio > 1) ? 'positive'
+        : (pct < 50 && ratio != null && ratio < 1) ? 'negative'
+        : '';
     el.innerHTML = `
         <div class="breadth-row">
             <span class="breadth-label">200d MA</span>
             <div class="breadth-bar-track"><div class="breadth-bar-fill ${maColor}" style="width:${pct.toFixed(1)}%"></div></div>
             <span class="breadth-value ${maColor}">${pct.toFixed(0)}%</span>
         </div>
-        <div class="breadth-ad">A/D &nbsp; ${breadth.advancing}↑ / ${breadth.declining}↓ &nbsp; ratio ${breadth.ad_ratio != null ? breadth.ad_ratio.toFixed(2) : '—'}</div>`;
+        <div class="breadth-ad ${adAgreement}">A/D &nbsp; ${breadth.advancing}↑ / ${breadth.declining}↓ &nbsp; ratio ${ratio != null ? ratio.toFixed(2) : '—'}</div>`;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
