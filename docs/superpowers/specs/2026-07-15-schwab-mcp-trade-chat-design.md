@@ -73,7 +73,7 @@ schwab-mcp:
 ```
 
 - **`--no-technical-tools`**: passed to `schwab-mcp server` for defense-in-depth scope minimization at the source, matching the tool scope agreed below — exact set of tools this disables to be confirmed during implementation (not observed in the tool list captured during earlier ad-hoc verification, so it may not add much beyond what's already excluded — verify and adjust this flag if it turns out to remove tools we actually want).
-- **Exact `mcp-proxy` flag syntax** (the `--` separator between proxy flags and the wrapped command, default endpoint path for streamable-http mode) **to be confirmed against the installed CLI version during implementation** — same hedge as the original Alpaca spec's flag syntax, for the same reason (don't want to hand-guess a bridge tool's CLI contract in the design doc).
+- **`mcp-proxy` flag syntax and endpoint confirmed by direct local reproduction** (2026-07-15, outside Docker): `mcp-proxy --port 8099 --host 127.0.0.1 -- /home/dev/.local/bin/schwab-mcp server` serves a working streamable-HTTP MCP endpoint at `/mcp` — a real `initialize` POST returned `{"serverInfo":{"name":"schwab-mcp","version":"1.28.1"}, ...}`, and a bare GET to `/mcp` returns `406` with curl exit `0` (no `-f`), exactly matching the existing Alpaca healthcheck's assumption. No hedge needed on this piece.
 - **`~/.local/share/schwab-mcp` read-only mount**: the same host directory already used by the operator's own `schwab-mcp` CLI setup (`[[reference_schwab_mcp]]`) — no duplicate credential file, no new secret to manage. Read-only so a compromised container can't tamper with the token file.
 - `discord-bot` gains `schwab-mcp` as a `depends_on: condition: service_healthy` dependency, same pattern as `alpaca-mcp`.
 
