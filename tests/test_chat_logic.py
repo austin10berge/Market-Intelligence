@@ -334,6 +334,7 @@ class TestCallClaudeChatMcpWiring:
         allowed_idx = argv.index("--allowedTools")
         allowed = argv[allowed_idx + 1:]
         assert "WebSearch" in allowed
+        assert "ToolSearch" in allowed
         assert "mcp__alpaca__get_option_chain" in allowed
         assert "mcp__alpaca__get_option_snapshot" in allowed
         assert "mcp__alpaca__get_stock_snapshot" in allowed
@@ -342,4 +343,8 @@ class TestCallClaudeChatMcpWiring:
         assert "mcp__schwab__get_orders" in allowed
         assert "mcp__schwab__get_quotes" in allowed
         assert not any(t.startswith("mcp__schwab__preview_") for t in allowed)
-        assert len(allowed) == 41  # WebSearch + 24 Alpaca tools + 16 Schwab tools
+        assert len(allowed) == 42  # WebSearch + ToolSearch + 24 Alpaca tools + 16 Schwab tools
+
+        tools_idx = argv.index("--tools")
+        tools = argv[tools_idx + 1:allowed_idx]
+        assert tools == ("WebSearch", "ToolSearch")

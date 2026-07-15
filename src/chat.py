@@ -401,8 +401,15 @@ async def call_claude_chat(prompt: str, timeout: int = 120) -> str | None:
             "claude", "-p",
             "--mcp-config", str(_MCP_CONFIG_PATH), str(_SCHWAB_MCP_CONFIG_PATH),
             "--strict-mcp-config",
-            "--tools", "WebSearch",
-            "--allowedTools", "WebSearch", *_ALPACA_ALLOWED_TOOLS, *_SCHWAB_ALLOWED_TOOLS,
+            # ToolSearch is required for the model to discover MCP tool schemas
+            # at all — without it, mcp__alpaca__*/mcp__schwab__* tools connect
+            # successfully (server-side "hasTools:true") but the model has no
+            # way to learn they exist, and silently never calls them. Found via
+            # live reproduction (2026-07-15): identical prompts reliably failed
+            # to call any Schwab tool without ToolSearch (3/3) and reliably
+            # succeeded with it (2/2, correct real data both times).
+            "--tools", "WebSearch", "ToolSearch",
+            "--allowedTools", "WebSearch", "ToolSearch", *_ALPACA_ALLOWED_TOOLS, *_SCHWAB_ALLOWED_TOOLS,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
