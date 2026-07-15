@@ -2,8 +2,9 @@ FROM python:3.12-slim AS base
 
 WORKDIR /app
 
-# install curl for healthchecks and ca-certificates for outbound HTTPS
-RUN apt-get update && apt-get install -y curl ca-certificates libgomp1 && rm -rf /var/lib/apt/lists/*
+# install curl for healthchecks, ca-certificates for outbound HTTPS, and git
+# (pip needs it to install schwab-mcp directly from GitHub — not on PyPI)
+RUN apt-get update && apt-get install -y curl ca-certificates libgomp1 git && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies from pyproject.toml
 COPY pyproject.toml .
