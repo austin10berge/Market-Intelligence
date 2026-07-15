@@ -75,10 +75,35 @@ def _gex_trend(current_b: float, avg_b: float) -> str:
     return "Flat"
 
 
+_YF_RETRIES = 2
+_YF_RETRY_BACKOFF_S = 1.5
+
+
+async def _download_with_retry(*args, **kwargs):
+    """Retry a yf.download call a couple of times before giving up.
+
+    Yahoo Finance intermittently drops tickers or errors out entirely under
+    rate limiting; a short retry with backoff self-heals most of these without
+    adding meaningful latency to the request.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_YF_RETRIES + 1):
+        try:
+            return await asyncio.to_thread(yf.download, *args, **kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < _YF_RETRIES:
+                logger.warning(
+                    "market_overview: yf.download failed (attempt %d/%d), retrying: %s",
+                    attempt + 1, _YF_RETRIES + 1, exc,
+                )
+                await asyncio.sleep(_YF_RETRY_BACKOFF_S * (attempt + 1))
+    raise last_exc
+
+
 async def _fetch_sectors() -> tuple[dict, str | None]:
     tickers = list(SECTOR_ETFS.keys())
-    raw = await asyncio.to_thread(
-        yf.download,
+    raw = await _download_with_retry(
         " ".join(tickers),
         period="30d",
         group_by="ticker",
@@ -124,8 +149,7 @@ async def _fetch_sectors() -> tuple[dict, str | None]:
 
 
 async def _fetch_vix() -> dict:
-    raw = await asyncio.to_thread(
-        yf.download,
+    raw = await _download_with_retry(
         "^VIX ^VIX3M",
         period="10d",
         group_by="ticker",

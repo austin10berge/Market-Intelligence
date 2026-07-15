@@ -14,6 +14,7 @@ import respx  # noqa: F401
 
 from src.fetchers.market_overview import (
     SECTOR_ETFS,
+    _download_with_retry,
     _fetch_breadth,
     _fetch_gex,
     _fetch_sectors,
@@ -346,6 +347,37 @@ class TestVix:
         mock_dl.return_value = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.1)
         with pytest.raises(ValueError, match="VIX data missing"):
             await _fetch_vix()
+
+
+# ── Download retry helper ───────────────────────────────────────────────────
+
+class TestDownloadWithRetry:
+    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_succeeds_on_first_attempt(self, mock_dl, mock_sleep):
+        mock_dl.return_value = "ok"
+        result = await _download_with_retry("XLK", period="30d")
+        assert result == "ok"
+        mock_sleep.assert_not_called()
+
+    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_recovers_after_one_transient_failure(self, mock_dl, mock_sleep):
+        mock_dl.side_effect = [Exception("rate limited"), "ok"]
+        result = await _download_with_retry("^VIX ^VIX3M", period="10d")
+        assert result == "ok"
+        assert mock_dl.call_count == 2
+        mock_sleep.assert_called_once()
+
+    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers.market_overview.yf.download")
+    async def test_raises_last_exception_after_exhausting_retries(self, mock_dl, mock_sleep):
+        mock_dl.side_effect = [
+            Exception("fail 1"), Exception("fail 2"), Exception("fail 3"),
+        ]
+        with pytest.raises(Exception, match="fail 3"):
+            await _download_with_retry("^VIX ^VIX3M", period="10d")
+        assert mock_dl.call_count == 3
 
 
 # ── Breadth ───────────────────────────────────────────────────────────────────
