@@ -152,15 +152,33 @@ class TradeChatCog(commands.Cog):
             response = await call_claude_chat(prompt)
 
             if response is None:
-                # Gemini fallback — include history as formatted text
+                # Gemini fallback has no tool access and no live data — it must not
+                # be allowed to state ticker-specific numbers as if verified (this is
+                # exactly how a real fabrication incident happened: the primary path
+                # timed out, this fallback fired silently, and Gemini invented
+                # specific RSI/price/BB figures for real tickers). Tell it plainly
+                # it has no live data, and tag the reply so it's never mistaken for
+                # a tool-grounded answer.
                 history_text = "".join(
                     f"{'User' if t['role'] == 'user' else 'Assistant'}: {t['content']}\n\n"
                     for t in history
                 )
-                user_prompt = history_text + message.content
+                user_prompt = (
+                    "NOTE: you have no live market data or tools available for this "
+                    "reply — the live lookup failed or timed out. Do not state "
+                    "specific numeric claims (price, RSI, IV, BB width, volume, %-move, "
+                    "etc.) for any real ticker as if verified. Speak in general/"
+                    "qualitative terms, or say plainly you can't verify current numbers "
+                    "right now.\n\n" + history_text + message.content
+                )
                 if screener_blocks:
                     user_prompt += "\n\n" + "\n\n".join(screener_blocks)
                 response = await synthesize(self.system_prompt, user_prompt)
+                if response:
+                    response = (
+                        "*(live data lookup timed out — this reply has no verified "
+                        "current numbers; ask again to retry)*\n\n" + response
+                    )
 
             if not response:
                 response = (

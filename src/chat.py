@@ -394,8 +394,17 @@ _SCHWAB_ALLOWED_TOOLS: tuple[str, ...] = (
 )
 
 
-async def call_claude_chat(prompt: str, timeout: int = 120) -> str | None:
-    """Call `claude -p` with the assembled prompt. Returns None on any failure."""
+async def call_claude_chat(prompt: str, timeout: int = 240) -> str | None:
+    """Call `claude -p` with the assembled prompt. Returns None on any failure.
+
+    240s, not the original 120s: live reproduction (2026-07-16) of a
+    no-named-ticker "screen for candidates" prompt showed the model
+    correctly using ToolSearch + several Alpaca tool calls to answer with
+    real data, but reliably taking ~130-140s to do so — past the old 120s
+    timeout on every trial. That silently discarded the correct answer and
+    fell through to the tool-less Gemini fallback in
+    discord_bot/commands/chat.py, which fabricated ticker-specific numbers.
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             "claude", "-p",
