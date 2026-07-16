@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
+import weakref
 from io import StringIO
 
 import httpx
@@ -78,6 +79,32 @@ def _gex_trend(current_b: float, avg_b: float) -> str:
 _YF_RETRIES = 2
 _YF_RETRY_BACKOFF_S = 1.5
 
+# yfinance's multi-ticker download populates a module-level global
+# (yfinance.shared._DFS) internally and reads results back out of it: two
+# yf.download() calls running concurrently in this process can race on that
+# global and each read back a mix of the other's tickers. Serializing every
+# call through a lock trades away intra-process download parallelism for
+# correctness — confirmed live that concurrent chunk/sector/VIX calls were
+# silently returning each other's data.
+#
+# The lock is keyed per event loop (not a single module-level instance):
+# asyncio.Lock binds to whichever loop first acquires it, and a plain
+# module-level lock would raise "bound to a different event loop" the moment
+# a second loop touches it (e.g. every pytest-asyncio test gets its own loop).
+# Production only ever runs one loop, so this reduces to one lock in practice.
+_yf_download_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _get_yf_download_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _yf_download_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _yf_download_locks[loop] = lock
+    return lock
+
 
 async def _download_with_retry(*args, **kwargs):
     """Retry a yf.download call a couple of times before giving up.
@@ -89,7 +116,8 @@ async def _download_with_retry(*args, **kwargs):
     last_exc: Exception | None = None
     for attempt in range(_YF_RETRIES + 1):
         try:
-            return await asyncio.to_thread(yf.download, *args, **kwargs)
+            async with _get_yf_download_lock():
+                return await asyncio.to_thread(yf.download, *args, **kwargs)
         except Exception as exc:
             last_exc = exc
             if attempt < _YF_RETRIES:

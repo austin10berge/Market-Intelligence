@@ -130,7 +130,9 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
                 )
                 await asyncio.sleep(_GEMINI_RETRY_BACKOFF_S * (attempt + 1))
                 continue
-            logger.exception("LLM: Gemini call failed after %d attempts: %s", _GEMINI_RETRIES + 1, exc)
+            logger.exception(
+                "LLM: Gemini call failed after %d attempts: %s", _GEMINI_RETRIES + 1, exc
+            )
             return None
 
 

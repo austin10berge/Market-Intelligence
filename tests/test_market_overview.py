@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 import tempfile
@@ -380,6 +381,32 @@ class TestDownloadWithRetry:
         with pytest.raises(Exception, match="fail 3"):
             await _download_with_retry("^VIX ^VIX3M", period="10d")
         assert mock_dl.call_count == 3
+
+    async def test_concurrent_calls_do_not_overlap(self):
+        # yfinance's shared._DFS global means two yf.download() calls running
+        # at the same time in this process can read back each other's
+        # tickers (confirmed live). _download_with_retry must serialize them.
+        import threading
+        import time
+
+        state_lock = threading.Lock()
+        state = {"current": 0, "max": 0}
+
+        def fake_download(*args, **kwargs):
+            with state_lock:
+                state["current"] += 1
+                state["max"] = max(state["max"], state["current"])
+            time.sleep(0.05)
+            with state_lock:
+                state["current"] -= 1
+            return "ok"
+
+        with patch("src.fetchers.market_overview.yf.download", side_effect=fake_download):
+            await asyncio.gather(
+                *[_download_with_retry(f"T{i}", period="30d") for i in range(5)]
+            )
+
+        assert state["max"] == 1
 
 
 # ── Theme chunking ───────────────────────────────────────────────────────────
