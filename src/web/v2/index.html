@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Market Intelligence</title>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=Outfit:wght@500;600;700&family=Questrial&display=swap" rel="stylesheet">
     <style>
         :root {
             --tv-bg:       #131722;
@@ -17,6 +17,7 @@
             --tv-red:      #F23645;
             --tv-blue:     #2962FF;
             --tv-yellow:   #F7C948;
+            --font-ui: 'Questrial', sans-serif;
             /* Row layout — keep in sync with .col-header-row */
             --col-spark: 44px;
             --col-a:     76px;
@@ -1686,6 +1687,76 @@
         .anlys-chart-container {
             height: 380px;
             background: var(--tv-bg);
+        }
+
+        /* ── Questrial: Watchlist (entire page incl. Edit Watchlist), the small
+               label text on Overview, the Scanner's parameter/filter sheet, and
+               the Charts result-card typography. Scoped by ancestor so shared
+               components (ticker rows, field rows, buttons) keep their original
+               font everywhere else they're reused (Scanner results, Backtester,
+               Charts controls). ── */
+        .watchlist-view { font-family: var(--font-ui); }
+        .watchlist-view .col-tab,
+        .watchlist-view .ch-col,
+        .watchlist-view .tr-col,
+        .watchlist-view .tr-ta-pill,
+        .watchlist-view .sub-tab,
+        .watchlist-view .oc-meta,
+        .watchlist-view .oc-highlight,
+        .watchlist-view .oc-metrics,
+        .watchlist-view .page-info-text,
+        .watchlist-view .overview-card-title,
+        .watchlist-view .scn-sheet-apply,
+        .watchlist-view .scn-sheet-section-title,
+        .watchlist-view .scn-field-label,
+        .watchlist-view .scn-field-input,
+        .watchlist-view .edit-back-btn,
+        .watchlist-view .edit-chip,
+        .watchlist-view .edit-chip-input,
+        .watchlist-view .edit-weight-sum-badge,
+        .watchlist-view .edit-status {
+            font-family: var(--font-ui);
+        }
+        /* Ticker symbols get Outfit instead — Questrial has no real bold, and its
+           faux 600 looked smeared at ticker size. Outfit ships a true 600. */
+        .watchlist-view .tr-symbol,
+        .watchlist-view .oc-symbol {
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .composite-score,
+        .overview-section .overview-card-title,
+        .overview-section .posture-detail-label,
+        .overview-section .sector-pill-ticker,
+        .overview-section .sector-tf-btn,
+        .overview-section .sector-toggle-btn,
+        .overview-section .vix-changes,
+        .overview-section .gex-label,
+        .overview-section .gex-avg,
+        .overview-section .breadth-label,
+        .overview-section .breadth-value,
+        .overview-section .breadth-ad {
+            font-family: var(--font-ui);
+        }
+
+        .scn-filters-btn,
+        .scn-chip,
+        #scn-sheet-root .scn-sheet-title,
+        #scn-sheet-root .scn-sheet-section-title,
+        #scn-sheet-root .scn-field-label,
+        #scn-sheet-root .scn-field-input,
+        #scn-sheet-root .scn-cond-chip,
+        #scn-sheet-root .scn-sector-check,
+        #scn-sheet-root .scn-sheet-apply,
+        #scn-sheet-root .scn-sheet-rescan {
+            font-family: var(--font-ui);
+        }
+
+        .anlys-symbol,
+        .anlys-subtitle,
+        .anlys-chip-val,
+        .anlys-chip-lbl {
+            font-family: var(--font-ui);
         }
     </style>
 </head>

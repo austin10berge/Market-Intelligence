@@ -331,6 +331,7 @@ function renderStockCandidates(candidates) {
 
 function renderWatchlistView() {
     document.getElementById('main-content').innerHTML = `
+        <div class="watchlist-view">
         <div class="section-header" style="padding-bottom:8px">
             <div class="watchlist-sub-tabs" id="watchlist-sub-tabs"></div>
             <div style="display:flex;align-items:center;gap:6px">
@@ -340,7 +341,8 @@ function renderWatchlistView() {
                 </button>
             </div>
         </div>
-        <div id="watchlist-content"></div>`;
+        <div id="watchlist-content"></div>
+        </div>`;
     renderWatchlistSubTabs();
     showWatchlistTab(activeWatchlistTab);
 }
@@ -570,6 +572,7 @@ function renderEditWatchlistView() {
     cspWlChipEditor = null;
     channelsChipEditor = null;
     document.getElementById('main-content').innerHTML = `
+        <div class="watchlist-view">
         <div class="section-header" style="padding-bottom:8px">
             <button class="edit-back-btn" onclick="backToWatchlist()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><polyline points="15 18 9 12 15 6"/></svg>
@@ -578,7 +581,8 @@ function renderEditWatchlistView() {
             <span class="section-title">Edit Watchlist</span>
         </div>
         <div class="watchlist-sub-tabs" id="edit-sub-tabs" style="padding: 0 16px 8px"></div>
-        <div id="edit-content"></div>`;
+        <div id="edit-content"></div>
+        </div>`;
     renderEditSubTabs();
     switchEditTab('watchlists');
 }
