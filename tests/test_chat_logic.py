@@ -330,6 +330,7 @@ class TestCallClaudeChatMcpWiring:
         mcp_config_idx = argv.index("--mcp-config")
         assert argv[mcp_config_idx + 1].replace("\\", "/").endswith("discord_bot/alpaca-mcp.json")
         assert argv[mcp_config_idx + 2].replace("\\", "/").endswith("discord_bot/schwab-mcp.json")
+        assert argv[mcp_config_idx + 3].replace("\\", "/").endswith("discord_bot/mi-mcp.json")
 
         allowed_idx = argv.index("--allowedTools")
         allowed = argv[allowed_idx + 1:]
@@ -343,7 +344,12 @@ class TestCallClaudeChatMcpWiring:
         assert "mcp__schwab__get_orders" in allowed
         assert "mcp__schwab__get_quotes" in allowed
         assert not any(t.startswith("mcp__schwab__preview_") for t in allowed)
-        assert len(allowed) == 42  # WebSearch + ToolSearch + 24 Alpaca tools + 16 Schwab tools
+        assert "mcp__mi__get_csp_watchlist" in allowed
+        assert "mcp__mi__get_stock_watchlist" in allowed
+        assert "mcp__mi__get_csp_candidates" in allowed
+        assert "mcp__mi__get_leaps_candidates" in allowed
+        assert "mcp__mi__get_market_posture" in allowed
+        assert len(allowed) == 47  # WebSearch + ToolSearch + 24 Alpaca + 16 Schwab + 5 MI tools
 
         tools_idx = argv.index("--tools")
         tools = argv[tools_idx + 1:allowed_idx]
