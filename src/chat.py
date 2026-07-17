@@ -421,7 +421,10 @@ async def call_claude_chat(prompt: str, timeout: int = 240) -> str | None:
     try:
         proc = await asyncio.create_subprocess_exec(
             "claude", "-p",
-            "--mcp-config", str(_MCP_CONFIG_PATH), str(_SCHWAB_MCP_CONFIG_PATH), str(_MI_MCP_CONFIG_PATH),
+            "--mcp-config",
+            str(_MCP_CONFIG_PATH),
+            str(_SCHWAB_MCP_CONFIG_PATH),
+            str(_MI_MCP_CONFIG_PATH),
             "--strict-mcp-config",
             # ToolSearch is required for the model to discover MCP tool schemas
             # at all — without it, mcp__alpaca__*/mcp__schwab__* tools connect
@@ -431,7 +434,12 @@ async def call_claude_chat(prompt: str, timeout: int = 240) -> str | None:
             # to call any Schwab tool without ToolSearch (3/3) and reliably
             # succeeded with it (2/2, correct real data both times).
             "--tools", "WebSearch", "ToolSearch",
-            "--allowedTools", "WebSearch", "ToolSearch", *_ALPACA_ALLOWED_TOOLS, *_SCHWAB_ALLOWED_TOOLS, *_MI_ALLOWED_TOOLS,
+            "--allowedTools",
+            "WebSearch",
+            "ToolSearch",
+            *_ALPACA_ALLOWED_TOOLS,
+            *_SCHWAB_ALLOWED_TOOLS,
+            *_MI_ALLOWED_TOOLS,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
