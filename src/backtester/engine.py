@@ -305,8 +305,13 @@ def _open_position(
 
     if opt_conf.enabled:
         # Approximate option pricing
-        iv = float(df["rv20"].iloc[bar_idx]) if "rv20" in df and not pd.isna(df["rv20"].iloc[bar_idx]) else 0.30
-        iv = max(iv, 0.10) # Floor IV at 10%
+        if "iv_override" in df and not pd.isna(df["iv_override"].iloc[bar_idx]):
+            iv = float(df["iv_override"].iloc[bar_idx])
+        elif "rv20" in df and not pd.isna(df["rv20"].iloc[bar_idx]):
+            iv = float(df["rv20"].iloc[bar_idx])
+        else:
+            iv = 0.30
+        iv = max(iv, 0.10)  # Floor IV at 10%
 
         target_delta = opt_conf.target_delta
         if direction == "short" and opt_conf.type == "call":
