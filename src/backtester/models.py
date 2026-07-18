@@ -101,6 +101,13 @@ class ConsecutiveCondition(BaseModel):
     count: int = 3
 
 
+class SignalDatesCondition(BaseModel):
+    """True only on bars whose date is in the supplied set (e.g. known
+    algo_detective gate-fire dates for a ticker)."""
+    type: str = "signal_dates"
+    dates: list[str]
+
+
 class ConditionGroup(BaseModel):
     """Compound condition with AND/OR nesting. Children can be conditions or nested groups."""
     operator: ConditionOperator

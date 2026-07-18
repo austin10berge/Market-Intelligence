@@ -79,6 +79,8 @@ def _evaluate_leaf(
             return _eval_pullback(cond, df, bar_idx)
         elif cond_type == "consecutive":
             return _eval_consecutive(cond, df, bar_idx)
+        elif cond_type == "signal_dates":
+            return _eval_signal_dates(cond, df, bar_idx)
         else:
             logger.warning("Unknown condition type '%s'", cond_type)
             return False
@@ -218,3 +220,12 @@ def _eval_consecutive(cond: dict, df: pd.DataFrame, bar_idx: int) -> bool:
             return False
 
     return True
+
+
+def _eval_signal_dates(cond: dict, df: pd.DataFrame, bar_idx: int) -> bool:
+    """True when the current bar's date is in the supplied date set —
+    used to replay known historical gate-hit dates instead of
+    re-evaluating live indicator logic."""
+    dates = set(cond.get("dates", []))
+    bar_date = df.index[bar_idx].strftime("%Y-%m-%d")
+    return bar_date in dates
