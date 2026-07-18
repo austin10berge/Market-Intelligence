@@ -117,6 +117,15 @@ class ConditionGroup(BaseModel):
 # ── Exit Strategy ─────────────────────────────────────────────────────────────
 
 
+class ProfitLadderTier(BaseModel):
+    """One tier of a time-based profit-taking ladder: BTC at
+    take_profit_pct once the position has been held for at least
+    max_days_held bars. Tiers should be ordered ascending by
+    max_days_held."""
+    max_days_held: int
+    take_profit_pct: float
+
+
 class ExitStrategy(BaseModel):
     """All exit conditions for a strategy."""
     stop_loss_pct: float | None = None
@@ -126,6 +135,10 @@ class ExitStrategy(BaseModel):
     # Indicator-based exit conditions (same tree structure as entry)
     conditions: dict[str, Any] | None = None
     pyramiding_exit_mode: PyramidingExitMode = PyramidingExitMode.SELL_ALL
+    # Time-tiered take-profit schedule (e.g. GTPro's 30/50/75% BTC rule).
+    # The first tier whose max_days_held covers the current days_held
+    # applies instead of the flat take_profit_pct above.
+    profit_ladder: list[ProfitLadderTier] | None = None
 
 
 # ── Position Sizing ───────────────────────────────────────────────────────────

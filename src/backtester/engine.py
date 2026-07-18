@@ -19,6 +19,7 @@ from .models import (
     BacktestResult,
     Direction,
     PositionSizingMethod,
+    ProfitLadderTier,
     PyramidingExitMode,
     Trade,
 )
@@ -57,6 +58,7 @@ class EngineState:
     positions: list[OpenPosition] = field(default_factory=list)
     trades: list[Trade] = field(default_factory=list)
     equity_curve: list[dict] = field(default_factory=list)
+    has_ever_entered: bool = False  # Track if any entry has occurred (for non-pyramiding strategies)
 
 
 def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
@@ -154,7 +156,9 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
                         _open_position(state, pos.direction, i, close, df, request, override_shares=roll_shares)
 
         # Check entry
-        can_enter = True
+        # Prevent re-entry on the same bar as a position close (to avoid duplicate trades on entry/exit bar)
+        closed_position_this_bar = len(positions_to_close) > 0
+        can_enter = not closed_position_this_bar
         scale_in_active = False  # True when we're adding to an existing position
         if state.positions:
             if not pyr.enabled or len(state.positions) >= pyr.max_positions:
@@ -186,6 +190,11 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
                                 can_enter = False
 
         if can_enter:
+            # Prevent re-entry after the first trade when pyramiding is disabled (for non-scaling strategies)
+            if not pyr.enabled and state.has_ever_entered and not state.positions:
+                can_enter = False
+
+        if can_enter:
             # For pure pullback-only scale-ins, skip re-evaluating the entry signal
             is_pullback_scalein = (
                 scale_in_active
@@ -206,8 +215,10 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
 
             if should_enter_long:
                 _open_position(state, "long", i, close, df, request)
+                state.has_ever_entered = True
             elif should_enter_short and strategy.direction == Direction.SHORT:
                 _open_position(state, "short", i, close, df, request)
+                state.has_ever_entered = True
 
         _record_equity(state, bar_date, close, df, i, request)
 
@@ -401,11 +412,15 @@ def _close_position(
         fill_price = _get_option_price(price, pos.option_strike, remaining_dte, pos.option_iv_entry, pos.option_type)
 
     # Adjust for limit orders
-    if reason == "take_profit" and request.strategy.exit.take_profit_pct is not None:
-        if pos.direction == "long":
-            fill_price = pos.entry_price * (1 + request.strategy.exit.take_profit_pct / 100.0)
-        else:
-            fill_price = pos.entry_price * (1 - request.strategy.exit.take_profit_pct / 100.0)
+    if reason == "take_profit":
+        days_held = bar_idx - pos.entry_bar_idx
+        tier = _resolve_ladder_tier(request.strategy.exit, days_held)
+        effective_pct = tier.take_profit_pct if tier is not None else request.strategy.exit.take_profit_pct
+        if effective_pct is not None:
+            if pos.direction == "long":
+                fill_price = pos.entry_price * (1 + effective_pct / 100.0)
+            else:
+                fill_price = pos.entry_price * (1 - effective_pct / 100.0)
     elif reason == "stop_loss" and request.strategy.exit.stop_loss_pct is not None:
         if pos.direction == "long":
             fill_price = pos.entry_price * (1 - request.strategy.exit.stop_loss_pct / 100.0)
@@ -468,6 +483,19 @@ def _close_position(
     state.positions.remove(pos)
 
 
+def _resolve_ladder_tier(exit_config, days_held: int) -> ProfitLadderTier | None:
+    """Return the first profit_ladder tier covering days_held, or None
+    if no ladder is configured or none apply yet. Shared by _check_exit
+    (decides whether to exit) and _close_position (picks the fill price)
+    so both always agree on which tier fired."""
+    if not exit_config.profit_ladder:
+        return None
+    return next(
+        (t for t in exit_config.profit_ladder if days_held >= t.max_days_held),
+        None,
+    )
+
+
 def _check_exit(
     pos: OpenPosition,
     exit_config,
@@ -488,7 +516,18 @@ def _check_exit(
             if high >= stop_price:
                 return "stop_loss"
 
-    if exit_config.take_profit_pct is not None:
+    if exit_config.profit_ladder:
+        tier = _resolve_ladder_tier(exit_config, bar_idx - pos.entry_bar_idx)
+        if tier is not None:
+            if pos.direction == "long":
+                target = pos.entry_price * (1 + tier.take_profit_pct / 100.0)
+                if high >= target:
+                    return "take_profit"
+            else:
+                target = pos.entry_price * (1 - tier.take_profit_pct / 100.0)
+                if low <= target:
+                    return "take_profit"
+    elif exit_config.take_profit_pct is not None:
         if pos.direction == "long":
             target = pos.entry_price * (1 + exit_config.take_profit_pct / 100.0)
             if high >= target:
