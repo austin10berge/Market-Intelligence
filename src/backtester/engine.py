@@ -58,7 +58,6 @@ class EngineState:
     positions: list[OpenPosition] = field(default_factory=list)
     trades: list[Trade] = field(default_factory=list)
     equity_curve: list[dict] = field(default_factory=list)
-    has_ever_entered: bool = False  # Track if any entry has occurred (for non-pyramiding strategies)
 
 
 def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
@@ -156,9 +155,7 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
                         _open_position(state, pos.direction, i, close, df, request, override_shares=roll_shares)
 
         # Check entry
-        # Prevent re-entry on the same bar as a position close (to avoid duplicate trades on entry/exit bar)
-        closed_position_this_bar = len(positions_to_close) > 0
-        can_enter = not closed_position_this_bar
+        can_enter = True
         scale_in_active = False  # True when we're adding to an existing position
         if state.positions:
             if not pyr.enabled or len(state.positions) >= pyr.max_positions:
@@ -190,11 +187,6 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
                                 can_enter = False
 
         if can_enter:
-            # Prevent re-entry after the first trade when pyramiding is disabled (for non-scaling strategies)
-            if not pyr.enabled and state.has_ever_entered and not state.positions:
-                can_enter = False
-
-        if can_enter:
             # For pure pullback-only scale-ins, skip re-evaluating the entry signal
             is_pullback_scalein = (
                 scale_in_active
@@ -215,10 +207,8 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
 
             if should_enter_long:
                 _open_position(state, "long", i, close, df, request)
-                state.has_ever_entered = True
             elif should_enter_short and strategy.direction == Direction.SHORT:
                 _open_position(state, "short", i, close, df, request)
-                state.has_ever_entered = True
 
         _record_equity(state, bar_date, close, df, i, request)
 
@@ -491,7 +481,7 @@ def _resolve_ladder_tier(exit_config, days_held: int) -> ProfitLadderTier | None
     if not exit_config.profit_ladder:
         return None
     return next(
-        (t for t in exit_config.profit_ladder if days_held >= t.max_days_held),
+        (t for t in exit_config.profit_ladder if t.max_days_held >= days_held),
         None,
     )
 

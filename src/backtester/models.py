@@ -118,10 +118,11 @@ class ConditionGroup(BaseModel):
 
 
 class ProfitLadderTier(BaseModel):
-    """One tier of a time-based profit-taking ladder: BTC at
-    take_profit_pct once the position has been held for at least
-    max_days_held bars. Tiers should be ordered ascending by
-    max_days_held."""
+    """One tier of a time-based profit-taking ladder. While days_held is
+    within max_days_held, this tier's take_profit_pct is the active
+    target (e.g. 30% during days 0-2, then 50% by day 4, 75% by day 5).
+    Past the last tier, no ladder take-profit applies. Tiers must be
+    ordered ascending by max_days_held."""
     max_days_held: int
     take_profit_pct: float
 
