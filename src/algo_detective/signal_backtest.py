@@ -6,8 +6,11 @@ docs/superpowers/specs/2026-07-18-algo-detective-signal-backtest-design.md.
 """
 from __future__ import annotations
 
+import argparse
+import json
 import logging
 from collections import defaultdict
+from pathlib import Path
 
 import pandas as pd
 
@@ -203,3 +206,59 @@ def run_signal_walk_forward(
         })
 
     return {"criteria": criteria, "folds": folds}
+
+
+def print_signal_backtest_report(result: dict) -> None:
+    stats = result["stats"]
+    print(f"\n{'='*60}")
+    print(f"Criteria: {json.dumps(result['criteria'], indent=2)}")
+    print(f"\nTrades simulated : {stats['total_trades']}")
+    print(f"Win rate         : {stats['win_rate_pct']}%  ({stats['wins']}W / {stats['losses']}L)")
+    print(f"Profit factor    : {stats['profit_factor']}")
+    print(f"Avg P&L / trade  : ${stats['avg_pnl']}")
+    print(f"Total P&L        : ${stats['total_pnl']}")
+    if result["tickers_skipped"]:
+        print(f"\nSkipped (no price data): {', '.join(result['tickers_skipped'])}")
+    print()
+
+
+def print_signal_walk_forward_report(result: dict) -> None:
+    print(f"\n{'='*60}")
+    print(f"Criteria: {json.dumps(result['criteria'], indent=2)}")
+    for fold in result["folds"]:
+        print(f"\nFold {fold['fold_number']}: IS {fold['is_start']}..{fold['is_end']} "
+              f"/ OOS {fold['oos_start']}..{fold['oos_end']}")
+        print(f"  IS  win_rate={fold['is_stats']['win_rate_pct']}%  "
+              f"profit_factor={fold['is_stats']['profit_factor']}")
+        print(f"  OOS win_rate={fold['oos_stats']['win_rate_pct']}%  "
+              f"profit_factor={fold['oos_stats']['profit_factor']}")
+        print(f"  Degradation: {fold['degradation']}")
+    print()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Simulate CSP wheel trades on every historical gate hit"
+    )
+    parser.add_argument("--criteria", required=True, help="JSON string or path to .json file")
+    parser.add_argument("--mode", choices=["backtest", "walk-forward"], default="backtest")
+    parser.add_argument("--target-delta", type=float, default=0.25)
+    parser.add_argument("--target-dte", type=int, default=5)
+    args = parser.parse_args()
+
+    criteria_input = args.criteria.strip()
+    if criteria_input.endswith(".json") and Path(criteria_input).exists():
+        criteria = json.loads(Path(criteria_input).read_text())
+    else:
+        criteria = json.loads(criteria_input)
+
+    if args.mode == "walk-forward":
+        wf_result = run_signal_walk_forward(
+            criteria, target_delta=args.target_delta, target_dte=args.target_dte
+        )
+        print_signal_walk_forward_report(wf_result)
+    else:
+        bt_result = run_signal_backtest(
+            criteria, target_delta=args.target_delta, target_dte=args.target_dte
+        )
+        print_signal_backtest_report(bt_result)
