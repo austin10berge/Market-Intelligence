@@ -66,6 +66,7 @@ class TestProfitLadder:
         hit the day-2 tier's 30% target within 2 bars, not ride further."""
         closes = [100.0, 65.0, 65.0, 65.0, 65.0, 65.0]
         trades = _run(closes, ExitStrategy(profit_ladder=LADDER), entry=_entry_close_above(90.0))
+        assert len(trades) == 1
         assert trades[0].exit_reason == "take_profit"
         assert trades[0].bars_held <= 2
 

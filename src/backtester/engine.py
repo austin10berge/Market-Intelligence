@@ -201,7 +201,10 @@ def run_backtest(request: BacktestRequest, df: pd.DataFrame) -> BacktestResult:
                     and _safe_evaluate(entry_tree, df, i)
                 )
                 should_enter_short = (
-                    strategy.direction in (Direction.SHORT, Direction.BOTH)
+                    strategy.direction == Direction.SHORT
+                    and _safe_evaluate(entry_tree, df, i)
+                ) or (
+                    strategy.direction == Direction.BOTH
                     and not should_enter_long
                 )
 
@@ -268,7 +271,11 @@ def _calc_equity(state: EngineState, current_price: float, df: pd.DataFrame, bar
             # Use entry IV as a simplistic proxy for remaining IV if not available
             iv = pos.option_iv_entry
             opt_price = _get_option_price(current_price, pos.option_strike, remaining_dte, iv, pos.option_type)
-            equity += pos.shares * opt_price * 100 # Options are 100 shares
+            if pos.direction == "long":
+                equity += pos.shares * opt_price * 100  # Options are 100 shares
+            else:
+                # Sold option: mark as a liability (cost to buy back)
+                equity -= pos.shares * opt_price * 100
         else:
             if pos.direction == "long":
                 equity += pos.shares * current_price
@@ -330,15 +337,20 @@ def _open_position(
     if shares <= 0:
         return
 
-    cost = shares * fill_price_cost + request.commission
-    if cost > state.cash:
-        affordable = (state.cash - request.commission) / fill_price_cost
-        shares = math.floor(affordable)
-        if shares <= 0:
-            return
+    if opt_conf.enabled and direction == "short":
+        # Sell to open: premium is received, not paid. Collateral is not
+        # modeled — pair short-option strategies with fixed-contract sizing.
+        state.cash += shares * fill_price_cost - request.commission
+    else:
         cost = shares * fill_price_cost + request.commission
+        if cost > state.cash:
+            affordable = (state.cash - request.commission) / fill_price_cost
+            shares = math.floor(affordable)
+            if shares <= 0:
+                return
+            cost = shares * fill_price_cost + request.commission
 
-    state.cash -= cost
+        state.cash -= cost
     bar_date = df.index[bar_idx].strftime("%Y-%m-%d")
 
     if opt_conf.enabled:
@@ -429,11 +441,15 @@ def _close_position(
             fill_price = fill_price * (1 + request.slippage_pct / 100.0)
 
     if pos.is_option:
-        pnl = (fill_price - pos.entry_price) * pos.shares * 100
+        if pos.direction == "long":
+            pnl = (fill_price - pos.entry_price) * pos.shares * 100
+            proceeds = (pos.shares * fill_price * 100) - request.commission
+        else:
+            # Sold option: profit is premium received minus buy-back cost
+            pnl = (pos.entry_price - fill_price) * pos.shares * 100
+            proceeds = -(pos.shares * fill_price * 100) - request.commission
         pnl -= request.commission
         pnl_pct = (pnl / (pos.entry_price * pos.shares * 100)) * 100.0 if pos.entry_price > 0 else 0.0
-
-        proceeds = (pos.shares * fill_price * 100) - request.commission
     else:
         if pos.direction == "long":
             pnl = (fill_price - pos.entry_price) * pos.shares
