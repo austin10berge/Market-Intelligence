@@ -19,7 +19,9 @@ from ..backtester.models import (
     OptionsConfig,
     ProfitLadderTier,
     StrategyDefinition,
+    WalkForwardMode,
 )
+from ..backtester.walk_forward import _generate_folds
 from .signal_events import get_signal_events
 from .store import get_options_index
 
@@ -133,3 +135,71 @@ def run_signal_backtest(
         "trades": all_trades,
         "tickers_skipped": tickers_skipped,
     }
+
+
+def _compute_pooled_degradation(is_stats: dict, oos_stats: dict) -> dict:
+    """OOS/IS ratios for the pooled trade metrics — values near 1.0 mean
+    the gate's P&L held up out of sample; values << 1.0 suggest overfit."""
+    metrics = ["win_rate_pct", "profit_factor", "avg_pnl", "avg_pnl_pct"]
+    ratios = {}
+    for m in metrics:
+        is_val, oos_val = is_stats.get(m), oos_stats.get(m)
+        if is_val in (None, 0) or oos_val is None:
+            ratios[m] = None
+        else:
+            ratios[m] = round(oos_val / is_val, 3)
+    return ratios
+
+
+def run_signal_walk_forward(
+    criteria: dict,
+    mode: WalkForwardMode = WalkForwardMode.ROLLING,
+    in_sample_days: int = 756,
+    out_of_sample_days: int = 252,
+    target_delta: float = 0.25,
+    target_dte: int = 5,
+    ladder: list[ProfitLadderTier] | None = None,
+    events: list[dict] | None = None,
+) -> dict:
+    """Split the signal event set into IS/OOS folds by calendar date
+    (reusing the backtester's existing fold-generation logic) and report
+    IS-vs-OOS degradation for the pooled trade stats in each fold."""
+    ladder = ladder if ladder is not None else DEFAULT_GTPRO_LADDER
+    events = events if events is not None else get_signal_events(criteria)
+
+    all_dates = sorted({e["date"] for e in events})
+    if not all_dates:
+        return {"criteria": criteria, "folds": []}
+
+    folds_idx = _generate_folds(
+        total_bars=len(all_dates),
+        is_bars=in_sample_days,
+        oos_bars=out_of_sample_days,
+        mode=mode,
+    )
+
+    folds = []
+    for fold_num, (is_start, is_end, oos_start, oos_end) in enumerate(folds_idx, 1):
+        is_dates = set(all_dates[is_start:is_end])
+        oos_dates = set(all_dates[oos_start:oos_end])
+
+        is_events = [e for e in events if e["date"] in is_dates]
+        oos_events = [e for e in events if e["date"] in oos_dates]
+
+        is_result = run_signal_backtest(
+            criteria, target_delta, target_dte, ladder, events=is_events
+        )
+        oos_result = run_signal_backtest(
+            criteria, target_delta, target_dte, ladder, events=oos_events
+        )
+
+        folds.append({
+            "fold_number": fold_num,
+            "is_start": all_dates[is_start], "is_end": all_dates[is_end - 1],
+            "oos_start": all_dates[oos_start], "oos_end": all_dates[oos_end - 1],
+            "is_stats": is_result["stats"],
+            "oos_stats": oos_result["stats"],
+            "degradation": _compute_pooled_degradation(is_result["stats"], oos_result["stats"]),
+        })
+
+    return {"criteria": criteria, "folds": folds}
