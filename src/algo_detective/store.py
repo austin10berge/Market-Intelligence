@@ -98,6 +98,12 @@ CREATE TABLE IF NOT EXISTS detective_macro (
     spy_rsi             REAL,
     top_sectors         TEXT
 );
+
+CREATE TABLE IF NOT EXISTS detective_scraped_posts (
+    slug            TEXT PRIMARY KEY,
+    scraped_at      TEXT NOT NULL,
+    trades_found    INTEGER NOT NULL
+);
 """
 
 
@@ -295,6 +301,31 @@ def get_computed_options_pairs() -> set[tuple[str, str]]:
     try:
         rows = conn.execute("SELECT date, ticker FROM detective_options").fetchall()
         return {(r["date"], r["ticker"]) for r in rows}
+    finally:
+        conn.close()
+
+
+def get_scraped_slugs() -> set[str]:
+    conn = _get_connection()
+    try:
+        rows = conn.execute("SELECT slug FROM detective_scraped_posts").fetchall()
+        return {r["slug"] for r in rows}
+    finally:
+        conn.close()
+
+
+def record_scraped_post(slug: str, trades_found: int) -> None:
+    from datetime import datetime, timezone
+
+    conn = _get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO detective_scraped_posts (slug, scraped_at, trades_found) "
+            "VALUES (?, ?, ?) ON CONFLICT(slug) DO UPDATE SET "
+            "scraped_at = excluded.scraped_at, trades_found = excluded.trades_found",
+            (slug, datetime.now(timezone.utc).isoformat(), trades_found),
+        )
+        conn.commit()
     finally:
         conn.close()
 

@@ -39,6 +39,8 @@ from src.algo_detective.store import (
     upsert_options_rows,
     get_options_index,
     get_computed_options_pairs,
+    get_scraped_slugs,
+    record_scraped_post,
 )
 
 
@@ -249,3 +251,44 @@ def test_upsert_options_rows_idempotent():
         pair for pair in get_computed_options_pairs() if pair == ("2026-06-18", "GOOG")
     ]
     assert len(matching) == 1
+
+
+class TestScrapedPostsCheckpoint:
+    # NOTE: this class shares the module-level session-scoped _tmp_db_path
+    # with every other test in this file (see the `ensure_tables()`-then-`==`
+    # pattern), and detective_scraped_posts is never reset between tests. The
+    # first test below runs before any record_scraped_post call in this class
+    # so `== set()` is safe there, matching the file's existing convention
+    # (e.g. test_get_options_index_empty). The remaining tests each add a new
+    # slug on top of state left by earlier tests in this class, so they use
+    # membership/count checks instead of exact-set equality — the same style
+    # already used elsewhere in this file (e.g. test_upsert_idempotent's
+    # `in`-based check) once more than one insert into the same table is
+    # involved.
+    def test_empty_when_nothing_recorded(self):
+        ensure_tables()
+        assert get_scraped_slugs() == set()
+
+    def test_records_and_returns_slug(self):
+        ensure_tables()
+        record_scraped_post("results_boring_puts_2026_01_05", trades_found=3)
+        assert "results_boring_puts_2026_01_05" in get_scraped_slugs()
+
+    def test_records_zero_trades_slug(self):
+        ensure_tables()
+        record_scraped_post("results_boring_puts_2025_12_29", trades_found=0)
+        assert "results_boring_puts_2025_12_29" in get_scraped_slugs()
+
+    def test_recording_same_slug_twice_does_not_duplicate(self):
+        ensure_tables()
+        record_scraped_post("results_boring_puts_2026_02_02", trades_found=5)
+        record_scraped_post("results_boring_puts_2026_02_02", trades_found=5)
+        assert "results_boring_puts_2026_02_02" in get_scraped_slugs()
+
+        conn = sqlite3.connect(_tmp_db_path)
+        count = conn.execute(
+            "SELECT COUNT(*) FROM detective_scraped_posts WHERE slug = ?",
+            ("results_boring_puts_2026_02_02",),
+        ).fetchone()[0]
+        conn.close()
+        assert count == 1
