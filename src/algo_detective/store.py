@@ -132,6 +132,10 @@ _FUNDAMENTAL_COLUMNS = [
 _OPTIONS_COLUMNS = [
     ("pcr_vol", "REAL"),
     ("pcr_oi", "REAL"),
+    ("delta", "REAL"),
+    ("bid", "REAL"),
+    ("ask", "REAL"),
+    ("open_interest", "INTEGER"),
 ]
 
 

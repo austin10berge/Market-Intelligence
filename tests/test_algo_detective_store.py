@@ -224,6 +224,14 @@ def test_ensure_tables_creates_detective_options():
     assert "detective_options" in {r[0] for r in rows}
 
 
+def test_ensure_tables_adds_delta_bid_ask_open_interest_columns():
+    ensure_tables()
+    conn = sqlite3.connect(_tmp_db_path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(detective_options)").fetchall()}
+    conn.close()
+    assert {"delta", "bid", "ask", "open_interest"} <= cols
+
+
 def test_get_options_index_empty():
     ensure_tables()
     assert get_options_index() == {}
