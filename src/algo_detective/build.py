@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+
+import pandas as pd
 
 from ..market_data.store import get_fundamentals_for_tickers
 from .features import compute_features
@@ -29,6 +32,80 @@ logger = logging.getLogger(__name__)
 _CSV_PATH = Path(__file__).parent.parent.parent / "data" / "detective" / "prime_tickers.csv"
 
 
+def compute_and_store_for_date(
+    date: str,
+    ticker_flags: list[tuple[str, int]],
+    computed_pairs: set[tuple[str, str]],
+    ohlcv_fallback_fn: Callable[[str], pd.DataFrame | None] | None = None,
+) -> list[dict]:
+    """Compute features and upsert detective_features rows for the given
+    (ticker, is_prime) pairs on one date, skipping any pair already in
+    computed_pairs. If a ticker has no OHLCV in the tracked universe batch
+    and ohlcv_fallback_fn is given, it's called as a last resort (used by
+    label_sync.py for prime tickers outside the tracked universe).
+
+    Returns the rows that were computed and upserted — callers needing
+    per-row post-processing (e.g. run_build()'s CSV cross-validation) read
+    them from the return value rather than recomputing.
+    """
+    to_compute = [(t, f) for t, f in ticker_flags if (date, t) not in computed_pairs]
+    if not to_compute:
+        return []
+
+    all_syms = [t for t, _ in to_compute]
+    fund_rows = get_fundamentals_for_tickers(all_syms)
+    sector_map = {r["symbol"]: r.get("sector") for r in fund_rows}
+    fund_map = {
+        r["symbol"]: {
+            "market_cap_b": r.get("market_cap_b"),
+            "beta": r.get("beta"),
+            "forward_pe": r.get("forward_pe"),
+            "peg_ratio": r.get("peg_ratio"),
+            "revenue_growth": r.get("revenue_growth"),
+            "earnings_growth": r.get("earnings_growth"),
+            "debt_to_equity": r.get("debt_to_equity"),
+            "dividend_yield": r.get("dividend_yield"),
+            "fcf": r.get("fcf"),
+        }
+        for r in fund_rows
+    }
+
+    macro = compute_macro_for_date(date)
+    if macro:
+        upsert_macro_row(macro)
+
+    ohlcv_map = load_ohlcv_batch_for_date(all_syms, date)
+    now = datetime.now(timezone.utc).isoformat()
+    rows_to_insert: list[dict] = []
+
+    for ticker, is_prime in to_compute:
+        df = ohlcv_map.get(ticker)
+        if (df is None or df.empty) and ohlcv_fallback_fn is not None:
+            df = ohlcv_fallback_fn(ticker)
+        if df is None or df.empty:
+            logger.warning("No OHLCV for %s on %s", ticker, date)
+            continue
+
+        feats = compute_features(ticker, date, df, sector=sector_map.get(ticker))
+        if feats is None:
+            logger.debug("Insufficient history for %s on %s", ticker, date)
+            continue
+
+        rows_to_insert.append(
+            {
+                "date": date,
+                "ticker": ticker,
+                "is_prime": is_prime,
+                **feats,
+                **fund_map.get(ticker, {}),
+                "computed_at": now,
+            }
+        )
+
+    upsert_feature_rows_bulk(rows_to_insert)
+    return rows_to_insert
+
+
 def run_build(csv_path: Path = _CSV_PATH) -> None:
     ensure_tables()
 
@@ -44,71 +121,19 @@ def run_build(csv_path: Path = _CSV_PATH) -> None:
         prime_set = set(prime_tickers)
         control_tickers = get_control_tickers(date, exclude=prime_set)
 
-        all_ticker_flags: list[tuple[str, int]] = [(t, 1) for t in prime_tickers] + [
-            (t, 0) for t in control_tickers
-        ]
-        to_compute = [(t, f) for t, f in all_ticker_flags if (date, t) not in computed_pairs]
+        ticker_flags = [(t, 1) for t in prime_tickers] + [(t, 0) for t in control_tickers]
+        rows = compute_and_store_for_date(date, ticker_flags, computed_pairs)
 
-        if not to_compute:
-            logger.debug("Date %s: all %d already computed", date, len(all_ticker_flags))
-            continue
+        for row in rows:
+            if row["is_prime"]:
+                _cross_validate(row["ticker"], date, row, records)
 
         logger.info(
-            "Date %s: computing %d tickers (%d skipped)",
+            "Date %s: computed %d of %d requested tickers",
             date,
-            len(to_compute),
-            len(all_ticker_flags) - len(to_compute),
+            len(rows),
+            len(ticker_flags),
         )
-
-        all_syms = [t for t, _ in to_compute]
-        fund_rows = get_fundamentals_for_tickers(all_syms)
-        sector_map = {r["symbol"]: r.get("sector") for r in fund_rows}
-        fund_map = {
-            r["symbol"]: {
-                "market_cap_b": r.get("market_cap_b"),
-                "beta": r.get("beta"),
-                "forward_pe": r.get("forward_pe"),
-                "peg_ratio": r.get("peg_ratio"),
-                "revenue_growth": r.get("revenue_growth"),
-                "earnings_growth": r.get("earnings_growth"),
-                "debt_to_equity": r.get("debt_to_equity"),
-                "dividend_yield": r.get("dividend_yield"),
-                "fcf": r.get("fcf"),
-            }
-            for r in fund_rows
-        }
-
-        macro = compute_macro_for_date(date)
-        if macro:
-            upsert_macro_row(macro)
-
-        ohlcv_map = load_ohlcv_batch_for_date(all_syms, date)
-        now = datetime.now(timezone.utc).isoformat()
-        rows_to_insert: list[dict] = []
-
-        for ticker, is_prime in to_compute:
-            df = ohlcv_map.get(ticker)
-            if df is None or df.empty:
-                logger.warning("No OHLCV for %s on %s", ticker, date)
-                continue
-
-            feats = compute_features(ticker, date, df, sector=sector_map.get(ticker))
-            if feats is None:
-                logger.debug("Insufficient history for %s on %s", ticker, date)
-                continue
-
-            if is_prime:
-                _cross_validate(ticker, date, feats, records)
-
-            rows_to_insert.append({
-                "date": date, "ticker": ticker, "is_prime": is_prime,
-                **feats,
-                **fund_map.get(ticker, {}),
-                "computed_at": now,
-            })
-
-        count = upsert_feature_rows_bulk(rows_to_insert)
-        logger.info("Date %s: inserted %d rows", date, count)
 
     counts = get_feature_counts()
     logger.info(
