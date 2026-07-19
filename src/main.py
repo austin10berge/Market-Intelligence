@@ -320,7 +320,10 @@ async def _run_algo_detective_steps(today) -> None:
     a failure in one logs and lets the rest of the pipeline continue."""
     from .algo_detective.store import ensure_tables
 
-    ensure_tables()
+    try:
+        ensure_tables()
+    except Exception as _exc:
+        logger.warning("Algo-detective ensure_tables failed (non-fatal): %s", _exc)
 
     logger.info("Step 6/7: Syncing mLabs trade labels...")
     try:
@@ -349,7 +352,9 @@ async def _run_algo_detective_steps(today) -> None:
         _prime = sorted({f["ticker"] for f in _features if f["is_prime"] == 1})
         if _prime:
             stored = await asyncio.to_thread(fetch_snapshot_pcr, _prime, today.isoformat())
-            logger.info("Options snapshot: %d rows stored for %d prime tickers", stored, len(_prime))
+            logger.info(
+                "Options snapshot: %d rows stored for %d prime tickers", stored, len(_prime)
+            )
     except Exception as _exc:
         logger.warning("Algo-detective options snapshot failed (non-fatal): %s", _exc)
 
