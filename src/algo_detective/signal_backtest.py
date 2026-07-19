@@ -157,16 +157,24 @@ def _compute_pooled_degradation(is_stats: dict, oos_stats: dict) -> dict:
 def run_signal_walk_forward(
     criteria: dict,
     mode: WalkForwardMode = WalkForwardMode.ROLLING,
-    in_sample_days: int = 756,
-    out_of_sample_days: int = 252,
+    in_sample_days: int = 60,
+    out_of_sample_days: int = 20,
     target_delta: float = 0.25,
     target_dte: int = 5,
     ladder: list[ProfitLadderTier] | None = None,
     events: list[dict] | None = None,
 ) -> dict:
-    """Split the signal event set into IS/OOS folds by calendar date
-    (reusing the backtester's existing fold-generation logic) and report
-    IS-vs-OOS degradation for the pooled trade stats in each fold."""
+    """Split the signal event set into IS/OOS folds by distinct
+    signal-firing date (reusing the backtester's existing fold-generation
+    logic) and report IS-vs-OOS degradation for the pooled trade stats in
+    each fold.
+
+    `in_sample_days`/`out_of_sample_days` count **distinct dates on which
+    the gate criteria fired** (across all tickers), not calendar days or
+    daily trading bars — a realistic, moderately selective GTPro gate
+    fires on roughly tens to a few hundred distinct dates over its
+    labeled history, far fewer than the thousands of daily OHLCV bars one
+    ticker's full price history spans."""
     ladder = ladder if ladder is not None else DEFAULT_GTPRO_LADDER
     events = events if events is not None else get_signal_events(criteria)
 
@@ -236,7 +244,7 @@ def print_signal_walk_forward_report(result: dict) -> None:
     print()
 
 
-if __name__ == "__main__":
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Simulate CSP wheel trades on every historical gate hit"
     )
@@ -244,7 +252,13 @@ if __name__ == "__main__":
     parser.add_argument("--mode", choices=["backtest", "walk-forward"], default="backtest")
     parser.add_argument("--target-delta", type=float, default=0.25)
     parser.add_argument("--target-dte", type=int, default=5)
-    args = parser.parse_args()
+    parser.add_argument("--in-sample-days", type=int, default=60)
+    parser.add_argument("--out-of-sample-days", type=int, default=20)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = _parse_args()
 
     criteria_input = args.criteria.strip()
     if criteria_input.endswith(".json") and Path(criteria_input).exists():
@@ -254,7 +268,11 @@ if __name__ == "__main__":
 
     if args.mode == "walk-forward":
         wf_result = run_signal_walk_forward(
-            criteria, target_delta=args.target_delta, target_dte=args.target_dte
+            criteria,
+            in_sample_days=args.in_sample_days,
+            out_of_sample_days=args.out_of_sample_days,
+            target_delta=args.target_delta,
+            target_dte=args.target_dte,
         )
         print_signal_walk_forward_report(wf_result)
     else:
@@ -262,3 +280,7 @@ if __name__ == "__main__":
             criteria, target_delta=args.target_delta, target_dte=args.target_dte
         )
         print_signal_backtest_report(bt_result)
+
+
+if __name__ == "__main__":
+    main()

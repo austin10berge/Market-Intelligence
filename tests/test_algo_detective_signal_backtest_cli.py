@@ -1,7 +1,11 @@
-"""Tests for the CLI report printers in src/algo_detective/signal_backtest.py."""
+"""Tests for the CLI report printers and argument plumbing in
+src/algo_detective/signal_backtest.py."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from src.algo_detective.signal_backtest import (
+    main,
     print_signal_backtest_report,
     print_signal_walk_forward_report,
 )
@@ -37,3 +41,43 @@ class TestReportPrinters:
         print_signal_walk_forward_report(result)
         captured = capsys.readouterr()
         assert "Fold 1" in captured.out
+
+
+class TestCLIArgPlumbing:
+    def test_in_sample_and_out_of_sample_flags_reach_run_signal_walk_forward(self, monkeypatch):
+        argv = [
+            "signal_backtest.py",
+            "--criteria", '{"adr20_pct_max": 4.0}',
+            "--mode", "walk-forward",
+            "--in-sample-days", "45",
+            "--out-of-sample-days", "15",
+        ]
+        monkeypatch.setattr("sys.argv", argv)
+        with patch(
+            "src.algo_detective.signal_backtest.run_signal_walk_forward"
+        ) as mock_wf, patch(
+            "src.algo_detective.signal_backtest.print_signal_walk_forward_report"
+        ):
+            mock_wf.return_value = {"criteria": {}, "folds": []}
+            main()
+        _, kwargs = mock_wf.call_args
+        assert kwargs["in_sample_days"] == 45
+        assert kwargs["out_of_sample_days"] == 15
+
+    def test_in_sample_and_out_of_sample_flags_default_to_60_and_20(self, monkeypatch):
+        argv = [
+            "signal_backtest.py",
+            "--criteria", '{"adr20_pct_max": 4.0}',
+            "--mode", "walk-forward",
+        ]
+        monkeypatch.setattr("sys.argv", argv)
+        with patch(
+            "src.algo_detective.signal_backtest.run_signal_walk_forward"
+        ) as mock_wf, patch(
+            "src.algo_detective.signal_backtest.print_signal_walk_forward_report"
+        ):
+            mock_wf.return_value = {"criteria": {}, "folds": []}
+            main()
+        _, kwargs = mock_wf.call_args
+        assert kwargs["in_sample_days"] == 60
+        assert kwargs["out_of_sample_days"] == 20

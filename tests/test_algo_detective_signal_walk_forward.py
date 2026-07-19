@@ -65,3 +65,18 @@ class TestRunSignalWalkForward:
             {"adr20_pct_max": 4.0}, in_sample_days=200, out_of_sample_days=50, events=events,
         )
         assert result["folds"] == []
+
+    def test_generates_at_least_one_fold_with_default_day_counts(self):
+        """Regression test: run_signal_walk_forward's own defaults (not an
+        override) must produce at least one fold for a realistic count of
+        distinct signal-firing dates. Before the fix, the defaults
+        (in_sample_days=756, out_of_sample_days=252) were copied from the
+        daily-trading-bar domain (src/backtester/models.py) and silently
+        produced zero folds for any plausible signal-date count, since a
+        moderately selective gate fires on only tens to a few hundred
+        distinct dates over its labeled history — nowhere near the combined
+        1008 dates the old defaults required."""
+        dates = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2024-01-02", periods=150)]
+        events = _events_across_dates(dates)
+        result = run_signal_walk_forward({"adr20_pct_max": 4.0}, events=events)
+        assert len(result["folds"]) >= 1
