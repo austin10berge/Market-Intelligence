@@ -17,7 +17,7 @@ class TestRunBackfill:
     @patch("src.algo_detective.backfill_mlabs.sync_control_universe")
     @patch("src.algo_detective.backfill_mlabs.record_scraped_post")
     @patch("src.algo_detective.backfill_mlabs.compute_and_store_for_date")
-    @patch("src.algo_detective.backfill_mlabs.get_computed_pairs")
+    @patch("src.algo_detective.backfill_mlabs.get_computed_prime_pairs")
     @patch("src.algo_detective.backfill_mlabs.fetch_recap_trades")
     @patch("src.algo_detective.backfill_mlabs.fetch_post_index")
     def test_phase1_processes_every_slug_regardless_of_checkpoint(
@@ -50,7 +50,7 @@ class TestRunBackfill:
     @patch("src.algo_detective.backfill_mlabs.sync_control_universe")
     @patch("src.algo_detective.backfill_mlabs.record_scraped_post")
     @patch("src.algo_detective.backfill_mlabs.compute_and_store_for_date")
-    @patch("src.algo_detective.backfill_mlabs.get_computed_pairs")
+    @patch("src.algo_detective.backfill_mlabs.get_computed_prime_pairs")
     @patch("src.algo_detective.backfill_mlabs.fetch_recap_trades")
     @patch("src.algo_detective.backfill_mlabs.fetch_post_index")
     def test_phase2_runs_control_sync_only_for_dates_phase1_touched(
@@ -81,7 +81,7 @@ class TestRunBackfill:
     @patch("src.algo_detective.backfill_mlabs.sync_control_universe")
     @patch("src.algo_detective.backfill_mlabs.record_scraped_post")
     @patch("src.algo_detective.backfill_mlabs.compute_and_store_for_date")
-    @patch("src.algo_detective.backfill_mlabs.get_computed_pairs")
+    @patch("src.algo_detective.backfill_mlabs.get_computed_prime_pairs")
     @patch("src.algo_detective.backfill_mlabs.fetch_recap_trades")
     @patch("src.algo_detective.backfill_mlabs.fetch_post_index")
     def test_returns_summary_dict(

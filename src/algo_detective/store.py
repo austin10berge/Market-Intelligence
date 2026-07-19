@@ -143,17 +143,13 @@ def ensure_tables() -> None:
         # Add any new columns to an existing table (idempotent)
         for col, col_type in _FUNDAMENTAL_COLUMNS:
             try:
-                conn.execute(
-                    f"ALTER TABLE detective_features ADD COLUMN {col} {col_type}"
-                )
+                conn.execute(f"ALTER TABLE detective_features ADD COLUMN {col} {col_type}")
                 conn.commit()
             except sqlite3.OperationalError:
                 pass  # column already exists
         for col, col_type in _OPTIONS_COLUMNS:
             try:
-                conn.execute(
-                    f"ALTER TABLE detective_options ADD COLUMN {col} {col_type}"
-                )
+                conn.execute(f"ALTER TABLE detective_options ADD COLUMN {col} {col_type}")
                 conn.commit()
             except sqlite3.OperationalError:
                 pass  # column already exists
@@ -183,9 +179,7 @@ def backfill_fundamentals() -> int:
             FROM universe_fundamentals f
             WHERE detective_features.ticker = f.symbol
         """)
-        count = conn.execute(
-            "SELECT changes() AS n"
-        ).fetchone()["n"]
+        count = conn.execute("SELECT changes() AS n").fetchone()["n"]
         conn.commit()
         return count
     finally:
@@ -196,6 +190,23 @@ def get_computed_pairs() -> set[tuple[str, str]]:
     conn = _get_connection()
     try:
         rows = conn.execute("SELECT date, ticker FROM detective_features").fetchall()
+        return {(r["date"], r["ticker"]) for r in rows}
+    finally:
+        conn.close()
+
+
+def get_computed_prime_pairs() -> set[tuple[str, str]]:
+    """Like get_computed_pairs(), but restricted to rows already stored as
+    is_prime=1. Callers that only ever write is_prime=1 rows (label_sync.py,
+    backfill_mlabs.py) must use this instead of the blanket
+    get_computed_pairs() — otherwise a pre-existing is_prime=0 control row
+    for the same (date, ticker) silently blocks promotion to is_prime=1 when
+    the mLabs recap for that trade is later scraped."""
+    conn = _get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT date, ticker FROM detective_features WHERE is_prime = 1"
+        ).fetchall()
         return {(r["date"], r["ticker"]) for r in rows}
     finally:
         conn.close()
@@ -250,9 +261,7 @@ def get_all_features() -> list[dict]:
 def get_macro_for_date(date: str) -> dict | None:
     conn = _get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM detective_macro WHERE date = ?", (date,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM detective_macro WHERE date = ?", (date,)).fetchone()
         return dict(row) if row else None
     finally:
         conn.close()
@@ -275,10 +284,7 @@ def upsert_options_rows(rows: list[dict]) -> int:
                 pcr_vol = COALESCE(excluded.pcr_vol, detective_options.pcr_vol),
                 pcr_oi  = COALESCE(excluded.pcr_oi,  detective_options.pcr_oi)
             """,
-            [
-                {**r, "pcr_vol": r.get("pcr_vol"), "pcr_oi": r.get("pcr_oi")}
-                for r in rows
-            ],
+            [{**r, "pcr_vol": r.get("pcr_vol"), "pcr_oi": r.get("pcr_oi")} for r in rows],
         )
         conn.commit()
         return len(rows)
@@ -333,15 +339,11 @@ def record_scraped_post(slug: str, trades_found: int) -> None:
 def get_feature_counts() -> dict:
     conn = _get_connection()
     try:
-        total = conn.execute(
-            "SELECT COUNT(*) as cnt FROM detective_features"
-        ).fetchone()["cnt"]
+        total = conn.execute("SELECT COUNT(*) as cnt FROM detective_features").fetchone()["cnt"]
         prime = conn.execute(
             "SELECT COUNT(*) as cnt FROM detective_features WHERE is_prime = 1"
         ).fetchone()["cnt"]
-        macro = conn.execute(
-            "SELECT COUNT(*) as cnt FROM detective_macro"
-        ).fetchone()["cnt"]
+        macro = conn.execute("SELECT COUNT(*) as cnt FROM detective_macro").fetchone()["cnt"]
         return {"total": total, "prime": prime, "control": total - prime, "macro_dates": macro}
     finally:
         conn.close()

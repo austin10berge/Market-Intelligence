@@ -22,7 +22,7 @@ from .build import compute_and_store_for_date
 from .control_sync import sync_control_universe
 from .label_sync import _ohlcv_fallback
 from .mlabs_scraper import fetch_post_index, fetch_recap_trades
-from .store import get_computed_pairs, record_scraped_post
+from .store import get_computed_prime_pairs, record_scraped_post
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -49,15 +49,25 @@ def run_backfill() -> dict:
         for trade in trades:
             by_date[trade["open_date"]].append(trade["ticker"])
 
-        computed_pairs = get_computed_pairs()
+        computed_pairs = get_computed_prime_pairs()
         for date, tickers in by_date.items():
             ticker_flags = [(t, 1) for t in sorted(set(tickers))]
-            rows = compute_and_store_for_date(
-                date,
-                ticker_flags,
-                computed_pairs,
-                ohlcv_fallback_fn=_ohlcv_fallback,
-            )
+            try:
+                rows = compute_and_store_for_date(
+                    date,
+                    ticker_flags,
+                    computed_pairs,
+                    ohlcv_fallback_fn=_ohlcv_fallback,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to compute/store features for %s on %s during backfill, "
+                    "skipping and continuing",
+                    slug,
+                    date,
+                    exc_info=True,
+                )
+                continue
             prime_rows_written += len(rows)
             dates_touched.add(date)
 
