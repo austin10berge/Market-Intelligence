@@ -284,19 +284,7 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
                     tags="robot",
                 )
 
-        # ── Step 5: Algo-detective options snapshot ──────────────
-        logger.info("Step 5/5: Collecting algo-detective options snapshot...")
-        try:
-            from .algo_detective.options_chain import fetch_snapshot_pcr
-            from .algo_detective.store import get_all_features as _get_detective_features
-
-            _features = await asyncio.to_thread(_get_detective_features)
-            _prime = sorted({f["ticker"] for f in _features if f["is_prime"] == 1})
-            if _prime:
-                stored = await asyncio.to_thread(fetch_snapshot_pcr, _prime, today.isoformat())
-                logger.info("Options snapshot: %d rows stored for %d prime tickers", stored, len(_prime))
-        except Exception as _exc:
-            logger.warning("Algo-detective options snapshot failed (non-fatal): %s", _exc)
+        await _run_algo_detective_steps(today)
 
         logger.info("✅ Pipeline complete!")
 
@@ -323,6 +311,47 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
 
     finally:
         await close_http_client()
+
+
+async def _run_algo_detective_steps(today) -> None:
+    """Steps 5-7 of the nightly pipeline: sync mLabs trade labels, sync
+    control-universe features, then refresh live options IV snapshots for
+    the (now up to date) prime-ticker whitelist. All three are non-fatal —
+    a failure in one logs and lets the rest of the pipeline continue."""
+    from .algo_detective.store import ensure_tables
+
+    ensure_tables()
+
+    logger.info("Step 6/7: Syncing mLabs trade labels...")
+    try:
+        from .algo_detective.label_sync import sync_new_labels
+
+        written = await asyncio.to_thread(sync_new_labels)
+        logger.info("Label sync: %d new prime rows written", written)
+    except Exception as _exc:
+        logger.warning("Algo-detective label sync failed (non-fatal): %s", _exc)
+
+    logger.info("Step 7/7: Syncing control-universe features...")
+    try:
+        from .algo_detective.control_sync import sync_control_universe
+
+        written = await asyncio.to_thread(sync_control_universe, today.isoformat())
+        logger.info("Control sync: %d rows written", written)
+    except Exception as _exc:
+        logger.warning("Algo-detective control sync failed (non-fatal): %s", _exc)
+
+    logger.info("Step 5/7: Collecting algo-detective options snapshot...")
+    try:
+        from .algo_detective.options_chain import fetch_snapshot_pcr
+        from .algo_detective.store import get_all_features as _get_detective_features
+
+        _features = await asyncio.to_thread(_get_detective_features)
+        _prime = sorted({f["ticker"] for f in _features if f["is_prime"] == 1})
+        if _prime:
+            stored = await asyncio.to_thread(fetch_snapshot_pcr, _prime, today.isoformat())
+            logger.info("Options snapshot: %d rows stored for %d prime tickers", stored, len(_prime))
+    except Exception as _exc:
+        logger.warning("Algo-detective options snapshot failed (non-fatal): %s", _exc)
 
 
 async def _fetch_all() -> list[Signal]:
