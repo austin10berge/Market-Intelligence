@@ -314,6 +314,59 @@ def test_upsert_options_coalesces_null_iv_without_clobbering_existing():
     assert stored["pcr_oi"] == 0.9
 
 
+def test_upsert_options_rows_accepts_schwab_only_row():
+    """A Schwab-sourced row supplies only delta/bid/ask/open_interest — the
+    Alpaca-only columns (best_iv, best_volume, occ_symbol, pcr_vol, pcr_oi)
+    must default to None rather than raising a binding error."""
+    ensure_tables()
+    row = {
+        "date": "2026-07-20",
+        "ticker": "HOOD",
+        "delta": -0.223,
+        "bid": 1.85,
+        "ask": 1.95,
+        "open_interest": 8325,
+    }
+    count = upsert_options_rows([row])
+    assert count == 1
+
+    stored = get_options_index()[("2026-07-20", "HOOD")]
+    assert stored["delta"] == -0.223
+    assert stored["bid"] == 1.85
+    assert stored["ask"] == 1.95
+    assert stored["open_interest"] == 8325
+    assert stored["best_iv"] is None
+
+
+def test_upsert_options_coalesces_delta_without_clobbering_iv():
+    """Writing delta/bid/ask/open_interest for a (date, ticker) that already
+    has an Alpaca-sourced best_iv/pcr_vol row must not erase those fields,
+    and vice versa — the two sources merge into one row per (date, ticker)."""
+    ensure_tables()
+    ticker = "AAPL"
+    upsert_options_rows([_make_options_row(ticker=ticker)])  # Alpaca-style row
+    upsert_options_rows(
+        [
+            {
+                "date": "2026-06-18",
+                "ticker": ticker,
+                "delta": -0.21,
+                "bid": 2.5,
+                "ask": 2.6,
+                "open_interest": 900,
+            }
+        ]
+    )
+
+    stored = get_options_index()[("2026-06-18", ticker)]
+    assert stored["best_iv"] == 0.42
+    assert stored["pcr_vol"] == 1.15
+    assert stored["delta"] == -0.21
+    assert stored["bid"] == 2.5
+    assert stored["ask"] == 2.6
+    assert stored["open_interest"] == 900
+
+
 def test_upsert_options_rows_idempotent():
     ensure_tables()
     row = _make_options_row(ticker="GOOG")

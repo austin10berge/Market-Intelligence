@@ -278,17 +278,38 @@ def upsert_options_rows(rows: list[dict]) -> int:
     try:
         conn.executemany(
             """
-            INSERT INTO detective_options (date, ticker, best_iv, best_volume, occ_symbol, pcr_vol, pcr_oi)
+            INSERT INTO detective_options
+                (date, ticker, best_iv, best_volume, occ_symbol, pcr_vol, pcr_oi,
+                 delta, bid, ask, open_interest)
             VALUES (:date, :ticker, :best_iv, :best_volume, :occ_symbol,
-                    :pcr_vol, :pcr_oi)
+                    :pcr_vol, :pcr_oi, :delta, :bid, :ask, :open_interest)
             ON CONFLICT(date, ticker) DO UPDATE SET
                 best_iv = COALESCE(excluded.best_iv, detective_options.best_iv),
                 best_volume = COALESCE(excluded.best_volume, detective_options.best_volume),
                 occ_symbol = COALESCE(excluded.occ_symbol, detective_options.occ_symbol),
                 pcr_vol = COALESCE(excluded.pcr_vol, detective_options.pcr_vol),
-                pcr_oi  = COALESCE(excluded.pcr_oi,  detective_options.pcr_oi)
+                pcr_oi  = COALESCE(excluded.pcr_oi,  detective_options.pcr_oi),
+                delta = COALESCE(excluded.delta, detective_options.delta),
+                bid = COALESCE(excluded.bid, detective_options.bid),
+                ask = COALESCE(excluded.ask, detective_options.ask),
+                open_interest = COALESCE(excluded.open_interest, detective_options.open_interest)
             """,
-            [{**r, "pcr_vol": r.get("pcr_vol"), "pcr_oi": r.get("pcr_oi")} for r in rows],
+            [
+                {
+                    "date": r["date"],
+                    "ticker": r["ticker"],
+                    "best_iv": r.get("best_iv"),
+                    "best_volume": r.get("best_volume"),
+                    "occ_symbol": r.get("occ_symbol"),
+                    "pcr_vol": r.get("pcr_vol"),
+                    "pcr_oi": r.get("pcr_oi"),
+                    "delta": r.get("delta"),
+                    "bid": r.get("bid"),
+                    "ask": r.get("ask"),
+                    "open_interest": r.get("open_interest"),
+                }
+                for r in rows
+            ],
         )
         conn.commit()
         return len(rows)
