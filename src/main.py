@@ -314,10 +314,12 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
 
 
 async def _run_algo_detective_steps(today) -> None:
-    """Steps 5-7 of the nightly pipeline: sync mLabs trade labels, sync
-    control-universe features, then refresh live options IV snapshots for
-    the (now up to date) prime-ticker whitelist. All three are non-fatal —
-    a failure in one logs and lets the rest of the pipeline continue."""
+    """Steps 5-8 of the nightly pipeline: sync mLabs trade labels, sync
+    control-universe features, look up the narrow (all-time-prime) ticker
+    universe once for the two steps that need it, then refresh live options
+    IV snapshots and real put delta for that whitelist. All steps are
+    non-fatal — a failure in one logs and lets the rest of the pipeline
+    continue."""
     from .algo_detective.store import ensure_tables
 
     try:
@@ -325,7 +327,7 @@ async def _run_algo_detective_steps(today) -> None:
     except Exception as _exc:
         logger.warning("Algo-detective ensure_tables failed (non-fatal): %s", _exc)
 
-    logger.info("Step 6/7: Syncing mLabs trade labels...")
+    logger.info("Step 6/8: Syncing mLabs trade labels...")
     try:
         from .algo_detective.label_sync import sync_new_labels
 
@@ -334,7 +336,7 @@ async def _run_algo_detective_steps(today) -> None:
     except Exception as _exc:
         logger.warning("Algo-detective label sync failed (non-fatal): %s", _exc)
 
-    logger.info("Step 7/7: Syncing control-universe features...")
+    logger.info("Step 7/8: Syncing control-universe features...")
     try:
         from .algo_detective.control_sync import sync_control_universe
 
@@ -343,20 +345,46 @@ async def _run_algo_detective_steps(today) -> None:
     except Exception as _exc:
         logger.warning("Algo-detective control sync failed (non-fatal): %s", _exc)
 
-    logger.info("Step 5/7: Collecting algo-detective options snapshot...")
+    _narrow_universe: list[str] = []
     try:
-        from .algo_detective.options_chain import fetch_snapshot_pcr
         from .algo_detective.store import get_all_features as _get_detective_features
 
         _features = await asyncio.to_thread(_get_detective_features)
-        _prime = sorted({f["ticker"] for f in _features if f["is_prime"] == 1})
-        if _prime:
-            stored = await asyncio.to_thread(fetch_snapshot_pcr, _prime, today.isoformat())
+        _narrow_universe = sorted({f["ticker"] for f in _features if f["is_prime"] == 1})
+    except Exception as _exc:
+        logger.warning("Algo-detective narrow-universe lookup failed (non-fatal): %s", _exc)
+
+    logger.info("Step 5/8: Collecting algo-detective options snapshot...")
+    try:
+        from .algo_detective.options_chain import fetch_snapshot_pcr
+
+        if _narrow_universe:
+            stored = await asyncio.to_thread(
+                fetch_snapshot_pcr, _narrow_universe, today.isoformat()
+            )
             logger.info(
-                "Options snapshot: %d rows stored for %d prime tickers", stored, len(_prime)
+                "Options snapshot: %d rows stored for %d prime tickers",
+                stored,
+                len(_narrow_universe),
             )
     except Exception as _exc:
         logger.warning("Algo-detective options snapshot failed (non-fatal): %s", _exc)
+
+    logger.info("Step 8/8: Collecting Schwab put delta snapshot...")
+    try:
+        from .algo_detective.schwab_options import fetch_delta_snapshot
+
+        if _narrow_universe:
+            delta_written = await asyncio.to_thread(
+                fetch_delta_snapshot, _narrow_universe, today.isoformat()
+            )
+            logger.info(
+                "Delta snapshot: %d rows stored for %d narrow-universe tickers",
+                delta_written,
+                len(_narrow_universe),
+            )
+    except Exception as _exc:
+        logger.warning("Algo-detective delta snapshot failed (non-fatal): %s", _exc)
 
 
 async def _fetch_all() -> list[Signal]:
