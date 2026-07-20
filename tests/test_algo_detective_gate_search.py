@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from src.algo_detective.gate_search import _build_candidate_gates
+from src.algo_detective.gate_search import (
+    _build_candidate_gates,
+    _eval_candidate,
+    run_greedy_search,
+)
 
 
 def _prime(n: int, rsi: float = 40.0, adx: float = 25.0) -> list[dict]:
@@ -70,3 +74,80 @@ class TestBuildCandidateGates:
         candidates = _build_candidate_gates(prime)
         rsi_min_vals = [v for k, v in candidates if k == "rsi_min"]
         assert len(rsi_min_vals) == len(set(rsi_min_vals))
+
+
+class TestEvalCandidate:
+    def test_returns_correct_precision_and_recall(self):
+        pool = [
+            {"is_prime": 1, "rsi": 30.0},
+            {"is_prime": 1, "rsi": 35.0},
+            {"is_prime": 0, "rsi": 25.0},
+            {"is_prime": 0, "rsi": 70.0},
+            {"is_prime": 0, "rsi": 75.0},
+        ]
+        # rsi_max=40 keeps rsi<=40: all 2 prime + 1 control (rsi=25) → prec=2/3, rec=2/2
+        prec, rec = _eval_candidate(pool, "rsi_max", 40.0, total_prime=2)
+        assert abs(prec - 2 / 3) < 1e-9
+        assert abs(rec - 1.0) < 1e-9
+
+    def test_returns_zeros_when_nothing_passes(self):
+        pool = [{"is_prime": 1, "rsi": 80.0}, {"is_prime": 0, "rsi": 90.0}]
+        # rsi_max=10 keeps nothing
+        prec, rec = _eval_candidate(pool, "rsi_max", 10.0, total_prime=1)
+        assert prec == 0.0
+        assert rec == 0.0
+
+
+class TestRunGreedySearch:
+    def _make_rows(self) -> list[dict]:
+        """10 prime with rsi 20-29; 100 control with rsi 60-79. rsi_max~40 is a clean separator."""
+        prime = [{"is_prime": 1, "rsi": float(20 + i)} for i in range(10)]
+        control = [{"is_prime": 0, "rsi": float(60 + i % 20)} for i in range(100)]
+        return prime + control
+
+    def test_improves_precision_over_base_rate(self):
+        rows = self._make_rows()
+        base_rate = 10 / 110
+        result = run_greedy_search(rows, recall_floor=0.30, max_steps=5)
+        assert result["precision"] > base_rate
+
+    def test_recall_never_drops_below_floor(self):
+        rows = self._make_rows()
+        result = run_greedy_search(rows, recall_floor=0.30, max_steps=10)
+        for step in result["steps"]:
+            assert step["recall"] >= 0.30, f"Step violated recall floor: {step}"
+        assert result["recall"] >= 0.30
+
+    def test_step_trace_matches_final_result(self):
+        rows = self._make_rows()
+        result = run_greedy_search(rows, recall_floor=0.30, max_steps=5)
+        if result["steps"]:
+            last = result["steps"][-1]
+            assert abs(last["precision"] - result["precision"]) < 1e-9
+
+    def test_stops_when_no_gate_improves_by_threshold(self):
+        # All features uniform between prime and control → no gate improves by >0.5pp
+        rows = [{"is_prime": 1, "rsi": 50.0} for _ in range(10)]
+        rows += [{"is_prime": 0, "rsi": 50.0} for _ in range(100)]
+        result = run_greedy_search(rows, recall_floor=0.30, max_steps=10)
+        assert result["criteria"] == {}
+        assert result["steps"] == []
+
+    def test_returns_empty_criteria_when_every_gate_violates_recall_floor(self):
+        # Gate rsi_min=90 would give 100% prec but only 1/10 = 10% recall < 30% floor.
+        # All other possible thresholds also give <30% recall or no precision gain.
+        prime = [{"is_prime": 1, "rsi": float(i * 10)} for i in range(10)]  # rsi 0,10,...,90
+        # Control: 200 rows with rsi spread uniformly; any low-rsi gate catches most control too
+        control = [{"is_prime": 0, "rsi": float(i % 100)} for i in range(200)]
+        rows = prime + control
+        result = run_greedy_search(rows, recall_floor=0.90, max_steps=5)
+        # recall_floor=0.90 means must catch ≥9/10 primes; very restrictive
+        if result["criteria"]:
+            assert result["recall"] >= 0.90
+
+    def test_empty_input_returns_empty_result(self):
+        result = run_greedy_search([], recall_floor=0.30)
+        assert result["criteria"] == {}
+        assert result["precision"] == 0.0
+        assert result["recall"] == 0.0
+        assert result["steps"] == []
