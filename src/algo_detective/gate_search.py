@@ -194,3 +194,118 @@ def run_greedy_search(
         "recall": round(final_tp / total_prime, 4),
         "steps": steps,
     }
+
+
+# Explicit mapping for options-derived feature names that don't follow the
+# generic field_name + _min/_max → criteria_key convention.
+_TREE_KEY_MAP: dict[tuple[str, str], str] = {
+    ("best_iv", ">"): "options_iv_min",
+    ("iv_rv", ">"): "iv_rv_min",
+    ("pcr_vol", "<="): "pcr_vol_max",
+}
+
+_BOOL_SET: frozenset[str] = frozenset(_BOOLEAN_FEATURES)
+
+
+def _tree_path_to_criteria(path: list[tuple[str, str, float]]) -> dict:
+    """Translate a root-to-leaf path of (feature, direction, threshold) to a criteria dict.
+
+    direction is '<=' (left child) or '>' (right child).
+    Boolean features: '>' → {feature: 1}; '<=' → skipped (no False gate exists).
+    Options-derived features: mapped via _TREE_KEY_MAP.
+    All others: '>' → {feature_min: threshold}; '<=' → {feature_max: threshold}.
+    """
+    criteria: dict = {}
+    for feat, direction, threshold in path:
+        mapped = _TREE_KEY_MAP.get((feat, direction))
+        if mapped is not None:
+            criteria[mapped] = round(threshold, 6)
+        elif feat in _BOOL_SET:
+            if direction == ">":
+                criteria[feat] = 1
+        else:
+            key = f"{feat}_min" if direction == ">" else f"{feat}_max"
+            criteria[key] = round(threshold, 6)
+    return criteria
+
+
+def _build_feature_matrix(
+    rows: list[dict],
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Build (x, y, feature_names) for sklearn. Nulls filled with column median."""
+    numeric_cols = _SEARCH_NUMERIC_FEATURES + ["best_iv", "pcr_vol", "iv_rv"]
+    bool_cols = list(_BOOLEAN_FEATURES)
+    feature_names = numeric_cols + bool_cols
+
+    x_list = []
+    y_list = []
+    for row in rows:
+        x_row = [row.get(f) for f in numeric_cols]
+        x_row += [1.0 if row.get(f) == 1 else 0.0 for f in bool_cols]
+        x_list.append(x_row)
+        y_list.append(1 if row.get("is_prime") == 1 else 0)
+
+    x = np.array(x_list, dtype=float)
+    y = np.array(y_list, dtype=int)
+
+    for col_idx in range(x.shape[1]):
+        col = x[:, col_idx]
+        mask = np.isnan(col)
+        if mask.any():
+            median_val = float(np.nanmedian(col))
+            x[mask, col_idx] = median_val if not np.isnan(median_val) else 0.0
+
+    return x, y, feature_names
+
+
+def run_tree_search(
+    rows: list[dict],
+    baseline_precision: float,
+    recall_floor: float = 0.30,
+) -> list[TreeCandidate]:
+    """Approach B: fit a shallow decision tree, extract leaf rules as criteria dicts.
+
+    Leaves with < 10 samples are skipped. Each surviving leaf's criteria dict is
+    validated by validate_criteria (authoritative ground truth — sklearn leaf stats
+    are approximate due to class_weight). Returns candidates sorted by precision.
+    """
+    from sklearn.tree import DecisionTreeClassifier
+    from sklearn.tree import _tree as sklearn_tree
+
+    from .validate import validate_criteria
+
+    x, y, feature_names = _build_feature_matrix(rows)
+    clf = DecisionTreeClassifier(max_depth=5, class_weight="balanced", random_state=42)
+    clf.fit(x, y)
+
+    tree = clf.tree_
+    raw_candidates: list[dict] = []
+
+    def _walk(node: int, path: list[tuple[str, str, float]]) -> None:
+        if tree.feature[node] == sklearn_tree.TREE_UNDEFINED:
+            if int(tree.n_node_samples[node]) < 10:
+                return
+            crit = _tree_path_to_criteria(path)
+            if crit:
+                raw_candidates.append(crit)
+            return
+        feat = feature_names[tree.feature[node]]
+        thresh = float(tree.threshold[node])
+        _walk(tree.children_left[node], path + [(feat, "<=", thresh)])
+        _walk(tree.children_right[node], path + [(feat, ">", thresh)])
+
+    _walk(0, [])
+
+    results: list[TreeCandidate] = []
+    for crit in raw_candidates:
+        report = validate_criteria(crit, features=rows)
+        if report["precision"] >= baseline_precision and report["recall"] >= recall_floor:
+            results.append(
+                {
+                    "criteria": crit,
+                    "precision": report["precision"],
+                    "recall": report["recall"],
+                }
+            )
+
+    return sorted(results, key=lambda c: c["precision"], reverse=True)

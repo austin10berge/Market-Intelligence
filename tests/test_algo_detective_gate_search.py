@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from src.algo_detective.gate_search import (
     _build_candidate_gates,
+    _build_feature_matrix,
     _eval_candidate,
+    _tree_path_to_criteria,
     run_greedy_search,
+    run_tree_search,
 )
 
 
@@ -151,3 +154,105 @@ class TestRunGreedySearch:
         assert result["precision"] == 0.0
         assert result["recall"] == 0.0
         assert result["steps"] == []
+
+
+class TestTreePathToCriteria:
+    def test_numeric_gt_becomes_min(self):
+        assert _tree_path_to_criteria([("rsi", ">", 20.5)]) == {"rsi_min": 20.5}
+
+    def test_numeric_lte_becomes_max(self):
+        assert _tree_path_to_criteria([("rv20", "<=", 0.45)]) == {"rv20_max": 0.45}
+
+    def test_boolean_gt_becomes_true(self):
+        assert _tree_path_to_criteria([("price_above_ema50", ">", 0.5)]) == {"price_above_ema50": 1}
+
+    def test_boolean_lte_skipped(self):
+        assert _tree_path_to_criteria([("price_above_ema50", "<=", 0.5)]) == {}
+
+    def test_best_iv_gt_becomes_options_iv_min(self):
+        assert _tree_path_to_criteria([("best_iv", ">", 0.25)]) == {"options_iv_min": 0.25}
+
+    def test_iv_rv_gt_becomes_iv_rv_min(self):
+        assert _tree_path_to_criteria([("iv_rv", ">", 1.2)]) == {"iv_rv_min": 1.2}
+
+    def test_pcr_vol_lte_becomes_pcr_vol_max(self):
+        assert _tree_path_to_criteria([("pcr_vol", "<=", 1.5)]) == {"pcr_vol_max": 1.5}
+
+    def test_multi_condition_path(self):
+        path = [("rsi", "<=", 60.0), ("adx", ">", 20.0)]
+        assert _tree_path_to_criteria(path) == {"rsi_max": 60.0, "adx_min": 20.0}
+
+    def test_empty_path_returns_empty_dict(self):
+        assert _tree_path_to_criteria([]) == {}
+
+
+class TestBuildFeatureMatrix:
+    def test_shape_matches_rows_and_features(self):
+        rows = [
+            {"is_prime": 1, "rsi": 40.0, "price_above_ema50": 1},
+            {"is_prime": 0, "rsi": 60.0, "price_above_ema50": 0},
+        ]
+        x, y, names = _build_feature_matrix(rows)
+        assert x.shape[0] == 2
+        assert x.shape[1] == len(names)
+        assert list(y) == [1, 0]
+
+    def test_null_filled_with_column_median(self):
+        rows = [
+            {"is_prime": 1, "rsi": None},
+            {"is_prime": 0, "rsi": 40.0},
+            {"is_prime": 0, "rsi": 60.0},
+        ]
+        x, y, names = _build_feature_matrix(rows)
+        rsi_idx = names.index("rsi")
+        # median of non-null values [40, 60] = 50
+        assert x[0, rsi_idx] == 50.0
+
+    def test_boolean_encoded_as_0_or_1(self):
+        rows = [
+            {"is_prime": 1, "price_above_ema50": 1},
+            {"is_prime": 0, "price_above_ema50": 0},
+        ]
+        x, y, names = _build_feature_matrix(rows)
+        idx = names.index("price_above_ema50")
+        assert x[0, idx] == 1.0
+        assert x[1, idx] == 0.0
+
+
+class TestRunTreeSearch:
+    def _make_separable_rows(self) -> list[dict]:
+        """30 prime (rsi 20-49) + 300 control (rsi 60-89). Tree should find rsi split."""
+        prime = [
+            {"is_prime": 1, "rsi": float(20 + i), "date": "2024-01-01", "ticker": f"P{i:03d}"}
+            for i in range(30)
+        ]
+        control = [
+            {"is_prime": 0, "rsi": float(60 + i % 30), "date": "2024-01-01", "ticker": f"C{i:03d}"}
+            for i in range(300)
+        ]
+        return prime + control
+
+    def test_returns_list(self):
+        result = run_tree_search(
+            self._make_separable_rows(), baseline_precision=0.0, recall_floor=0.30
+        )
+        assert isinstance(result, list)
+
+    def test_all_candidates_meet_baseline_and_floor(self):
+        rows = self._make_separable_rows()
+        result = run_tree_search(rows, baseline_precision=0.50, recall_floor=0.30)
+        for cand in result:
+            assert cand["precision"] >= 0.50, f"Below baseline: {cand}"
+            assert cand["recall"] >= 0.30, f"Below recall floor: {cand}"
+
+    def test_sorted_by_precision_descending(self):
+        rows = self._make_separable_rows()
+        result = run_tree_search(rows, baseline_precision=0.0, recall_floor=0.30)
+        precisions = [c["precision"] for c in result]
+        assert precisions == sorted(precisions, reverse=True)
+
+    def test_returns_empty_when_baseline_impossible(self):
+        rows = self._make_separable_rows()
+        # Baseline of 100% can never be met on a real dataset
+        result = run_tree_search(rows, baseline_precision=1.01, recall_floor=0.30)
+        assert result == []
