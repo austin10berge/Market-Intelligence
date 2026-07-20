@@ -8,9 +8,12 @@ See docs/superpowers/specs/2026-07-19-algo-detective-schwab-delta-design.md.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from src.algo_detective.schwab_options import (
     _parse_put_chain,
     _select_target_delta_contract,
+    fetch_delta_snapshot,
 )
 
 _HOOD_CHAIN_FIXTURE = """symbol: HOOD
@@ -81,3 +84,59 @@ class TestSelectTargetDeltaContract:
 
     def test_returns_none_for_empty_contract_list(self):
         assert _select_target_delta_contract([], target_delta=0.20) is None
+
+
+class TestFetchDeltaSnapshot:
+    @patch("src.algo_detective.schwab_options.upsert_options_rows")
+    @patch("src.algo_detective.schwab_options._fetch_chain_via_mcp")
+    def test_writes_selected_contract_per_ticker(self, mock_fetch, mock_upsert):
+        mock_fetch.return_value = _HOOD_CHAIN_FIXTURE
+        mock_upsert.return_value = 1
+
+        written = fetch_delta_snapshot(["HOOD"], "2026-07-19")
+
+        assert written == 1
+        rows = mock_upsert.call_args.args[0]
+        assert rows == [
+            {
+                "date": "2026-07-19",
+                "ticker": "HOOD",
+                "delta": -0.223,
+                "bid": 1.33,
+                "ask": 1.41,
+                "open_interest": 370,
+            }
+        ]
+
+    @patch("src.algo_detective.schwab_options.upsert_options_rows")
+    @patch("src.algo_detective.schwab_options._fetch_chain_via_mcp")
+    def test_one_ticker_failure_does_not_block_others(self, mock_fetch, mock_upsert):
+        mock_fetch.side_effect = [RuntimeError("boom"), _HOOD_CHAIN_FIXTURE]
+        mock_upsert.return_value = 1
+
+        written = fetch_delta_snapshot(["BADTICKER", "HOOD"], "2026-07-19")
+
+        assert written == 1
+        rows = mock_upsert.call_args.args[0]
+        assert len(rows) == 1
+        assert rows[0]["ticker"] == "HOOD"
+
+    @patch("src.algo_detective.schwab_options.upsert_options_rows")
+    @patch("src.algo_detective.schwab_options._fetch_chain_via_mcp")
+    def test_returns_zero_and_skips_upsert_when_no_contracts_selected(
+        self, mock_fetch, mock_upsert
+    ):
+        mock_fetch.return_value = _EMPTY_CHAIN_FIXTURE
+
+        written = fetch_delta_snapshot(["XXXX"], "2026-07-19")
+
+        assert written == 0
+        mock_upsert.assert_not_called()
+
+    @patch("src.algo_detective.schwab_options._fetch_chain_via_mcp")
+    def test_passes_next_two_fridays_as_the_date_window(self, mock_fetch):
+        mock_fetch.return_value = _EMPTY_CHAIN_FIXTURE
+
+        fetch_delta_snapshot(["HOOD"], "2026-07-19")  # a Sunday
+
+        mock_fetch.assert_called_once_with("HOOD", "2026-07-24", "2026-07-31")

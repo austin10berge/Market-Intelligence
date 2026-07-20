@@ -8,9 +8,17 @@ See docs/superpowers/specs/2026-07-19-algo-detective-schwab-delta-design.md.
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import logging
 import re
+from datetime import date, timedelta
+
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+from .options_chain import _next_fridays
+from .store import upsert_options_rows
 
 logger = logging.getLogger(__name__)
 
@@ -59,3 +67,78 @@ def _select_target_delta_contract(contracts: list[dict], target_delta: float = 0
     if not contracts:
         return None
     return min(contracts, key=lambda c: abs(abs(c["delta"]) - target_delta))
+
+
+_SCHWAB_MCP_URL = "http://schwab-mcp:8002/mcp"
+
+
+async def _fetch_chain_via_mcp_async(ticker: str, from_date_str: str, to_date_str: str) -> str:
+    async with streamablehttp_client(_SCHWAB_MCP_URL) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(
+                "get_option_chain",
+                {
+                    "symbol": ticker,
+                    "contract_type": "PUT",
+                    "from_date": from_date_str,
+                    "to_date": to_date_str,
+                },
+            )
+            if result.isError:
+                raise RuntimeError(
+                    f"schwab-mcp get_option_chain error for {ticker}: {result.content}"
+                )
+            return result.content[0].text
+
+
+def _fetch_chain_via_mcp(ticker: str, from_date_str: str, to_date_str: str) -> str:
+    """Sync boundary around the async MCP tool call — bridges this
+    module's asyncio.to_thread-based calling convention (see main.py) to
+    the MCP SDK's async-only client API. This is the network boundary;
+    tests patch this function directly rather than simulating the MCP
+    session handshake (no automated test safely exercises the real live
+    schwab-mcp service — see the design spec's Testing section)."""
+    return asyncio.run(_fetch_chain_via_mcp_async(ticker, from_date_str, to_date_str))
+
+
+def fetch_delta_snapshot(tickers: list[str], scan_date_str: str) -> int:
+    """Step 8 of the nightly pipeline: fetch real put delta/bid/ask/
+    open_interest for tickers via Schwab (schwab-mcp), upsert into
+    detective_options. Returns the number of rows written."""
+    scan_date = date.fromisoformat(scan_date_str)
+    fridays = _next_fridays(scan_date + timedelta(days=1), n=2)
+    from_date_str, to_date_str = fridays[0].isoformat(), fridays[-1].isoformat()
+
+    rows = []
+    for ticker in tickers:
+        try:
+            raw = _fetch_chain_via_mcp(ticker, from_date_str, to_date_str)
+            contracts = _parse_put_chain(raw)
+        except Exception:
+            logger.warning(
+                "Failed to fetch option chain for %s on %s", ticker, scan_date_str, exc_info=True
+            )
+            continue
+
+        selected = _select_target_delta_contract(contracts)
+        if selected is None:
+            logger.warning("No usable put contracts for %s on %s", ticker, scan_date_str)
+            continue
+
+        rows.append(
+            {
+                "date": scan_date_str,
+                "ticker": ticker,
+                "delta": selected["delta"],
+                "bid": selected["bid"],
+                "ask": selected["ask"],
+                "open_interest": selected["open_interest"],
+            }
+        )
+
+    if not rows:
+        return 0
+    written = upsert_options_rows(rows)
+    logger.info("Delta snapshot %s: %d/%d tickers written", scan_date_str, written, len(tickers))
+    return written
