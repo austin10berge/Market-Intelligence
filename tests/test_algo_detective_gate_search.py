@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 from src.algo_detective.gate_search import (
     _build_candidate_gates,
     _build_feature_matrix,
     _eval_candidate,
     _tree_path_to_criteria,
+    run_gate_search,
     run_greedy_search,
     run_tree_search,
 )
@@ -261,3 +265,117 @@ class TestRunTreeSearch:
         # Baseline of 100% can never be met on a real dataset
         result = run_tree_search(rows, baseline_precision=1.01, recall_floor=0.30)
         assert result == []
+
+
+class TestRunGateSearch:
+    def _tiny_features(self) -> list[dict]:
+        """20 prime (rsi 20-39) + 200 control (rsi 60-79)."""
+        prime = [
+            {"is_prime": 1, "date": "2026-01-01", "ticker": f"P{i:02d}", "rsi": float(20 + i)}
+            for i in range(20)
+        ]
+        control = [
+            {"is_prime": 0, "date": "2026-01-01", "ticker": f"C{i:03d}", "rsi": float(60 + i % 20)}
+            for i in range(200)
+        ]
+        return prime + control
+
+    def test_result_contains_required_keys(self, tmp_path):
+        with (
+            patch(
+                "src.algo_detective.gate_search.get_all_features",
+                return_value=self._tiny_features(),
+            ),
+            patch("src.algo_detective.gate_search.get_options_index", return_value={}),
+            patch(
+                "src.algo_detective.gate_search.Path",
+                side_effect=lambda *a: (
+                    tmp_path / Path(*a).name
+                    if str(Path(*a)).startswith("data/detective")
+                    else Path(*a)
+                ),
+            ),
+        ):
+            result = run_gate_search(recall_floor=0.30, approach="a")
+
+        assert "generated" in result
+        assert "recall_floor" in result
+        assert "v42_baseline" in result
+        assert "approach_a" in result
+        assert "approach_b" in result
+
+    def test_approach_a_only_skips_tree(self, tmp_path):
+        with (
+            patch(
+                "src.algo_detective.gate_search.get_all_features",
+                return_value=self._tiny_features(),
+            ),
+            patch("src.algo_detective.gate_search.get_options_index", return_value={}),
+            patch("src.algo_detective.gate_search.run_tree_search") as mock_tree,
+            patch(
+                "src.algo_detective.gate_search.Path",
+                side_effect=lambda *a: (
+                    tmp_path / Path(*a).name
+                    if str(Path(*a)).startswith("data/detective")
+                    else Path(*a)
+                ),
+            ),
+        ):
+            run_gate_search(recall_floor=0.30, approach="a")
+
+        mock_tree.assert_not_called()
+
+    def test_approach_b_only_skips_greedy(self, tmp_path):
+        with (
+            patch(
+                "src.algo_detective.gate_search.get_all_features",
+                return_value=self._tiny_features(),
+            ),
+            patch("src.algo_detective.gate_search.get_options_index", return_value={}),
+            patch("src.algo_detective.gate_search.run_greedy_search") as mock_greedy,
+            patch(
+                "src.algo_detective.gate_search.Path",
+                side_effect=lambda *a: (
+                    tmp_path / Path(*a).name
+                    if str(Path(*a)).startswith("data/detective")
+                    else Path(*a)
+                ),
+            ),
+        ):
+            run_gate_search(recall_floor=0.30, approach="b")
+
+        mock_greedy.assert_not_called()
+
+    def test_iv_rv_computed_in_enriched_rows(self, tmp_path):
+        """iv_rv = best_iv / rv20 is pre-computed in enriched rows."""
+        features = [
+            {"is_prime": 1, "date": "2026-01-01", "ticker": "AAA", "rv20": 0.20, "rsi": 30.0}
+        ]
+        options_idx = {("2026-01-01", "AAA"): {"best_iv": 0.30, "pcr_vol": 1.0}}
+
+        captured: list[dict] = []
+
+        def fake_greedy(rows, **kwargs):
+            captured.extend(rows)
+            return {"criteria": {}, "precision": 0.0, "recall": 0.0, "steps": []}
+
+        with (
+            patch("src.algo_detective.gate_search.get_all_features", return_value=features),
+            patch("src.algo_detective.gate_search.get_options_index", return_value=options_idx),
+            patch("src.algo_detective.gate_search.run_greedy_search", side_effect=fake_greedy),
+            patch(
+                "src.algo_detective.gate_search.Path",
+                side_effect=lambda *a: (
+                    tmp_path / Path(*a).name
+                    if str(Path(*a)).startswith("data/detective")
+                    else Path(*a)
+                ),
+            ),
+        ):
+            run_gate_search(recall_floor=0.30, approach="a")
+
+        assert len(captured) == 1
+        row = captured[0]
+        assert abs(row["iv_rv"] - 0.30 / 0.20) < 1e-9
+        assert row["best_iv"] == 0.30
+        assert row["pcr_vol"] == 1.0

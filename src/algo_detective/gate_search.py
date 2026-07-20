@@ -5,12 +5,18 @@ See docs/superpowers/specs/2026-07-20-algo-detective-gate-search-design.md.
 
 from __future__ import annotations
 
+import argparse
+import json
 import logging
+from datetime import date
+from pathlib import Path
 from typing import TypedDict
 
 import numpy as np
 
 from .analyze import _BOOLEAN_FEATURES, _NUMERIC_FEATURES, _apply_criteria
+from .store import get_all_features, get_options_index
+from .validate import validate_criteria
 
 logger = logging.getLogger(__name__)
 
@@ -282,8 +288,6 @@ def run_tree_search(
     from sklearn.tree import DecisionTreeClassifier
     from sklearn.tree import _tree as sklearn_tree
 
-    from .validate import validate_criteria
-
     x, y, feature_names = _build_feature_matrix(rows)
     clf = DecisionTreeClassifier(max_depth=5, class_weight="balanced", random_state=42)
     clf.fit(x, y)
@@ -319,3 +323,151 @@ def run_tree_search(
             )
 
     return sorted(results, key=lambda c: c["precision"], reverse=True)
+
+
+def _print_report(result: GateSearchResult) -> None:
+    v42 = result["v42_baseline"]
+    print(f"\n{'=' * 60}")
+    print(f"GATE SEARCH RESULTS — {result['generated']}")
+    print(f"Recall floor: {result['recall_floor']:.0%}")
+    if v42.get("precision") is not None:
+        print(f"\nV42 baseline:  precision={v42['precision']:.1%}  recall={v42['recall']:.1%}")
+
+    a = result["approach_a"]
+    print("\nApproach A (greedy):")
+    print(f"  precision={a['precision']:.1%}  recall={a['recall']:.1%}  ({len(a['steps'])} gates)")
+    for i, step in enumerate(a["steps"], 1):
+        prec = step["precision"]
+        rec = step["recall"]
+        print(f"  {i}. {step['gate']}={step['value']}  →  prec={prec:.1%} rec={rec:.1%}")
+
+    b = result["approach_b"]
+    if b:
+        top_n = min(5, len(b))
+        print(f"\nApproach B (tree) — top {top_n} candidates:")
+        for cand in b[:5]:
+            prec = cand["precision"]
+            rec = cand["recall"]
+            print(f"  precision={prec:.1%}  recall={rec:.1%}  {cand['criteria']}")
+    elif "b" in result.get("_approach", "ab"):
+        print("\nApproach B: no candidates met the baseline + recall floor.")
+
+    out = f"data/detective/gate_search_{result['generated']}.json"
+    print(f"\nFull results saved to: {out}")
+    print("=" * 60)
+
+
+def run_gate_search(
+    recall_floor: float = 0.30,
+    approach: str = "ab",
+) -> GateSearchResult:
+    """Load data, run A+B gate search, save output JSON, print report, return result.
+
+    approach: 'a' (greedy only), 'b' (tree only), or 'ab' (both).
+    Options join (best_iv, pcr_vol, delta, open_interest) and iv_rv computation
+    are done once upfront so the greedy inner loop never touches the DB.
+    """
+    logger.info("Loading features and options data...")
+    features = get_all_features()
+    options_idx = get_options_index()
+
+    enriched: list[dict] = []
+    for row in features:
+        opt = options_idx.get((row["date"], row["ticker"]), {})
+        iv = opt.get("best_iv")
+        rv = row.get("rv20")
+        enriched.append(
+            {
+                **row,
+                "best_iv": iv,
+                "pcr_vol": opt.get("pcr_vol"),
+                "delta": opt.get("delta"),
+                "open_interest": opt.get("open_interest"),
+                "iv_rv": (iv / rv) if (iv is not None and rv is not None and rv > 0) else None,
+            }
+        )
+
+    total_prime = sum(1 for r in enriched if r.get("is_prime") == 1)
+    logger.info(
+        "Loaded %d rows (%d prime, %d control)",
+        len(enriched),
+        total_prime,
+        len(enriched) - total_prime,
+    )
+
+    v42_baseline: dict = {"precision": None, "recall": None}
+    v42_path = Path("data/v42_criteria.json")
+    if v42_path.exists():
+        v42_criteria = json.loads(v42_path.read_text())
+        v42_report = validate_criteria(v42_criteria, features=enriched)
+        v42_baseline = {"precision": v42_report["precision"], "recall": v42_report["recall"]}
+        logger.info(
+            "V42 baseline: precision=%.1f%% recall=%.1f%%",
+            v42_baseline["precision"] * 100,
+            v42_baseline["recall"] * 100,
+        )
+
+    empty_greedy: GreedySearchResult = {
+        "criteria": {},
+        "precision": 0.0,
+        "recall": 0.0,
+        "steps": [],
+    }
+    greedy_result = empty_greedy
+
+    if "a" in approach:
+        logger.info("Running Approach A (greedy search)...")
+        greedy_result = run_greedy_search(enriched, recall_floor=recall_floor)
+        logger.info(
+            "Approach A: precision=%.1f%% recall=%.1f%% in %d steps",
+            greedy_result["precision"] * 100,
+            greedy_result["recall"] * 100,
+            len(greedy_result["steps"]),
+        )
+
+    tree_results: list[TreeCandidate] = []
+    if "b" in approach:
+        logger.info("Running Approach B (tree search)...")
+        baseline_prec = greedy_result["precision"] if "a" in approach else 0.0
+        tree_results = run_tree_search(
+            enriched, baseline_precision=baseline_prec, recall_floor=recall_floor
+        )
+        logger.info("Approach B: found %d candidates above baseline", len(tree_results))
+
+    result: GateSearchResult = {
+        "generated": date.today().isoformat(),
+        "recall_floor": recall_floor,
+        "v42_baseline": v42_baseline,
+        "approach_a": greedy_result,
+        "approach_b": tree_results,
+    }
+
+    out_path = Path(f"data/detective/gate_search_{date.today().isoformat()}.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(result, indent=2))
+    logger.info("Saved to %s", out_path)
+
+    _print_report(result)
+    return result
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    parser = argparse.ArgumentParser(description="Automated gate search for algo detective")
+    parser.add_argument(
+        "--approach",
+        choices=["a", "b", "ab"],
+        default="ab",
+        help="Which search approach to run (default: ab)",
+    )
+    parser.add_argument(
+        "--recall-floor",
+        type=float,
+        default=0.30,
+        help="Minimum recall fraction to enforce (default: 0.30)",
+    )
+    args = parser.parse_args()
+    run_gate_search(recall_floor=args.recall_floor, approach=args.approach)
