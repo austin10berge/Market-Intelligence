@@ -8,13 +8,20 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from collections import defaultdict
 from datetime import date
 from pathlib import Path
 from typing import TypedDict
 
 import numpy as np
 
-from .analyze import _BOOLEAN_FEATURES, _NUMERIC_FEATURES, _SECTOR_NAME_MAP, _apply_criteria
+from .analyze import (
+    _BOOLEAN_FEATURES,
+    _NUMERIC_FEATURES,
+    _SECTOR_NAME_MAP,
+    _apply_criteria,
+    _match_sector_prefix,
+)
 from .store import get_all_features, get_options_index
 from .validate import validate_criteria
 
@@ -124,8 +131,6 @@ def _build_sector_candidate_gates(prime_rows: list[dict]) -> list[tuple[str, flo
     if len(prime_rows) < 5:
         return []
 
-    from collections import defaultdict
-
     by_sector: dict[str, list[dict]] = defaultdict(list)
     for row in prime_rows:
         sector = row.get("sector")
@@ -151,6 +156,100 @@ def _build_sector_candidate_gates(prime_rows: list[dict]) -> list[tuple[str, flo
                 candidates.append((f"{prefix}_{feat}_max", t))
 
     return candidates
+
+
+# Integer code for each sector — used in fast numpy sector comparisons.
+_SECTOR_CODES: dict[str, int] = {
+    sector: i for i, sector in enumerate(sorted(_SECTOR_NAME_MAP.values()))
+}
+
+# Options-derived gate keys whose source field differs from the key name.
+# Value is (source_field, null_behavior): "min" means null fails, "max" means null passes.
+_OPTIONS_KEY_FIELD: dict[str, tuple[str, str]] = {
+    "options_iv_min": ("best_iv", "min"),
+    "iv_rv_min": ("iv_rv", "min"),
+    "pcr_vol_max": ("pcr_vol", "max"),
+}
+
+# All feature columns needed in the evaluation matrix.
+_EVAL_FEATURES: list[str] = (
+    _SEARCH_NUMERIC_FEATURES + ["best_iv", "pcr_vol", "iv_rv"] + list(_BOOLEAN_FEATURES)
+)
+
+
+def _build_row_arrays(
+    rows: list[dict],
+) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray]:
+    """Pre-build numpy arrays for vectorized gate evaluation in the greedy inner loop.
+
+    Returns feat_arrs (feature→float array, NaN for None), sector_arr (int, -1 for unknown),
+    and is_prime_arr (bool).
+    """
+    feat_arrs: dict[str, np.ndarray] = {
+        feat: np.array(
+            [r.get(feat) if r.get(feat) is not None else float("nan") for r in rows],
+            dtype=float,
+        )
+        for feat in _EVAL_FEATURES
+    }
+    sector_arr = np.array(
+        [_SECTOR_CODES.get(r.get("sector", ""), -1) for r in rows],
+        dtype=np.int8,
+    )
+    is_prime_arr = np.array([r.get("is_prime") == 1 for r in rows], dtype=bool)
+    return feat_arrs, sector_arr, is_prime_arr
+
+
+def _gate_mask(
+    key: str,
+    val: float | int,
+    feat_arrs: dict[str, np.ndarray],
+    sector_arr: np.ndarray,
+) -> np.ndarray:
+    """Return a boolean array of rows that pass the single gate {key: val}.
+
+    Replicates _apply_criteria semantics for the gate types the greedy search generates:
+    - _min gates: null fails  (NaN row does not meet the floor)
+    - _max gates: null passes (NaN row is not filtered out by the ceiling)
+    - sector gates: non-sector rows always pass; sector rows get the _min/_max rule
+    - options keys: mapped to their source field via _OPTIONS_KEY_FIELD
+    """
+    n = sector_arr.shape[0]
+    _empty = np.full(n, np.nan)
+
+    # Options-derived keys with non-standard names
+    if key in _OPTIONS_KEY_FIELD:
+        src, null_behavior = _OPTIONS_KEY_FIELD[key]
+        arr = feat_arrs.get(src, _empty)
+        if null_behavior == "min":
+            return ~np.isnan(arr) & (arr >= val)
+        return np.where(np.isnan(arr), True, arr <= val)
+
+    # Sector-scoped gate: {prefix}_{feature}_{min|max}
+    _sm = _match_sector_prefix(key)
+    if _sm is not None:
+        _, sector_name, remainder = _sm
+        s_code = _SECTOR_CODES.get(sector_name, -1)
+        non_sector: np.ndarray = sector_arr != s_code
+        if remainder.endswith("_min"):
+            arr = feat_arrs.get(remainder[:-4], _empty)
+            return non_sector | (~np.isnan(arr) & (arr >= val))
+        if remainder.endswith("_max"):
+            arr = feat_arrs.get(remainder[:-4], _empty)
+            return non_sector | np.where(np.isnan(arr), True, arr <= val)
+        arr = feat_arrs.get(remainder, _empty)
+        return non_sector | (arr == val)
+
+    # Standard generic gates
+    if key.endswith("_min"):
+        arr = feat_arrs.get(key[:-4], _empty)
+        return ~np.isnan(arr) & (arr >= val)
+    if key.endswith("_max"):
+        arr = feat_arrs.get(key[:-4], _empty)
+        return np.where(np.isnan(arr), True, arr <= val)
+    # Boolean exact match (e.g. sma50_above_sma150 = 1)
+    arr = feat_arrs.get(key, _empty)
+    return arr == val
 
 
 def _eval_candidate(
@@ -180,21 +279,23 @@ def run_greedy_search(
 ) -> GreedySearchResult:
     """Approach A: add one gate per step, maximising precision while recall >= recall_floor.
 
-    rows: full enriched dataset (prime + control). The greedy loop pre-filters
-    to candidate_pool at each step so _eval_candidate only touches the shrinking
-    subset rather than all 134k rows.
+    Uses numpy vectorized gate evaluation — each candidate is applied as a single
+    boolean array operation over all rows rather than a Python loop per row.
     """
     total_prime = sum(1 for r in rows if r.get("is_prime") == 1)
     if total_prime == 0:
         return {"criteria": {}, "precision": 0.0, "recall": 0.0, "steps": []}
 
+    feat_arrs, sector_arr, is_prime_arr = _build_row_arrays(rows)
+    active_mask = np.ones(len(rows), dtype=bool)
+
     criteria: dict = {}
     steps: list[StepTrace] = []
-    candidate_pool = list(rows)
     current_precision = total_prime / len(rows)
 
     for _ in range(max_steps):
-        prime_in_pool = [r for r in candidate_pool if r.get("is_prime") == 1]
+        active_idx = np.where(active_mask)[0]
+        prime_in_pool = [rows[i] for i in active_idx if is_prime_arr[i]]
         gate_candidates = _build_candidate_gates(prime_in_pool) + _build_sector_candidate_gates(
             prime_in_pool
         )
@@ -207,7 +308,14 @@ def run_greedy_search(
         for key, val in gate_candidates:
             if key in criteria:
                 continue
-            prec, rec = _eval_candidate(candidate_pool, key, val, total_prime)
+            gate_mask = _gate_mask(key, val, feat_arrs, sector_arr)
+            filtered = active_mask & gate_mask
+            filtered_count = int(filtered.sum())
+            if filtered_count == 0:
+                continue
+            tp = int((filtered & is_prime_arr).sum())
+            prec = tp / filtered_count
+            rec = tp / total_prime
             if rec < recall_floor:
                 continue
             if prec > best_precision:
@@ -218,9 +326,9 @@ def run_greedy_search(
         if best_key is None:
             break
 
-        criteria[best_key] = best_val
-        candidate_pool = [r for r in candidate_pool if _apply_criteria(r, {best_key: best_val})]
+        active_mask = active_mask & _gate_mask(best_key, best_val, feat_arrs, sector_arr)
         current_precision = best_precision
+        criteria[best_key] = best_val
         steps.append(
             {
                 "gate": best_key,
@@ -238,11 +346,11 @@ def run_greedy_search(
             best_recall * 100,
         )
 
-    final_tp = sum(1 for r in candidate_pool if r.get("is_prime") == 1)
+    active_prime = int((active_mask & is_prime_arr).sum())
     return {
         "criteria": criteria,
         "precision": round(current_precision, 4),
-        "recall": round(final_tp / total_prime, 4),
+        "recall": round(active_prime / total_prime, 4),
         "steps": steps,
     }
 
