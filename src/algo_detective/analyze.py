@@ -30,6 +30,32 @@ _BOOLEAN_FEATURES = [
     "price_above_bb_middle", "price_above_bb_upper", "price_below_bb_lower",
 ]
 
+# Sector prefix → sector name, longest-first so prefix matching is unambiguous.
+_SECTOR_NAME_MAP: dict[str, str] = {
+    "communication_services": "Communication Services",
+    "consumer_cyclical": "Consumer Cyclical",
+    "consumer_defensive": "Consumer Defensive",
+    "basic_materials": "Basic Materials",
+    "real_estate": "Real Estate",
+    "financials": "Financial Services",
+    "technology": "Technology",
+    "industrials": "Industrials",
+    "healthcare": "Healthcare",
+    "utilities": "Utilities",
+    "energy": "Energy",
+}
+_SECTOR_NAME_MAP_SORTED: list[tuple[str, str]] = sorted(
+    _SECTOR_NAME_MAP.items(), key=lambda x: -len(x[0])
+)
+
+
+def _match_sector_prefix(key: str) -> tuple[str, str, str] | None:
+    """Return (prefix, sector_name, remainder) if key starts with a known sector prefix."""
+    for prefix, sector in _SECTOR_NAME_MAP_SORTED:
+        if key.startswith(prefix + "_"):
+            return prefix, sector, key[len(prefix) + 1:]
+    return None
+
 
 def rank_features(features: list[dict]) -> list[dict]:
     """Rank all features by KS statistic (prime vs control distribution separation)."""
@@ -236,14 +262,32 @@ def _apply_criteria(row: dict, criteria: dict) -> bool:
                 if v is None or v < val:
                     return False
         elif key.endswith("_min"):
-            feat = key[:-4]
-            if row.get(feat) is None or row[feat] < val:
-                return False
+            _sm = _match_sector_prefix(key)
+            if _sm is not None:
+                _, _sector, _rem = _sm
+                if row.get("sector") == _sector:
+                    _feat = _rem[:-4]
+                    _v = row.get(_feat)
+                    if _v is None or _v < val:
+                        return False
+            else:
+                feat = key[:-4]
+                if row.get(feat) is None or row[feat] < val:
+                    return False
         elif key.endswith("_max"):
-            feat = key[:-4]
-            feat_val = row.get(feat)
-            if feat_val is not None and feat_val > val:
-                return False
+            _sm = _match_sector_prefix(key)
+            if _sm is not None:
+                _, _sector, _rem = _sm
+                if row.get("sector") == _sector:
+                    _feat = _rem[:-4]
+                    _v = row.get(_feat)
+                    if _v is not None and _v > val:
+                        return False
+            else:
+                feat = key[:-4]
+                feat_val = row.get(feat)
+                if feat_val is not None and feat_val > val:
+                    return False
         elif isinstance(val, int):
             expected = int(val)
             if row.get(key) != expected:

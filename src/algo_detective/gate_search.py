@@ -14,7 +14,7 @@ from typing import TypedDict
 
 import numpy as np
 
-from .analyze import _BOOLEAN_FEATURES, _NUMERIC_FEATURES, _apply_criteria
+from .analyze import _BOOLEAN_FEATURES, _NUMERIC_FEATURES, _SECTOR_NAME_MAP, _apply_criteria
 from .store import get_all_features, get_options_index
 from .validate import validate_criteria
 
@@ -110,6 +110,49 @@ def _build_candidate_gates(prime_rows: list[dict]) -> list[tuple[str, float | in
     return candidates
 
 
+# Inverse of _SECTOR_NAME_MAP: sector name → criteria key prefix
+_SECTOR_PREFIX_MAP: dict[str, str] = {v: k for k, v in _SECTOR_NAME_MAP.items()}
+
+
+def _build_sector_candidate_gates(prime_rows: list[dict]) -> list[tuple[str, float | int]]:
+    """Return sector-scoped (criteria_key, value) pairs for sectors with ≥5 prime rows.
+
+    Generates {sector_prefix}_{feature}_{min|max} candidates by sweeping
+    _SEARCH_NUMERIC_FEATURES at prime-distribution percentiles within each sector.
+    These are handled by _apply_criteria's generic sector fallback.
+    """
+    if len(prime_rows) < 5:
+        return []
+
+    from collections import defaultdict
+
+    by_sector: dict[str, list[dict]] = defaultdict(list)
+    for row in prime_rows:
+        sector = row.get("sector")
+        if sector and sector in _SECTOR_PREFIX_MAP:
+            by_sector[sector].append(row)
+
+    candidates: list[tuple[str, float | int]] = []
+    for sector, sector_rows in by_sector.items():
+        if len(sector_rows) < 5:
+            continue
+        prefix = _SECTOR_PREFIX_MAP[sector]
+        for feat in _SEARCH_NUMERIC_FEATURES:
+            vals = [r[feat] for r in sector_rows if r.get(feat) is not None]
+            if len(vals) < 5:
+                continue
+            seen: set[float] = set()
+            for pct in _PERCENTILE_STEPS:
+                t = round(float(np.percentile(vals, pct)), 6)
+                if t in seen:
+                    continue
+                seen.add(t)
+                candidates.append((f"{prefix}_{feat}_min", t))
+                candidates.append((f"{prefix}_{feat}_max", t))
+
+    return candidates
+
+
 def _eval_candidate(
     candidate_pool: list[dict],
     key: str,
@@ -152,7 +195,9 @@ def run_greedy_search(
 
     for _ in range(max_steps):
         prime_in_pool = [r for r in candidate_pool if r.get("is_prime") == 1]
-        gate_candidates = _build_candidate_gates(prime_in_pool)
+        gate_candidates = _build_candidate_gates(prime_in_pool) + _build_sector_candidate_gates(
+            prime_in_pool
+        )
 
         best_key: str | None = None
         best_val: float | int | None = None
