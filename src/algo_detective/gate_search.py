@@ -325,7 +325,7 @@ def run_tree_search(
     return sorted(results, key=lambda c: c["precision"], reverse=True)
 
 
-def _print_report(result: GateSearchResult) -> None:
+def _print_report(result: GateSearchResult, approach: str = "ab") -> None:
     v42 = result["v42_baseline"]
     print(f"\n{'=' * 60}")
     print(f"GATE SEARCH RESULTS — {result['generated']}")
@@ -333,24 +333,28 @@ def _print_report(result: GateSearchResult) -> None:
     if v42.get("precision") is not None:
         print(f"\nV42 baseline:  precision={v42['precision']:.1%}  recall={v42['recall']:.1%}")
 
-    a = result["approach_a"]
-    print("\nApproach A (greedy):")
-    print(f"  precision={a['precision']:.1%}  recall={a['recall']:.1%}  ({len(a['steps'])} gates)")
-    for i, step in enumerate(a["steps"], 1):
-        prec = step["precision"]
-        rec = step["recall"]
-        print(f"  {i}. {step['gate']}={step['value']}  →  prec={prec:.1%} rec={rec:.1%}")
+    if "a" in approach:
+        a = result["approach_a"]
+        print("\nApproach A (greedy):")
+        print(
+            f"  precision={a['precision']:.1%}  recall={a['recall']:.1%}  ({len(a['steps'])} gates)"
+        )
+        for i, step in enumerate(a["steps"], 1):
+            prec = step["precision"]
+            rec = step["recall"]
+            print(f"  {i}. {step['gate']}={step['value']}  →  prec={prec:.1%} rec={rec:.1%}")
 
-    b = result["approach_b"]
-    if b:
-        top_n = min(5, len(b))
-        print(f"\nApproach B (tree) — top {top_n} candidates:")
-        for cand in b[:5]:
-            prec = cand["precision"]
-            rec = cand["recall"]
-            print(f"  precision={prec:.1%}  recall={rec:.1%}  {cand['criteria']}")
-    elif "b" in result.get("_approach", "ab"):
-        print("\nApproach B: no candidates met the baseline + recall floor.")
+    if "b" in approach:
+        b = result["approach_b"]
+        if b:
+            top_n = min(5, len(b))
+            print(f"\nApproach B (tree) — top {top_n} candidates:")
+            for cand in b[:5]:
+                prec = cand["precision"]
+                rec = cand["recall"]
+                print(f"  precision={prec:.1%}  recall={rec:.1%}  {cand['criteria']}")
+        else:
+            print("\nApproach B: no candidates met the baseline + recall floor.")
 
     out = f"data/detective/gate_search_{result['generated']}.json"
     print(f"\nFull results saved to: {out}")
@@ -447,7 +451,7 @@ def run_gate_search(
     out_path.write_text(json.dumps(result, indent=2))
     logger.info("Saved to %s", out_path)
 
-    _print_report(result)
+    _print_report(result, approach)
     return result
 
 
