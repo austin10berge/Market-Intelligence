@@ -204,6 +204,14 @@ _TREE_KEY_MAP: dict[tuple[str, str], str] = {
     ("pcr_vol", "<="): "pcr_vol_max",
 }
 
+_OPTIONS_INVERSE_SKIP: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("best_iv", "<="),
+        ("iv_rv", "<="),
+        ("pcr_vol", ">"),
+    }
+)
+
 _BOOL_SET: frozenset[str] = frozenset(_BOOLEAN_FEATURES)
 
 
@@ -220,6 +228,8 @@ def _tree_path_to_criteria(path: list[tuple[str, str, float]]) -> dict:
         mapped = _TREE_KEY_MAP.get((feat, direction))
         if mapped is not None:
             criteria[mapped] = round(threshold, 6)
+        elif (feat, direction) in _OPTIONS_INVERSE_SKIP:
+            pass
         elif feat in _BOOL_SET:
             if direction == ">":
                 criteria[feat] = 1

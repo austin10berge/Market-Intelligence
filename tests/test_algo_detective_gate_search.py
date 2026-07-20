@@ -185,6 +185,11 @@ class TestTreePathToCriteria:
     def test_empty_path_returns_empty_dict(self):
         assert _tree_path_to_criteria([]) == {}
 
+    def test_inverse_options_directions_skipped(self):
+        assert _tree_path_to_criteria([("best_iv", "<=", 0.30)]) == {}
+        assert _tree_path_to_criteria([("iv_rv", "<=", 1.2)]) == {}
+        assert _tree_path_to_criteria([("pcr_vol", ">", 1.5)]) == {}
+
 
 class TestBuildFeatureMatrix:
     def test_shape_matches_rows_and_features(self):
