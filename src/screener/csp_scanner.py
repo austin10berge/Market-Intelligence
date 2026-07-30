@@ -808,6 +808,12 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
                 if adx_col:
                     adx = round(float(adx_df[adx_col[0]].iloc[-1]), 2)
 
+        # ── 5-day return — used by options.py's pullback_mode gate ──────────────────
+        return_5d: float | None = None
+        if len(hist) >= 6:
+            v = float((close.iloc[-1] - close.iloc[-6]) / close.iloc[-6] * 100)
+            return_5d = None if math.isnan(v) else v
+
         return {
             "price":                round(last_price, 2),
             "sma20":                round(sma20, 2)  if sma20  is not None else None,
@@ -825,6 +831,7 @@ def _compute_technical_indicators(symbol: str, hist: pd.DataFrame) -> dict | Non
             "adr20_pct":            adr20_pct,
             "rsi":                  round(rsi, 2) if rsi is not None else None,
             "adx":                  adx,
+            "return_5d":            return_5d,
         }
     except Exception as exc:
         logger.warning("Technical indicators failed for %s: %s", symbol, exc)
@@ -1115,6 +1122,14 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
 
     # 5. Options screener
     logger.info("Passing %d tickers to CSP options screener", len(tech_passing))
+    # Stage 3 already computed RSI/ADX/SMA50/etc. from the local OHLCV store —
+    # reuse it instead of letting screen_csp_candidates() re-fetch live yfinance
+    # history per ticker.
+    precomputed_technicals = {
+        row["symbol"]: row["technical_indicators"]
+        for row in tech_rows
+        if row.get("technical_indicators")
+    }
     candidates = screen_csp_candidates(
         tickers=tech_passing,
         min_dte=params.min_dte,
@@ -1123,6 +1138,7 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         max_rsi=params.max_rsi,
         min_adx=params.min_adx,
         max_adx=params.max_adx,
+        precomputed_technicals=precomputed_technicals,
     )
 
     # Merge fundamental fields (fcf, forward_pe) into each candidate

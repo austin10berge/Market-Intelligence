@@ -424,6 +424,25 @@ class TestComputeTechnicalIndicators:
         assert 0.0 <= result["adx"] <= 100.0
 
 
+def test_compute_technical_indicators_includes_return_5d():
+    dates = pd.bdate_range(end="2024-06-28", periods=210)
+    closes = [100.0] * 204 + [101.0, 102.0, 103.0, 104.0, 105.0, 110.0]
+    hist = pd.DataFrame(
+        {
+            "Open": closes, "High": closes, "Low": closes, "Close": closes,
+            "Volume": [1_000_000] * len(closes),
+        },
+        index=dates,
+    )
+
+    indicators = _compute_technical_indicators("TEST", hist)
+
+    assert indicators is not None
+    assert "return_5d" in indicators
+    expected = round((110.0 - 101.0) / 101.0 * 100, 2)
+    assert indicators["return_5d"] == pytest.approx(expected, abs=0.05)
+
+
 # ── apply_technical_conditions: pass-through when no conditions ───────────────
 
 class TestApplyTechnicalConditions:
