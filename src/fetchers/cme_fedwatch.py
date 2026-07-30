@@ -14,10 +14,10 @@ import asyncio
 import logging
 
 import httpx
-import yfinance as yf
 
 from ..config import settings
 from ..models import Signal, SignalSource
+from ._yf_lock import download_with_retry
 from .base import BaseFetcher
 from .fred import fetch_fred_series
 
@@ -42,8 +42,7 @@ async def _get_current_fftr() -> float | None:
 async def _get_futures_implied_rate() -> float | None:
     """Fetch front-month 30-Day FF futures price and return implied rate."""
     try:
-        data = await asyncio.to_thread(
-            yf.download,
+        data = await download_with_retry(
             _FUTURES_TICKER,
             period="5d",
             progress=False,

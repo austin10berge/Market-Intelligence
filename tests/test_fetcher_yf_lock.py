@@ -52,3 +52,43 @@ async def test_download_with_retry_retries_then_raises():
                 await download_with_retry("AAPL")
 
     assert mock_dl.call_count == 3  # 1 initial + 2 retries
+
+
+@pytest.mark.asyncio
+async def test_sector_etf_fetcher_uses_shared_download_with_retry():
+    from src.fetchers import sector_etf
+
+    fake_df = pd.DataFrame()  # empty is fine — fetch() should return None gracefully
+    with patch.object(sector_etf, "download_with_retry", return_value=fake_df) as mock_dl:
+        await sector_etf.SectorEtfFetcher().fetch()
+    mock_dl.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_thematic_etf_fetcher_uses_shared_download_with_retry():
+    from src.fetchers import thematic_etf
+
+    fake_df = pd.DataFrame()
+    with patch.object(thematic_etf, "download_with_retry", return_value=fake_df) as mock_dl:
+        await thematic_etf.ThematicEtfFetcher().fetch()
+    mock_dl.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_treasury_yields_fetcher_uses_shared_download_with_retry():
+    from src.fetchers import treasury_yields
+
+    fake_df = pd.DataFrame()
+    with patch.object(treasury_yields, "download_with_retry", return_value=fake_df) as mock_dl:
+        await treasury_yields.TreasuryYieldsFetcher().fetch()
+    mock_dl.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cme_fedwatch_futures_fetch_uses_shared_download_with_retry():
+    from src.fetchers import cme_fedwatch
+
+    fake_df = pd.DataFrame({"Close": [100.0]})
+    with patch.object(cme_fedwatch, "download_with_retry", return_value=fake_df) as mock_dl:
+        await cme_fedwatch._get_futures_implied_rate()
+    mock_dl.assert_called_once()

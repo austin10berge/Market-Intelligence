@@ -5,9 +5,8 @@ from __future__ import annotations
 import logging
 import math
 
-import yfinance as yf
-
 from ..models import Signal, SignalSource
+from ._yf_lock import download_with_retry
 from .base import BaseFetcher
 
 logger = logging.getLogger(__name__)
@@ -42,7 +41,9 @@ class SectorEtfFetcher(BaseFetcher):
     async def fetch(self) -> Signal | None:
         # Download 2 days of data so we can compute daily % change
         tickers_str = " ".join(SECTOR_ETFS.keys())
-        data = yf.download(tickers_str, period="2d", group_by="ticker", progress=False)
+        data = await download_with_retry(
+            tickers_str, period="2d", group_by="ticker", progress=False
+        )
 
         if data.empty:
             logger.warning("Sector ETFs: no data returned")
@@ -95,11 +96,7 @@ class SectorEtfFetcher(BaseFetcher):
         leader_lines = "\n".join(f"  {SECTOR_ETFS[t]} ({t}): {p:+.2f}%" for t, p in leaders)
         laggard_lines = "\n".join(f"  {SECTOR_ETFS[t]} ({t}): {p:+.2f}%" for t, p in laggards)
 
-        summary = (
-            f"Sectors: {rotation}\n"
-            f"Leaders:\n{leader_lines}\n"
-            f"Laggards:\n{laggard_lines}"
-        )
+        summary = f"Sectors: {rotation}\nLeaders:\n{leader_lines}\nLaggards:\n{laggard_lines}"
 
         return Signal(
             source=SignalSource.SECTOR_ETF,
