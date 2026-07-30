@@ -13,7 +13,13 @@ import pandas_ta as ta
 import yfinance as yf
 
 from ..config import settings
-from ..db import get_stock_iv_history, get_stock_watchlist, store_stock_iv_snapshot
+from ..db import (
+    get_iv_backfill_attempt,
+    get_stock_iv_history,
+    get_stock_watchlist,
+    record_iv_backfill_attempt,
+    store_stock_iv_snapshot,
+)
 from ..indicators import compute_adr20_pct
 from ._yf_timeout import call_with_timeout
 
@@ -27,6 +33,23 @@ DEFAULT_RISK_FREE_RATE = 0.045
 IV_RANK_LOOKBACK_DAYS = 252
 MIN_IV_RANK_POINTS = 20
 ALPACA_OPTION_CONTRACTS_URL = "https://paper-api.alpaca.markets/v2/options/contracts"
+
+IV_BACKFILL_COOLDOWN_DAYS = 7
+
+
+def _should_attempt_iv_backfill(symbol: str) -> bool:
+    """Circuit breaker: skip re-attempting IV backfill for a symbol whose last
+    attempt was recent and still came up short (e.g. options too illiquid to
+    ever produce enough IV history). Always attempts if there's no prior record.
+    """
+    attempt = get_iv_backfill_attempt(symbol)
+    if attempt is None:
+        return True
+    if attempt["result_count"] >= MIN_IV_RANK_POINTS:
+        return True
+    last_attempt_date = date.fromisoformat(attempt["attempt_date"])
+    days_since = (date.today() - last_attempt_date).days
+    return days_since >= IV_BACKFILL_COOLDOWN_DAYS
 
 
 def _safe_pct(new_val, old_val):
@@ -720,12 +743,19 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                     )
 
                 iv_history = get_stock_iv_history(symbol, lookback_days=IV_RANK_LOOKBACK_DAYS)
-                if atm_iv_val is not None and len(iv_history) < MIN_IV_RANK_POINTS:
+                if (
+                    atm_iv_val is not None
+                    and len(iv_history) < MIN_IV_RANK_POINTS
+                    and _should_attempt_iv_backfill(symbol)
+                ):
                     logger.info(
                         "Auto-backfilling IV history for %s (%d points)", symbol, len(iv_history)
                     )
                     backfill_stock_iv_history([symbol])
                     iv_history = get_stock_iv_history(symbol, lookback_days=IV_RANK_LOOKBACK_DAYS)
+                    record_iv_backfill_attempt(
+                        symbol, attempt_date=date.today(), result_count=len(iv_history)
+                    )
                 iv_percentile_val = (
                     _calculate_iv_percentile(atm_iv_val, iv_history)
                     if atm_iv_val is not None

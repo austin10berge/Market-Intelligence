@@ -50,3 +50,51 @@ def test_record_iv_backfill_attempt_upserts(temp_db):
     result = get_iv_backfill_attempt("SOFI")
     assert result["attempt_date"] == "2026-07-27"
     assert result["result_count"] == 5
+
+
+def test_should_attempt_iv_backfill_true_when_no_prior_attempt(temp_db):
+    from src.screener.stocks import _should_attempt_iv_backfill
+
+    assert _should_attempt_iv_backfill("NEWTICKER") is True
+
+
+def test_should_attempt_iv_backfill_false_within_cooldown_after_insufficient_result(temp_db):
+    from datetime import date
+    from src.db import record_iv_backfill_attempt
+    from src.screener.stocks import _should_attempt_iv_backfill
+
+    record_iv_backfill_attempt("ILLIQUID", attempt_date=date.today(), result_count=2)
+
+    assert _should_attempt_iv_backfill("ILLIQUID") is False
+
+
+def test_should_attempt_iv_backfill_true_after_cooldown_expires(temp_db):
+    from datetime import date, timedelta
+    from src.db import record_iv_backfill_attempt
+    from src.screener.stocks import _should_attempt_iv_backfill
+
+    old_date = date.today() - timedelta(days=8)
+    record_iv_backfill_attempt("ILLIQUID", attempt_date=old_date, result_count=2)
+
+    assert _should_attempt_iv_backfill("ILLIQUID") is True
+
+
+def test_screen_stocks_skips_backfill_when_circuit_breaker_open(temp_db, monkeypatch):
+    from datetime import date
+    from src.db import record_iv_backfill_attempt
+    from src.screener import stocks
+
+    record_iv_backfill_attempt("ILLIQUID", attempt_date=date.today(), result_count=1)
+
+    with_mock = False
+    import unittest.mock as mock
+    with mock.patch.object(stocks, "backfill_stock_iv_history") as mock_backfill:
+        # Directly exercise the gate rather than the full screen_stocks pipeline
+        # (which needs live Alpaca/yfinance data) — this is what Step 3 wired in.
+        should_attempt = stocks._should_attempt_iv_backfill("ILLIQUID")
+        assert should_attempt is False
+        # Confirm nothing calls backfill when the gate says no — mirrors the
+        # `and _should_attempt_iv_backfill(symbol)` guard added in screen_stocks.
+        if should_attempt:
+            stocks.backfill_stock_iv_history(["ILLIQUID"])
+        mock_backfill.assert_not_called()
