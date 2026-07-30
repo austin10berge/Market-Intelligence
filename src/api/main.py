@@ -174,8 +174,16 @@ class ScanTriggerRequest(BaseModel):
     requested_by: str = "unknown"
 
 
+# In-process guard against overlapping /api/scan/trigger runs — single uvicorn
+# process (no --workers), so a plain module-level flag is sufficient. Prevents
+# double LLM cost / double external fetches / duplicate digest rows when a
+# user double-taps Discord's /scan command.
+_scan_in_progress = False
+
+
 async def _run_and_post_to_discord(channel_id: str, discord_bot_url: str) -> None:
     """Background task: run pipeline, POST results back to the Discord bot."""
+    global _scan_in_progress
     if not discord_bot_url:
         discord_bot_url = os.getenv("DISCORD_BOT_CALLBACK_URL", "http://discord-bot:9000")
     try:
@@ -190,15 +198,25 @@ async def _run_and_post_to_discord(channel_id: str, discord_bot_url: str) -> Non
             )
     except Exception as e:
         logger.error(f"Discord scan callback failed: {e}")
+    finally:
+        _scan_in_progress = False
 
 
 @app.post("/api/scan/trigger")
 async def trigger_scan(req: Request, body: ScanTriggerRequest, background_tasks: BackgroundTasks):
     """Trigger a market sentiment scan from the Discord bot."""
+    global _scan_in_progress
     token = req.headers.get("x-bot-token")
     if not token or token != settings.discord_bot_secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    if _scan_in_progress:
+        return {
+            "status": "already_running",
+            "message": "A scan is already in progress. Results will post to Discord shortly.",
+        }
+
+    _scan_in_progress = True
     discord_bot_url = req.headers.get("x-bot-callback-url", "")
     background_tasks.add_task(_run_and_post_to_discord, body.channel_id, discord_bot_url)
     return {"status": "queued", "message": "Scan started. Results will post to Discord shortly."}
