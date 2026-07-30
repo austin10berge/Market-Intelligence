@@ -19,8 +19,10 @@ so the frontend can surface "Last updated X minutes ago (market closed)" to the 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import weakref
 import zoneinfo
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -33,6 +35,38 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 ET = zoneinfo.ZoneInfo("America/New_York")
+
+# ── Cache-miss stampede protection ─────────────────────────────────────────────
+#
+# Two requests landing right after a TTL expiry (or a watchlist-edit cache
+# invalidation) would otherwise both fall through to a live compute — worst
+# case, /api/screener/csp-scan (a multi-minute whole-universe scan) running
+# twice concurrently. This registry hands out one asyncio.Lock per cache key
+# so the second request waits for the first's in-flight compute and then
+# reads the result it just cached, instead of recomputing.
+#
+# Keyed per event loop (not a single module-level dict) for the same reason
+# market_overview.py's yf.download lock is: asyncio.Lock binds to whichever
+# loop first acquires it, and pytest-asyncio gives each test its own loop.
+# Production only ever runs one loop, so this reduces to one registry in practice.
+_cache_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def get_cache_lock(key: str) -> asyncio.Lock:
+    """Return the asyncio.Lock guarding computation of the given cache key."""
+    loop = asyncio.get_running_loop()
+    loop_locks = _cache_locks.get(loop)
+    if loop_locks is None:
+        loop_locks = {}
+        _cache_locks[loop] = loop_locks
+    lock = loop_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        loop_locks[key] = lock
+    return lock
+
 
 # ── Market-hours helpers ──────────────────────────────────────────────────────
 

@@ -28,6 +28,7 @@ from ..cache import (
     cache_delete,
     cache_get,
     cache_set,
+    get_cache_lock,
     invalidate_market_posture,
     invalidate_screener_cache,
     market_is_open,
@@ -379,15 +380,21 @@ async def get_csp_candidates():
     if envelope is not None:
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
-    try:
-        candidates = await asyncio.to_thread(screen_csp_candidates)
-        ttl = screener_ttl()
-        await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
-    except Exception as e:
-        logger.exception("CSP screener failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    async with get_cache_lock(KEY_SCREENER_CSP):
+        # Re-check: another request may have populated the cache while we waited.
+        envelope = await cache_get(KEY_SCREENER_CSP)
+        if envelope is not None:
+            return {"candidates": envelope["data"], **_cache_meta(envelope)}
+
+        try:
+            candidates = await asyncio.to_thread(screen_csp_candidates)
+            ttl = screener_ttl()
+            await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
+        except Exception as e:
+            logger.exception("CSP screener failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Screener: CSP Scan (broad universe) ─────────────────────────────────────
@@ -484,24 +491,31 @@ async def get_csp_scan_candidates(
         payload.update(_cache_meta(envelope))
         return payload
 
-    try:
-        result = await asyncio.to_thread(run_csp_scan, params)
+    async with get_cache_lock(cache_key):
+        envelope = await cache_get(cache_key)
+        if envelope is not None:
+            payload = envelope["data"]
+            payload.update(_cache_meta(envelope))
+            return payload
 
-        summary = result.get("filter_summary", {})
-        if summary.get("combined_unique", 0) > 0:
-            await cache_set(cache_key, result, ttl=scanner_ttl())
-        else:
-            logger.warning(
-                "CSP scan returned zero universe tickers — result not cached. "
-                "Params: %s", params
-            )
+        try:
+            result = await asyncio.to_thread(run_csp_scan, params)
 
-        now_iso = datetime.now(timezone.utc).isoformat()
-        result.update(_cache_meta(None, cached_at=now_iso))
-        return result
-    except Exception as e:
-        logger.exception("CSP scan failed")
-        raise HTTPException(status_code=500, detail=str(e))
+            summary = result.get("filter_summary", {})
+            if summary.get("combined_unique", 0) > 0:
+                await cache_set(cache_key, result, ttl=scanner_ttl())
+            else:
+                logger.warning(
+                    "CSP scan returned zero universe tickers — result not cached. "
+                    "Params: %s", params
+                )
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            result.update(_cache_meta(None, cached_at=now_iso))
+            return result
+        except Exception as e:
+            logger.exception("CSP scan failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/screener/csp-scan")
@@ -575,15 +589,20 @@ async def get_leaps_candidates():
     if envelope is not None:
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
-    try:
-        candidates = await asyncio.to_thread(screen_leaps_candidates)
-        ttl = screener_ttl()
-        await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
-    except Exception as e:
-        logger.exception("LEAPS screener failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    async with get_cache_lock(KEY_SCREENER_LEAPS):
+        envelope = await cache_get(KEY_SCREENER_LEAPS)
+        if envelope is not None:
+            return {"candidates": envelope["data"], **_cache_meta(envelope)}
+
+        try:
+            candidates = await asyncio.to_thread(screen_leaps_candidates)
+            ttl = screener_ttl()
+            await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
+        except Exception as e:
+            logger.exception("LEAPS screener failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Screener: Stocks ──────────────────────────────────────────────────────────
@@ -602,29 +621,39 @@ async def get_stock_candidates(tickers: str | None = None):
         envelope = await cache_get(cache_key)
         if envelope is not None:
             return {"candidates": envelope["data"], **_cache_meta(envelope)}
-        try:
-            candidates = await asyncio.to_thread(screen_stocks, ticker_list)
-            ttl = screener_ttl()
-            await cache_set(cache_key, candidates, ttl=ttl)
-            now_iso = datetime.now(timezone.utc).isoformat()
-            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
-        except Exception as e:
-            logger.exception("Stock screener (dynamic tickers) failed")
-            raise HTTPException(status_code=500, detail=str(e))
+
+        async with get_cache_lock(cache_key):
+            envelope = await cache_get(cache_key)
+            if envelope is not None:
+                return {"candidates": envelope["data"], **_cache_meta(envelope)}
+            try:
+                candidates = await asyncio.to_thread(screen_stocks, ticker_list)
+                ttl = screener_ttl()
+                await cache_set(cache_key, candidates, ttl=ttl)
+                now_iso = datetime.now(timezone.utc).isoformat()
+                return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
+            except Exception as e:
+                logger.exception("Stock screener (dynamic tickers) failed")
+                raise HTTPException(status_code=500, detail=str(e))
 
     envelope = await cache_get(KEY_SCREENER_STOCKS)
     if envelope is not None:
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
-    try:
-        candidates = await asyncio.to_thread(screen_stocks)
-        ttl = screener_ttl()
-        await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
-    except Exception as e:
-        logger.exception("Stock screener failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    async with get_cache_lock(KEY_SCREENER_STOCKS):
+        envelope = await cache_get(KEY_SCREENER_STOCKS)
+        if envelope is not None:
+            return {"candidates": envelope["data"], **_cache_meta(envelope)}
+
+        try:
+            candidates = await asyncio.to_thread(screen_stocks)
+            ttl = screener_ttl()
+            await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
+        except Exception as e:
+            logger.exception("Stock screener failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Watchlist: Options (CSP/LEAPS) ────────────────────────────────────────────
