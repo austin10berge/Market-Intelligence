@@ -224,25 +224,26 @@ class TestFetchSnapshotsBatch:
 class TestFetchSnapshotPcr:
     @respx.mock
     def test_stores_rows_for_each_ticker(self):
-        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots").mock(
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/AAPL").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "snapshots": {
-                        "AAPL": {
-                            "AAPL260619P00190000": {
-                                "dailyBar": {"v": 300},
-                                "openInterest": 1000,
-                                "impliedVolatility": 0.40,
-                            },
-                            "AAPL260619C00195000": {
-                                "dailyBar": {"v": 100},
-                                "openInterest": 500,
-                            },
-                        }
+                        "AAPL260619P00190000": {
+                            "dailyBar": {"v": 300},
+                            "openInterest": 1000,
+                            "impliedVolatility": 0.40,
+                        },
+                        "AAPL260619C00195000": {
+                            "dailyBar": {"v": 100},
+                            "openInterest": 500,
+                        },
                     }
                 },
             )
+        )
+        respx.get(f"{settings.alpaca_data_url}/v1beta1/options/snapshots/TSLA").mock(
+            return_value=httpx.Response(200, json={"snapshots": {}})
         )
         stored = fetch_snapshot_pcr(["AAPL", "TSLA"], "2026-06-18")
         assert stored == 2
