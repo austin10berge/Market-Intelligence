@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
@@ -28,7 +29,7 @@ def test_is_trading_day_nyse_holiday():
 def test_main_skips_run_pipeline_on_non_trading_day(monkeypatch, argv_mode):
     from src import main as main_module
 
-    monkeypatch.setattr(main_module.sys, "argv", ["main.py", *argv_mode])
+    monkeypatch.setattr(sys, "argv", ["main.py", *argv_mode])
     with patch.object(main_module, "is_trading_day", return_value=False) as mock_check:
         with patch.object(main_module, "run_pipeline", new=AsyncMock()) as mock_run:
             main_module.main()
@@ -40,7 +41,7 @@ def test_main_skips_run_pipeline_on_non_trading_day(monkeypatch, argv_mode):
 def test_main_runs_on_demand_even_on_non_trading_day(monkeypatch):
     from src import main as main_module
 
-    monkeypatch.setattr(main_module.sys, "argv", ["main.py", "--mode", "on-demand"])
+    monkeypatch.setattr(sys, "argv", ["main.py", "--mode", "on-demand"])
     with patch.object(main_module, "is_trading_day", return_value=False):
         with patch.object(
             main_module, "run_pipeline", new=AsyncMock(return_value=None)
