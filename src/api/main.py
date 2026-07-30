@@ -473,24 +473,31 @@ async def get_csp_scan_candidates(
         payload.update(_cache_meta(envelope))
         return payload
 
-    try:
-        result = await asyncio.to_thread(run_csp_scan, params)
+    async with get_cache_lock(cache_key):
+        envelope = await cache_get(cache_key)
+        if envelope is not None:
+            payload = envelope["data"]
+            payload.update(_cache_meta(envelope))
+            return payload
 
-        summary = result.get("filter_summary", {})
-        if summary.get("combined_unique", 0) > 0:
-            await cache_set(cache_key, result, ttl=scanner_ttl())
-        else:
-            logger.warning(
-                "CSP scan returned zero universe tickers — result not cached. "
-                "Params: %s", params
-            )
+        try:
+            result = await asyncio.to_thread(run_csp_scan, params)
 
-        now_iso = datetime.now(timezone.utc).isoformat()
-        result.update(_cache_meta(None, cached_at=now_iso))
-        return result
-    except Exception as e:
-        logger.exception("CSP scan failed")
-        raise HTTPException(status_code=500, detail=str(e))
+            summary = result.get("filter_summary", {})
+            if summary.get("combined_unique", 0) > 0:
+                await cache_set(cache_key, result, ttl=scanner_ttl())
+            else:
+                logger.warning(
+                    "CSP scan returned zero universe tickers — result not cached. "
+                    "Params: %s", params
+                )
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            result.update(_cache_meta(None, cached_at=now_iso))
+            return result
+        except Exception as e:
+            logger.exception("CSP scan failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/screener/csp-scan")

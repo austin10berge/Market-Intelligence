@@ -92,3 +92,54 @@ async def test_csp_endpoint_dedupes_concurrent_cache_misses(monkeypatch):
     assert call_count == 1
     assert results[0]["candidates"] == [{"symbol": "AAPL"}]
     assert results[1]["candidates"] == [{"symbol": "AAPL"}]
+
+
+@pytest.mark.asyncio
+async def test_csp_scan_endpoint_dedupes_concurrent_cache_misses(monkeypatch):
+    from src.api import main as api_main
+
+    fake_cache_get, fake_cache_set = _fake_cache_pair()
+    monkeypatch.setattr(api_main, "cache_get", fake_cache_get)
+    monkeypatch.setattr(api_main, "cache_set", fake_cache_set)
+
+    call_count = 0
+    fake_result = {"candidates": [], "filter_summary": {"combined_unique": 5}}
+
+    async def slow_scan(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.05)
+        return dict(fake_result)
+
+    # get_csp_scan_candidates() has several params defaulted to `Query(default=...)`
+    # sentinels that only FastAPI's dependency injection resolves. Calling the
+    # coroutine directly (bypassing FastAPI) leaves those as raw Query objects, which
+    # breaks JSON-serializing the params for the cache key — so pass the actual
+    # resolved defaults explicitly, mirroring what FastAPI would inject.
+    scan_kwargs = dict(
+        min_fcf_b=0.0,
+        max_debt_to_equity=2.0,
+        min_revenue_growth=-0.10,
+        min_earnings_growth=None,
+        min_dividend_yield=None,
+        max_forward_pe=None,
+        max_peg_ratio=None,
+        max_dividend_yield=None,
+        rv20_max=None,
+        bb_width_pct_min=None,
+        bb_width_pct_max=None,
+        volume_ratio_max=None,
+        pct_from_52wk_high_max=None,
+        adr20_pct_max=None,
+        price_vs_ema200_pct_min=None,
+    )
+
+    with patch("asyncio.to_thread", side_effect=slow_scan):
+        results = await asyncio.gather(
+            api_main.get_csp_scan_candidates(**scan_kwargs),
+            api_main.get_csp_scan_candidates(**scan_kwargs),
+        )
+
+    assert call_count == 1
+    assert results[0]["filter_summary"]["combined_unique"] == 5
+    assert results[1]["filter_summary"]["combined_unique"] == 5
