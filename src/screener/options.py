@@ -189,6 +189,7 @@ def screen_csp_candidates(
     max_rsi: float | None = None,
     min_adx: float | None = None,
     max_adx: float | None = None,
+    precomputed_technicals: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Find CSP candidates with live Alpaca pricing, technical quality filters
     (RSI, ADX via pandas-ta), and a composite score modelled on mLabs methodology.
@@ -229,7 +230,10 @@ def screen_csp_candidates(
     technicals: dict[str, dict] = {}
     tech_rejected = 0
     for symbol in tickers:
-        tech = _compute_technicals(symbol)
+        if precomputed_technicals is not None and symbol in precomputed_technicals:
+            tech = precomputed_technicals[symbol]
+        else:
+            tech = _compute_technicals(symbol)
         if tech is None:
             tech_rejected += 1
             logger.debug("Skipping %s — could not compute technicals", symbol)
