@@ -28,6 +28,7 @@ from ..cache import (
     cache_delete,
     cache_get,
     cache_set,
+    get_cache_lock,
     invalidate_market_posture,
     invalidate_screener_cache,
     market_is_open,
@@ -361,15 +362,21 @@ async def get_csp_candidates():
     if envelope is not None:
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
-    try:
-        candidates = await asyncio.to_thread(screen_csp_candidates)
-        ttl = screener_ttl()
-        await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
-    except Exception as e:
-        logger.exception("CSP screener failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    async with get_cache_lock(KEY_SCREENER_CSP):
+        # Re-check: another request may have populated the cache while we waited.
+        envelope = await cache_get(KEY_SCREENER_CSP)
+        if envelope is not None:
+            return {"candidates": envelope["data"], **_cache_meta(envelope)}
+
+        try:
+            candidates = await asyncio.to_thread(screen_csp_candidates)
+            ttl = screener_ttl()
+            await cache_set(KEY_SCREENER_CSP, candidates, ttl=ttl)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
+        except Exception as e:
+            logger.exception("CSP screener failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Screener: CSP Scan (broad universe) ─────────────────────────────────────
