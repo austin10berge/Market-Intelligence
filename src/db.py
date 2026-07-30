@@ -92,6 +92,12 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_iv_history_date_symbol
             ON stock_iv_history(date, symbol);
 
+        CREATE TABLE IF NOT EXISTS stock_iv_backfill_attempts (
+            symbol       TEXT PRIMARY KEY,
+            attempt_date TEXT NOT NULL,
+            result_count INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS backtest_strategies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -403,6 +409,38 @@ def get_stock_iv_history(symbol: str, lookback_days: int = 252) -> list[dict]:
             (symbol, lookback_days),
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_iv_backfill_attempt(symbol: str) -> dict | None:
+    """Return the most recent IV backfill attempt record for a symbol, or None."""
+    conn = _get_connection()
+    try:
+        row = conn.execute(
+            "SELECT symbol, attempt_date, result_count FROM stock_iv_backfill_attempts WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def record_iv_backfill_attempt(symbol: str, attempt_date: date, result_count: int) -> None:
+    """Record (upsert) the outcome of an IV backfill attempt for a symbol."""
+    conn = _get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO stock_iv_backfill_attempts (symbol, attempt_date, result_count)
+            VALUES (?, ?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                attempt_date = excluded.attempt_date,
+                result_count = excluded.result_count
+            """,
+            (symbol, attempt_date.isoformat(), result_count),
+        )
+        conn.commit()
     finally:
         conn.close()
 
