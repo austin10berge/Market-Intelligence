@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
-import weakref
 from io import StringIO
 
 import httpx
-import yfinance as yf
 
 from ..config import settings
+from ._yf_lock import download_with_retry as _download_with_retry
 from .thematic_etf import BASKET_THEMES, SINGLE_TICKER_THEMES
 
 logger = logging.getLogger(__name__)
@@ -74,59 +73,6 @@ def _gex_trend(current_b: float, avg_b: float) -> str:
     if diff_pct < -0.1:
         return "Falling"
     return "Flat"
-
-
-_YF_RETRIES = 2
-_YF_RETRY_BACKOFF_S = 1.5
-
-# yfinance's multi-ticker download populates a module-level global
-# (yfinance.shared._DFS) internally and reads results back out of it: two
-# yf.download() calls running concurrently in this process can race on that
-# global and each read back a mix of the other's tickers. Serializing every
-# call through a lock trades away intra-process download parallelism for
-# correctness — confirmed live that concurrent chunk/sector/VIX calls were
-# silently returning each other's data.
-#
-# The lock is keyed per event loop (not a single module-level instance):
-# asyncio.Lock binds to whichever loop first acquires it, and a plain
-# module-level lock would raise "bound to a different event loop" the moment
-# a second loop touches it (e.g. every pytest-asyncio test gets its own loop).
-# Production only ever runs one loop, so this reduces to one lock in practice.
-_yf_download_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
-    weakref.WeakKeyDictionary()
-)
-
-
-def _get_yf_download_lock() -> asyncio.Lock:
-    loop = asyncio.get_running_loop()
-    lock = _yf_download_locks.get(loop)
-    if lock is None:
-        lock = asyncio.Lock()
-        _yf_download_locks[loop] = lock
-    return lock
-
-
-async def _download_with_retry(*args, **kwargs):
-    """Retry a yf.download call a couple of times before giving up.
-
-    Yahoo Finance intermittently drops tickers or errors out entirely under
-    rate limiting; a short retry with backoff self-heals most of these without
-    adding meaningful latency to the request.
-    """
-    last_exc: Exception | None = None
-    for attempt in range(_YF_RETRIES + 1):
-        try:
-            async with _get_yf_download_lock():
-                return await asyncio.to_thread(yf.download, *args, **kwargs)
-        except Exception as exc:
-            last_exc = exc
-            if attempt < _YF_RETRIES:
-                logger.warning(
-                    "market_overview: yf.download failed (attempt %d/%d), retrying: %s",
-                    attempt + 1, _YF_RETRIES + 1, exc,
-                )
-                await asyncio.sleep(_YF_RETRY_BACKOFF_S * (attempt + 1))
-    raise last_exc
 
 
 async def _fetch_sectors() -> tuple[dict, str | None]:
@@ -355,7 +301,7 @@ def _chunk_tickers(items: list[str], size: int) -> list[list[str]]:
     the per-ticker extraction below can't parse — so no chunk may end up
     with exactly one ticker.
     """
-    chunks = [items[i:i + size] for i in range(0, len(items), size)]
+    chunks = [items[i : i + size] for i in range(0, len(items), size)]
     if len(chunks) > 1 and len(chunks[-1]) == 1:
         chunks[-2].extend(chunks.pop())
     return chunks
@@ -369,8 +315,11 @@ async def _fetch_themes() -> dict:
     chunk_results = await asyncio.gather(
         *[
             _download_with_retry(
-                " ".join(chunk), period="30d", group_by="ticker",
-                progress=False, auto_adjust=True,
+                " ".join(chunk),
+                period="30d",
+                group_by="ticker",
+                progress=False,
+                auto_adjust=True,
             )
             for chunk in chunks
         ],
