@@ -143,3 +143,78 @@ async def test_csp_scan_endpoint_dedupes_concurrent_cache_misses(monkeypatch):
     assert call_count == 1
     assert results[0]["filter_summary"]["combined_unique"] == 5
     assert results[1]["filter_summary"]["combined_unique"] == 5
+
+
+@pytest.mark.asyncio
+async def test_leaps_endpoint_dedupes_concurrent_cache_misses(monkeypatch):
+    from src.api import main as api_main
+
+    fake_cache_get, fake_cache_set = _fake_cache_pair()
+    monkeypatch.setattr(api_main, "cache_get", fake_cache_get)
+    monkeypatch.setattr(api_main, "cache_set", fake_cache_set)
+    call_count = 0
+
+    async def slow(*a, **k):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.05)
+        return [{"symbol": "MSFT"}]
+
+    with patch("asyncio.to_thread", side_effect=slow):
+        results = await asyncio.gather(api_main.get_leaps_candidates(), api_main.get_leaps_candidates())
+
+    assert call_count == 1
+    assert results[0]["candidates"] == [{"symbol": "MSFT"}]
+    assert results[1]["candidates"] == [{"symbol": "MSFT"}]
+
+
+@pytest.mark.asyncio
+async def test_stocks_endpoint_default_watchlist_dedupes_concurrent_cache_misses(monkeypatch):
+    from src.api import main as api_main
+
+    fake_cache_get, fake_cache_set = _fake_cache_pair()
+    monkeypatch.setattr(api_main, "cache_get", fake_cache_get)
+    monkeypatch.setattr(api_main, "cache_set", fake_cache_set)
+    call_count = 0
+
+    async def slow(*a, **k):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.05)
+        return [{"symbol": "SOFI"}]
+
+    with patch("asyncio.to_thread", side_effect=slow):
+        results = await asyncio.gather(
+            api_main.get_stock_candidates(tickers=None),
+            api_main.get_stock_candidates(tickers=None),
+        )
+
+    assert call_count == 1
+    assert results[0]["candidates"] == [{"symbol": "SOFI"}]
+    assert results[1]["candidates"] == [{"symbol": "SOFI"}]
+
+
+@pytest.mark.asyncio
+async def test_stocks_endpoint_dynamic_tickers_dedupes_concurrent_cache_misses(monkeypatch):
+    from src.api import main as api_main
+
+    fake_cache_get, fake_cache_set = _fake_cache_pair()
+    monkeypatch.setattr(api_main, "cache_get", fake_cache_get)
+    monkeypatch.setattr(api_main, "cache_set", fake_cache_set)
+    call_count = 0
+
+    async def slow(*a, **k):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.05)
+        return [{"symbol": "SOFI"}]
+
+    with patch("asyncio.to_thread", side_effect=slow):
+        results = await asyncio.gather(
+            api_main.get_stock_candidates(tickers="SOFI"),
+            api_main.get_stock_candidates(tickers="SOFI"),
+        )
+
+    assert call_count == 1
+    assert results[0]["candidates"] == [{"symbol": "SOFI"}]
+    assert results[1]["candidates"] == [{"symbol": "SOFI"}]

@@ -571,15 +571,20 @@ async def get_leaps_candidates():
     if envelope is not None:
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
-    try:
-        candidates = await asyncio.to_thread(screen_leaps_candidates)
-        ttl = screener_ttl()
-        await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
-    except Exception as e:
-        logger.exception("LEAPS screener failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    async with get_cache_lock(KEY_SCREENER_LEAPS):
+        envelope = await cache_get(KEY_SCREENER_LEAPS)
+        if envelope is not None:
+            return {"candidates": envelope["data"], **_cache_meta(envelope)}
+
+        try:
+            candidates = await asyncio.to_thread(screen_leaps_candidates)
+            ttl = screener_ttl()
+            await cache_set(KEY_SCREENER_LEAPS, candidates, ttl=ttl)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
+        except Exception as e:
+            logger.exception("LEAPS screener failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Screener: Stocks ──────────────────────────────────────────────────────────
@@ -598,29 +603,39 @@ async def get_stock_candidates(tickers: str | None = None):
         envelope = await cache_get(cache_key)
         if envelope is not None:
             return {"candidates": envelope["data"], **_cache_meta(envelope)}
-        try:
-            candidates = await asyncio.to_thread(screen_stocks, ticker_list)
-            ttl = screener_ttl()
-            await cache_set(cache_key, candidates, ttl=ttl)
-            now_iso = datetime.now(timezone.utc).isoformat()
-            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
-        except Exception as e:
-            logger.exception("Stock screener (dynamic tickers) failed")
-            raise HTTPException(status_code=500, detail=str(e))
+
+        async with get_cache_lock(cache_key):
+            envelope = await cache_get(cache_key)
+            if envelope is not None:
+                return {"candidates": envelope["data"], **_cache_meta(envelope)}
+            try:
+                candidates = await asyncio.to_thread(screen_stocks, ticker_list)
+                ttl = screener_ttl()
+                await cache_set(cache_key, candidates, ttl=ttl)
+                now_iso = datetime.now(timezone.utc).isoformat()
+                return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
+            except Exception as e:
+                logger.exception("Stock screener (dynamic tickers) failed")
+                raise HTTPException(status_code=500, detail=str(e))
 
     envelope = await cache_get(KEY_SCREENER_STOCKS)
     if envelope is not None:
         return {"candidates": envelope["data"], **_cache_meta(envelope)}
 
-    try:
-        candidates = await asyncio.to_thread(screen_stocks)
-        ttl = screener_ttl()
-        await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
-    except Exception as e:
-        logger.exception("Stock screener failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    async with get_cache_lock(KEY_SCREENER_STOCKS):
+        envelope = await cache_get(KEY_SCREENER_STOCKS)
+        if envelope is not None:
+            return {"candidates": envelope["data"], **_cache_meta(envelope)}
+
+        try:
+            candidates = await asyncio.to_thread(screen_stocks)
+            ttl = screener_ttl()
+            await cache_set(KEY_SCREENER_STOCKS, candidates, ttl=ttl)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return {"candidates": candidates, **_cache_meta(None, cached_at=now_iso)}
+        except Exception as e:
+            logger.exception("Stock screener failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Watchlist: Options (CSP/LEAPS) ────────────────────────────────────────────
