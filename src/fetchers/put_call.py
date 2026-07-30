@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import date, timedelta
@@ -26,7 +27,12 @@ _PC_MIN, _PC_MAX = 0.3, 2.5
 def _validate(ratio: float) -> float | None:
     if _PC_MIN <= ratio <= _PC_MAX:
         return ratio
-    logger.warning("Put/Call: parsed value %.3f is outside valid range [%.1f, %.1f] — discarding", ratio, _PC_MIN, _PC_MAX)
+    logger.warning(
+        "Put/Call: parsed value %.3f is outside valid range [%.1f, %.1f] — discarding",
+        ratio,
+        _PC_MIN,
+        _PC_MAX,
+    )
     return None
 
 
@@ -163,7 +169,8 @@ class PutCallFetcher(BaseFetcher):
 
     async def _fetch_fallback(self) -> float | None:
         """Derive put/call ratio from SPY options volume across near-term expiries."""
-        try:
+
+        def _sync_fetch() -> float | None:
             import yfinance as yf
 
             spy = yf.Ticker("SPY")
@@ -189,6 +196,9 @@ class PutCallFetcher(BaseFetcher):
                     logger.info("Put/Call: using SPY options fallback — %.3f", ratio)
                     return ratio
             return None
+
+        try:
+            return await asyncio.to_thread(_sync_fetch)
         except Exception:
             logger.debug("Put/Call: fallback also failed", exc_info=True)
             return None

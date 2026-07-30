@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import yfinance as yf
@@ -24,15 +25,14 @@ class VixFetcher(BaseFetcher):
         return "VIX Term Structure"
 
     async def fetch(self) -> Signal | None:
-        # yfinance is synchronous but fast for single quotes
-        spot_ticker = yf.Ticker(VIX_SPOT)
-        vix3m_ticker = yf.Ticker(VIX_3M)
+        def _fetch_fast_info() -> tuple[float | None, float | None]:
+            spot_ticker = yf.Ticker(VIX_SPOT)
+            vix3m_ticker = yf.Ticker(VIX_3M)
+            spot = getattr(spot_ticker.fast_info, "last_price", None)
+            vix3m = getattr(vix3m_ticker.fast_info, "last_price", None)
+            return spot, vix3m
 
-        spot_data = spot_ticker.fast_info
-        vix3m_data = vix3m_ticker.fast_info
-
-        spot_price = getattr(spot_data, "last_price", None)
-        vix3m_price = getattr(vix3m_data, "last_price", None)
+        spot_price, vix3m_price = await asyncio.to_thread(_fetch_fast_info)
 
         if spot_price is None:
             logger.warning("VIX: unable to retrieve spot price")
@@ -58,12 +58,14 @@ class VixFetcher(BaseFetcher):
                 structure = "Flat"
                 stress_note = "— transition zone"
 
-            metadata.update({
-                "vix3m": vix3m_price,
-                "spread": spread,
-                "ratio": ratio,
-                "term_structure": structure,
-            })
+            metadata.update(
+                {
+                    "vix3m": vix3m_price,
+                    "spread": spread,
+                    "ratio": ratio,
+                    "term_structure": structure,
+                }
+            )
 
             summary = (
                 f"VIX: {spot_price} | Term structure: {structure} "

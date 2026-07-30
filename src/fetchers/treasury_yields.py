@@ -8,12 +8,10 @@ anchor and flags inversion as an extreme bearish condition.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
-import yfinance as yf
-
 from ..models import Signal, SignalSource
+from ._yf_lock import download_with_retry
 from .base import BaseFetcher
 
 logger = logging.getLogger(__name__)
@@ -55,8 +53,7 @@ class TreasuryYieldsFetcher(BaseFetcher):
 
     async def fetch(self) -> Signal | None:
         all_tickers = list(_YIELD_TICKERS.keys()) + [_DXY_TICKER]
-        raw = await asyncio.to_thread(
-            yf.download,
+        raw = await download_with_retry(
             " ".join(all_tickers),
             period="30d",
             group_by="ticker",
@@ -120,10 +117,7 @@ class TreasuryYieldsFetcher(BaseFetcher):
         bps_str = f" ({bps_1d:+.0f}bps 1D)" if bps_1d is not None else ""
         dxy_str = f" | DXY {dxy['level']:.2f} ({dxy['pct_1d']:+.1f}% 1D)" if dxy else ""
 
-        summary = (
-            f"Treasury: 10yr {ten_yr:.2f}%{bps_str} | "
-            f"Curve: {curve_label}{dxy_str}"
-        )
+        summary = f"Treasury: 10yr {ten_yr:.2f}%{bps_str} | Curve: {curve_label}{dxy_str}"
 
         return Signal(
             source=SignalSource.TREASURY_YIELDS,

@@ -219,7 +219,7 @@ async def test_fetch_gex_bucket_negative_live():
 # ── Sectors ───────────────────────────────────────────────────────────────────
 
 class TestSectors:
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_sectors_returns_all_tickers(self, mock_dl):
         mock_dl.return_value = _make_yf_df(["XLK", "XLF"], n_days=30)
         etfs = {"XLK": "Technology", "XLF": "Financials"}
@@ -227,7 +227,7 @@ class TestSectors:
             result, rotation = await _fetch_sectors()
         assert set(result.keys()) == {"XLK", "XLF"}
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_sectors_pct_values(self, mock_dl):
         mock_dl.return_value = _make_yf_df(["XLK"], n_days=30, base=100.0, step=1.0)
         etfs = {"XLK": "Technology"}
@@ -241,7 +241,7 @@ class TestSectors:
         # close[-1] = 129, close[-22] = 108 → 1M = (129-108)/108*100 ≈ 19.44%
         assert xlk["pct_1m"] == pytest.approx(19.44, abs=0.01)
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_sectors_name_field(self, mock_dl):
         mock_dl.return_value = _make_yf_df(["XLK"], n_days=30)
         etfs = {"XLK": "Technology"}
@@ -249,7 +249,7 @@ class TestSectors:
             result, rotation = await _fetch_sectors()
         assert result["XLK"]["name"] == "Technology"
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_sectors_null_when_insufficient_data(self, mock_dl):
         mock_dl.return_value = _make_yf_df(["XLK"], n_days=3)
         etfs = {"XLK": "Technology"}
@@ -260,7 +260,7 @@ class TestSectors:
         assert result["XLK"]["pct_1w"] is None
         assert result["XLK"]["pct_1m"] is None
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_sectors_rotation_risk_on(self, mock_dl):
         # Make cyclicals outperform defensives by >0.1%
         mock_dl.return_value = _make_yf_df(["XLK", "XLU"], n_days=30, base=100.0, step=1.0)
@@ -274,7 +274,7 @@ class TestSectors:
 # ── VIX ───────────────────────────────────────────────────────────────────────
 
 class TestVix:
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_vix_spot_value(self, mock_dl):
         # 5 days of VIX at 18.x, VIX3M at 18.x (same base/step)
         vix_data = _make_yf_df(["^VIX", "^VIX3M"], n_days=5, base=18.0, step=0.1)
@@ -283,7 +283,7 @@ class TestVix:
         # close[-1] = 18.0 + 4*0.1 = 18.4
         assert result["spot"] == pytest.approx(18.4, abs=0.01)
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_vix_pct_1d(self, mock_dl):
         vix_data = _make_yf_df(["^VIX", "^VIX3M"], n_days=5, base=18.0, step=0.1)
         mock_dl.return_value = vix_data
@@ -291,7 +291,7 @@ class TestVix:
         # close[-1]=18.4, close[-2]=18.3 → (18.4-18.3)/18.3*100 ≈ 0.55%
         assert result["pct_1d"] == pytest.approx(0.55, abs=0.01)
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_vix_term_structure_contango(self, mock_dl):
         # VIX lower than VIX3M → spread > 0.5 → Contango
         vix_df = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.0)
@@ -303,7 +303,7 @@ class TestVix:
         assert result["stress_note"] == "normal, calm"
         assert result["spread"] == pytest.approx(1.5, abs=0.01)
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_vix_term_structure_backwardation(self, mock_dl):
         # VIX higher than VIX3M → spread < -0.5 → Backwardation
         vix_df = _make_yf_df(["^VIX"], n_days=5, base=25.0, step=0.0)
@@ -314,7 +314,7 @@ class TestVix:
         assert result["term_structure"] == "Backwardation"
         assert result["stress_note"] == "elevated stress"
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_vix_term_structure_flat(self, mock_dl):
         # spread = 0.2 (within ±0.25) → Flat
         vix_df = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.0)
@@ -325,7 +325,7 @@ class TestVix:
         assert result["term_structure"] == "Flat"
         assert result["stress_note"] == "transitioning"
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_vix_term_structure_contango_near_threshold(self, mock_dl):
         # spread = 0.3 → just past the tightened ±0.25 band → Contango (not Flat)
         vix_df = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.0)
@@ -336,7 +336,7 @@ class TestVix:
         assert result["term_structure"] == "Contango"
         assert result["spread"] == pytest.approx(0.3, abs=0.01)
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_vix_pct_1w_none_with_few_rows(self, mock_dl):
         vix_data = _make_yf_df(["^VIX", "^VIX3M"], n_days=3, base=18.0, step=0.1)
         mock_dl.return_value = vix_data
@@ -344,7 +344,7 @@ class TestVix:
         # 3 rows → 1W needs 6 → None
         assert result["pct_1w"] is None
 
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_vix_raises_on_missing_vix3m(self, mock_dl):
         # Only VIX data, no VIX3M key
         mock_dl.return_value = _make_yf_df(["^VIX"], n_days=5, base=18.0, step=0.1)
@@ -355,16 +355,16 @@ class TestVix:
 # ── Download retry helper ───────────────────────────────────────────────────
 
 class TestDownloadWithRetry:
-    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_succeeds_on_first_attempt(self, mock_dl, mock_sleep):
         mock_dl.return_value = "ok"
         result = await _download_with_retry("XLK", period="30d")
         assert result == "ok"
         mock_sleep.assert_not_called()
 
-    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_recovers_after_one_transient_failure(self, mock_dl, mock_sleep):
         mock_dl.side_effect = [Exception("rate limited"), "ok"]
         result = await _download_with_retry("^VIX ^VIX3M", period="10d")
@@ -372,8 +372,8 @@ class TestDownloadWithRetry:
         assert mock_dl.call_count == 2
         mock_sleep.assert_called_once()
 
-    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_raises_last_exception_after_exhausting_retries(self, mock_dl, mock_sleep):
         mock_dl.side_effect = [
             Exception("fail 1"), Exception("fail 2"), Exception("fail 3"),
@@ -401,7 +401,7 @@ class TestDownloadWithRetry:
                 state["current"] -= 1
             return "ok"
 
-        with patch("src.fetchers.market_overview.yf.download", side_effect=fake_download):
+        with patch("src.fetchers._yf_lock.yf.download", side_effect=fake_download):
             await asyncio.gather(
                 *[_download_with_retry(f"T{i}", period="30d") for i in range(5)]
             )
@@ -438,8 +438,8 @@ class TestChunkTickers:
 # ── Themes ────────────────────────────────────────────────────────────────────
 
 class TestThemes:
-    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_all_themes_present_when_all_chunks_succeed(self, mock_dl, mock_sleep):
         singles = {"SaaS": "IGV", "Semis/Memory": "SMH"}
         baskets = {"Hyperscalers": ["AMZN", "MSFT"]}
@@ -453,8 +453,8 @@ class TestThemes:
         assert set(result["singles"].keys()) == {"SaaS", "Semis/Memory"}
         assert set(result["baskets"].keys()) == {"Hyperscalers"}
 
-    @patch("src.fetchers.market_overview.asyncio.sleep", new_callable=AsyncMock)
-    @patch("src.fetchers.market_overview.yf.download")
+    @patch("src.fetchers._yf_lock.asyncio.sleep", new_callable=AsyncMock)
+    @patch("src.fetchers._yf_lock.yf.download")
     async def test_one_failed_chunk_does_not_drop_other_chunks(self, mock_dl, mock_sleep):
         # 8 single-ticker themes, chunk size 6 → two chunks: [6 tickers], [2 tickers]
         singles = {f"Theme{i}": f"TK{i}" for i in range(8)}

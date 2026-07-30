@@ -7,12 +7,10 @@ this is context for LLM narrative, not a mechanical composite score input.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
-import yfinance as yf
-
 from ..models import Signal, SignalSource
+from ._yf_lock import download_with_retry
 from .base import BaseFetcher
 
 logger = logging.getLogger(__name__)
@@ -59,8 +57,7 @@ class ThematicEtfFetcher(BaseFetcher):
             t for tickers in BASKET_THEMES.values() for t in tickers
         ]
 
-        raw = await asyncio.to_thread(
-            yf.download,
+        raw = await download_with_retry(
             " ".join(all_tickers),
             period="30d",
             group_by="ticker",
