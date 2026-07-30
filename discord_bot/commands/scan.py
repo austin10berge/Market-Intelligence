@@ -43,6 +43,7 @@ class ScanCommands(commands.Cog):
                     },
                 )
                 resp.raise_for_status()
+                payload = resp.json()
 
         except httpx.HTTPStatusError as e:
             await interaction.followup.send(
@@ -53,14 +54,24 @@ class ScanCommands(commands.Cog):
             await interaction.followup.send(embed=_error_embed(str(e)))
             return
 
-        embed = discord.Embed(
-            title="⏳ Scan Queued",
-            description=(
-                f"Full pipeline is running. Results will appear in this channel "
-                f"in ~30–60 seconds.\n\n*Requested by {interaction.user.mention}*"
-            ),
-            color=discord.Color.blue(),
-        )
+        if payload.get("status") == "already_running":
+            embed = discord.Embed(
+                title="⏳ Scan Already Running",
+                description=(
+                    "A scan is already in progress — hang tight, results will "
+                    "post to this channel shortly."
+                ),
+                color=discord.Color.orange(),
+            )
+        else:
+            embed = discord.Embed(
+                title="⏳ Scan Queued",
+                description=(
+                    f"Full pipeline is running. Results will appear in this channel "
+                    f"in ~30–60 seconds.\n\n*Requested by {interaction.user.mention}*"
+                ),
+                color=discord.Color.blue(),
+            )
         await interaction.followup.send(embed=embed)
 
     # ── /scan-history ────────────────────────────────────────────────────────
