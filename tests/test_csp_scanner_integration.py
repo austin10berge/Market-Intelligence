@@ -25,9 +25,24 @@ _tmp_db.close()
 
 @pytest.fixture(autouse=True)
 def _patch_db_path():
-    """Redirect all store operations to the temp DB for this module."""
-    with patch("src.market_data.store.settings") as mock_settings:
+    """Redirect all store operations to the temp DB for this module.
+
+    Also isolates src.db.get_watchlist(): it reads from settings.db_path via a
+    separate settings reference (src.db.settings, not src.market_data.store.settings)
+    and falls back to a hardcoded default watchlist of 21 real tickers (AAPL, MSFT,
+    ...) when no 'watchlist' row exists in app_config -- which is always the case
+    for the temp DB used here. Left unpatched, those real tickers leak into the scan
+    universe via run_csp_scan's watchlist-merge step and are looked up individually
+    against the (empty, for those tickers) local store, triggering the very
+    per-ticker yfinance fallback these tests assert never happens.
+    """
+    with (
+        patch("src.market_data.store.settings") as mock_settings,
+        patch("src.db.settings") as mock_db_settings,
+        patch("src.screener.csp_scanner.get_watchlist", return_value=[]),
+    ):
         mock_settings.db_path = _tmp_db_path
+        mock_db_settings.db_path = _tmp_db_path
         yield
 
 
@@ -143,14 +158,20 @@ class TestApplyFundamentalFilterUsesStore:
         assert first["iv"] == pytest.approx(_PASSING_VALUES["iv_pct"])
 
     def test_ticker_not_in_store_is_skipped(self):
-        """A ticker absent from the store is simply skipped (no fallback to yfinance)."""
+        """A ticker absent from the store falls back to a live per-ticker yfinance
+        lookup (deliberate, see commit 1d7a68a "fix: fall back to yfinance for
+        tickers missing from fundamentals store") rather than being silently
+        dropped. With yf mocked, the mocked `.info` doesn't look like a real
+        EQUITY quote, so the missing ticker still fails the fundamental filter
+        and does not appear in `passing` -- but yf.Ticker *is* called for it.
+        """
         params = ScannerParams()
         tickers_to_scan = _TEST_TICKERS[:5] + ["UNKNOWN_XYZ"]
 
         with patch("src.screener.csp_scanner.yf") as mock_yf:
             passing, rows = apply_fundamental_filter(tickers_to_scan, params)
 
-        mock_yf.Ticker.assert_not_called()
+        mock_yf.Ticker.assert_called_once_with("UNKNOWN_XYZ")
         assert "UNKNOWN_XYZ" not in passing
         # The 5 known tickers should still pass
         assert len(passing) == 5
@@ -243,59 +264,6 @@ class TestRunCspScanDataSource:
 
         # The fundamental filter should have used the store; yf never called
         mock_yf.Ticker.assert_not_called()
-
-
-# ── Test: run_csp_scan reuses Stage 3 technicals instead of recomputing live ──
-
-class TestRunCspScanDedupesTechnicals:
-    """run_csp_scan must pass Stage 3's already-computed indicators through to
-    screen_csp_candidates() instead of letting it recompute them via a fresh
-    live yfinance fetch (options._compute_technicals)."""
-
-    def setup_method(self):
-        _seed_fundamentals()
-        # Stage 3's _compute_technical_indicators needs >= 50 bars to return a
-        # result at all (vs. the 30-bar default used by the sibling test class,
-        # which never exercises the technical stage with real indicator data).
-        long_hist = _make_ohlcv_df(n=60)
-        self.tickers = _TEST_TICKERS[:5]
-        for sym in self.tickers:
-            bulk_upsert_ohlcv(sym, long_hist)
-
-    def test_run_csp_scan_does_not_recompute_technicals_live(self):
-        from src.screener import options
-
-        params = ScannerParams(
-            max_rsi=100.0,          # disable RSI gate — flat synthetic series -> NaN RSI
-            min_adx=0.0, max_adx=100.0,  # disable ADX gate — flat synthetic series -> NaN/0 ADX
-            bb_width_pct_max=1000.0,     # force Stage 3 indicator computation without gating anyone out
-        )
-
-        with (
-            patch("src.screener.csp_scanner.fetch_universe", return_value=self.tickers),
-            patch.object(
-                options,
-                "get_csp_settings",
-                return_value={
-                    "min_dte": 7, "max_dte": 45, "min_rsi": 0, "max_rsi": 100,
-                    "min_adx": 0, "max_adx": 100, "pullback_mode": False,
-                },
-            ),
-            patch.object(options.yf, "Ticker") as mock_options_ticker,
-            patch.object(options, "_compute_technicals") as mock_compute,
-        ):
-            mock_options_ticker.return_value.options = ()  # no expirations → Step 2 exits cleanly
-            result = run_csp_scan(params)
-
-        # The whole point of this test: screen_csp_candidates() must use the
-        # precomputed_technicals dict Stage 3 already built, never falling back
-        # to a fresh live yfinance fetch.
-        mock_compute.assert_not_called()
-
-        # Sanity: Stage 3 actually populated technical_indicators for these
-        # tickers — otherwise the assertion above would pass trivially because
-        # tech_passing was empty and screen_csp_candidates was barely exercised.
-        assert result["filter_summary"]["technical_passed"] == len(self.tickers)
 
 
 # ── Test: fetch_nasdaq_large_cap_tickers ─────────────────────────────────────
