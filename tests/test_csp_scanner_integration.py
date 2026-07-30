@@ -245,6 +245,59 @@ class TestRunCspScanDataSource:
         mock_yf.Ticker.assert_not_called()
 
 
+# ── Test: run_csp_scan reuses Stage 3 technicals instead of recomputing live ──
+
+class TestRunCspScanDedupesTechnicals:
+    """run_csp_scan must pass Stage 3's already-computed indicators through to
+    screen_csp_candidates() instead of letting it recompute them via a fresh
+    live yfinance fetch (options._compute_technicals)."""
+
+    def setup_method(self):
+        _seed_fundamentals()
+        # Stage 3's _compute_technical_indicators needs >= 50 bars to return a
+        # result at all (vs. the 30-bar default used by the sibling test class,
+        # which never exercises the technical stage with real indicator data).
+        long_hist = _make_ohlcv_df(n=60)
+        self.tickers = _TEST_TICKERS[:5]
+        for sym in self.tickers:
+            bulk_upsert_ohlcv(sym, long_hist)
+
+    def test_run_csp_scan_does_not_recompute_technicals_live(self):
+        from src.screener import options
+
+        params = ScannerParams(
+            max_rsi=100.0,          # disable RSI gate — flat synthetic series -> NaN RSI
+            min_adx=0.0, max_adx=100.0,  # disable ADX gate — flat synthetic series -> NaN/0 ADX
+            bb_width_pct_max=1000.0,     # force Stage 3 indicator computation without gating anyone out
+        )
+
+        with (
+            patch("src.screener.csp_scanner.fetch_universe", return_value=self.tickers),
+            patch.object(
+                options,
+                "get_csp_settings",
+                return_value={
+                    "min_dte": 7, "max_dte": 45, "min_rsi": 0, "max_rsi": 100,
+                    "min_adx": 0, "max_adx": 100, "pullback_mode": False,
+                },
+            ),
+            patch.object(options.yf, "Ticker") as mock_options_ticker,
+            patch.object(options, "_compute_technicals") as mock_compute,
+        ):
+            mock_options_ticker.return_value.options = ()  # no expirations → Step 2 exits cleanly
+            result = run_csp_scan(params)
+
+        # The whole point of this test: screen_csp_candidates() must use the
+        # precomputed_technicals dict Stage 3 already built, never falling back
+        # to a fresh live yfinance fetch.
+        mock_compute.assert_not_called()
+
+        # Sanity: Stage 3 actually populated technical_indicators for these
+        # tickers — otherwise the assertion above would pass trivially because
+        # tech_passing was empty and screen_csp_candidates was barely exercised.
+        assert result["filter_summary"]["technical_passed"] == len(self.tickers)
+
+
 # ── Test: fetch_nasdaq_large_cap_tickers ─────────────────────────────────────
 
 MOCK_NASDAQ_SCREENER_RESPONSE = {

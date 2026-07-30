@@ -1122,6 +1122,14 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
 
     # 5. Options screener
     logger.info("Passing %d tickers to CSP options screener", len(tech_passing))
+    # Stage 3 already computed RSI/ADX/SMA50/etc. from the local OHLCV store —
+    # reuse it instead of letting screen_csp_candidates() re-fetch live yfinance
+    # history per ticker.
+    precomputed_technicals = {
+        row["symbol"]: row["technical_indicators"]
+        for row in tech_rows
+        if row.get("technical_indicators")
+    }
     candidates = screen_csp_candidates(
         tickers=tech_passing,
         min_dte=params.min_dte,
@@ -1130,6 +1138,7 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         max_rsi=params.max_rsi,
         min_adx=params.min_adx,
         max_adx=params.max_adx,
+        precomputed_technicals=precomputed_technicals,
     )
 
     # Merge fundamental fields (fcf, forward_pe) into each candidate
