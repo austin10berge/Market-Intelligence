@@ -9,12 +9,13 @@ can indicate institutional positioning ahead of news.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import pandas as pd
 import yfinance as yf
 
-from ..db import get_stock_watchlist
+from ..db import get_stock_watchlist, get_unusual_volume_cache, set_unusual_volume_cache
 from ..models import Signal, SignalSource
 from .base import BaseFetcher
 
@@ -34,6 +35,15 @@ class UnusualVolumeFetcher(BaseFetcher):
         return "Unusual Volume"
 
     async def fetch(self) -> Signal | None:
+        cached = get_unusual_volume_cache()
+        if cached is not None:
+            return Signal(
+                source=SignalSource.UNUSUAL_VOLUME,
+                value=cached["value"],
+                metadata=cached["metadata"],
+                summary=cached["summary"],
+            )
+
         tickers = get_stock_watchlist()
         if not tickers:
             logger.warning("Unusual Volume: watchlist is empty")
@@ -46,7 +56,7 @@ class UnusualVolumeFetcher(BaseFetcher):
             try:
                 ticker = yf.Ticker(symbol)
                 # Fetch 25 trading days — enough for 20d avg + today
-                hist = ticker.history(period="25d")
+                hist = await asyncio.to_thread(ticker.history, period="25d")
 
                 if hist.empty or len(hist) < 5:
                     continue
@@ -74,27 +84,33 @@ class UnusualVolumeFetcher(BaseFetcher):
 
                     direction = "up" if pct_change > 0 else "down" if pct_change < 0 else "flat"
 
-                    spikes.append({
-                        "symbol": symbol,
-                        "volume": int(today_vol),
-                        "avg_volume_20d": int(avg_vol_20d),
-                        "ratio": round(ratio, 2),
-                        "price_change_pct": pct_change,
-                        "direction": direction,
-                        "close": round(float(today_close), 2),
-                    })
+                    spikes.append(
+                        {
+                            "symbol": symbol,
+                            "volume": int(today_vol),
+                            "avg_volume_20d": int(avg_vol_20d),
+                            "ratio": round(ratio, 2),
+                            "price_change_pct": pct_change,
+                            "direction": direction,
+                            "close": round(float(today_close), 2),
+                        }
+                    )
 
             except Exception as exc:
                 logger.debug("Unusual Volume: failed for %s: %s", symbol, exc)
                 errors += 1
 
         if not spikes:
-            return Signal(
+            signal = Signal(
                 source=SignalSource.UNUSUAL_VOLUME,
                 value=0.0,
                 metadata={"spikes": [], "threshold": VOLUME_SPIKE_THRESHOLD, "errors": errors},
                 summary=f"Unusual Volume: no spikes >{VOLUME_SPIKE_THRESHOLD}x avg across watchlist",
             )
+            set_unusual_volume_cache(
+                {"value": signal.value, "metadata": signal.metadata, "summary": signal.summary}
+            )
+            return signal
 
         # Sort by ratio descending
         spikes.sort(key=lambda x: x["ratio"], reverse=True)
@@ -118,7 +134,7 @@ class UnusualVolumeFetcher(BaseFetcher):
             f">{VOLUME_SPIKE_THRESHOLD}x avg — {', '.join(spike_strs)}{more}"
         )
 
-        return Signal(
+        signal = Signal(
             source=SignalSource.UNUSUAL_VOLUME,
             value=score_value,
             metadata={
@@ -131,3 +147,7 @@ class UnusualVolumeFetcher(BaseFetcher):
             },
             summary=summary,
         )
+        set_unusual_volume_cache(
+            {"value": signal.value, "metadata": signal.metadata, "summary": signal.summary}
+        )
+        return signal

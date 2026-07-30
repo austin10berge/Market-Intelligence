@@ -131,6 +131,7 @@ def store_signal(
 ) -> None:
     """Store or update a daily signal."""
     import math
+
     if isinstance(raw_value, float) and (math.isnan(raw_value) or math.isinf(raw_value)):
         raw_value = 0.0
     conn = _get_connection()
@@ -227,8 +228,27 @@ def get_watchlist() -> list[str]:
 
         # Defaults
         return [
-            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "AMD",
-            "SPY", "QQQ", "IWM", "DIA", "XLE", "XLF", "XLK", "XLV", "JPM", "V", "MA", "SOFI"
+            "AAPL",
+            "MSFT",
+            "GOOGL",
+            "AMZN",
+            "META",
+            "NVDA",
+            "TSLA",
+            "NFLX",
+            "AMD",
+            "SPY",
+            "QQQ",
+            "IWM",
+            "DIA",
+            "XLE",
+            "XLF",
+            "XLK",
+            "XLV",
+            "JPM",
+            "V",
+            "MA",
+            "SOFI",
         ]
     finally:
         conn.close()
@@ -244,7 +264,7 @@ def update_watchlist(tickers: list[str]) -> None:
             VALUES ('watchlist', ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """,
-            (json.dumps(tickers),)
+            (json.dumps(tickers),),
         )
         conn.commit()
     finally:
@@ -302,7 +322,7 @@ def update_csp_settings(settings: dict) -> None:
             VALUES ('csp_settings', ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """,
-            (json.dumps(settings),)
+            (json.dumps(settings),),
         )
         conn.commit()
     finally:
@@ -333,7 +353,7 @@ def update_stock_watchlist(tickers: list[str]) -> None:
             VALUES ('stock_watchlist', ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """,
-            (json.dumps(tickers),)
+            (json.dumps(tickers),),
         )
         conn.commit()
     finally:
@@ -363,7 +383,7 @@ def save_youtube_channels(channels: list[str]) -> None:
             VALUES ('youtube_channels', ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """,
-            ("\n".join(channels),)
+            ("\n".join(channels),),
         )
         conn.commit()
     finally:
@@ -479,6 +499,43 @@ def set_insider_cache(data: dict) -> None:
         conn.close()
 
 
+def get_unusual_volume_cache(max_age_hours: float = 0.25) -> dict | None:
+    """Return cached unusual-volume scan results if they exist and are fresh enough."""
+    conn = _get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_config WHERE key = 'cache_unusual_volume'"
+        ).fetchone()
+        if not row:
+            return None
+        cached = json.loads(row["value"])
+        cached_at = datetime.fromisoformat(cached.get("cached_at", "2000-01-01"))
+        age_hours = (datetime.now() - cached_at).total_seconds() / 3600
+        if age_hours > max_age_hours:
+            return None
+        return cached
+    finally:
+        conn.close()
+
+
+def set_unusual_volume_cache(data: dict) -> None:
+    """Store unusual-volume scan results in the cache."""
+    conn = _get_connection()
+    try:
+        data["cached_at"] = datetime.now().isoformat()
+        conn.execute(
+            """
+            INSERT INTO app_config (key, value)
+            VALUES ('cache_unusual_volume', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (json.dumps(data, default=_json_default),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_congressional_cache(max_age_hours: int = 12) -> dict | None:
     """Return cached congressional trades data if it exists and is fresh enough."""
     conn = _get_connection()
@@ -525,7 +582,7 @@ def save_strategy(name: str, definition: dict) -> int:
             INSERT INTO backtest_strategies (name, definition, updated_at)
             VALUES (?, ?, datetime('now'))
             """,
-            (name, json.dumps(definition, default=_json_default))
+            (name, json.dumps(definition, default=_json_default)),
         )
         conn.commit()
         return cursor.lastrowid
@@ -567,7 +624,7 @@ def get_strategy(strategy_id: int) -> dict | None:
             FROM backtest_strategies
             WHERE id = ?
             """,
-            (strategy_id,)
+            (strategy_id,),
         ).fetchone()
         if not row:
             return None
@@ -593,6 +650,7 @@ def delete_strategy(strategy_id: int) -> bool:
 
 
 # ── Trade chat ────────────────────────────────────────────────────────────────
+
 
 def get_trade_chat_channel_id() -> str | None:
     """Return the configured Discord channel ID for trade chat, or None."""
