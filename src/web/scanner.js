@@ -55,6 +55,9 @@ const _state = {
         min_revenue_growth: -0.10,
         min_earnings_growth: null,
         min_dividend_yield:  null,
+        max_peg_ratio:        null,
+        min_gross_margin:     null,
+        min_interest_coverage: null,
         restrict_to_watchlist_universe: false,
         sectors: [],      // list of selected sector strings (empty = all)
     },
@@ -103,6 +106,9 @@ function _restoreParams() {
         if (typeof saved.min_revenue_growth  === 'number' || saved.min_revenue_growth  === null) p.min_revenue_growth  = saved.min_revenue_growth;
         if (typeof saved.min_earnings_growth === 'number' || saved.min_earnings_growth === null) p.min_earnings_growth = saved.min_earnings_growth;
         if (typeof saved.min_dividend_yield  === 'number' || saved.min_dividend_yield  === null) p.min_dividend_yield  = saved.min_dividend_yield;
+        if (typeof saved.max_peg_ratio         === 'number' || saved.max_peg_ratio         === null) p.max_peg_ratio         = saved.max_peg_ratio;
+        if (typeof saved.min_gross_margin      === 'number' || saved.min_gross_margin      === null) p.min_gross_margin      = saved.min_gross_margin;
+        if (typeof saved.min_interest_coverage === 'number' || saved.min_interest_coverage === null) p.min_interest_coverage = saved.min_interest_coverage;
         if (Array.isArray(saved.conditions)) p.conditions = saved.conditions;
         if (typeof saved.restrict_to_watchlist_universe === 'boolean') p.restrict_to_watchlist_universe = saved.restrict_to_watchlist_universe;
         if (Array.isArray(saved.sectors)) p.sectors = saved.sectors;
@@ -140,6 +146,9 @@ const PARAM_CONFIG = [
     { key: 'min_revenue_growth',  label: 'Rev >',  suffix: '%',  min: -100, max: 100,  step: 1,   decimals: 0, scale: 100, nullable: true },
     { key: 'min_earnings_growth', label: 'EPS >',  suffix: '%',  min: -100, max: 100,  step: 1,   decimals: 0, scale: 100, nullable: true },
     { key: 'min_dividend_yield',  label: 'Div >',  suffix: '%',  min: 0,    max: 20,   step: 0.1, decimals: 1, scale: 100, nullable: true },
+    { key: 'max_peg_ratio',        label: 'PEG <',        suffix: '',  min: 0, max: 10, step: 0.1, decimals: 1, nullable: true },
+    { key: 'min_gross_margin',     label: 'Gross Mgn >',  suffix: '%', min: 0, max: 100, step: 1, decimals: 0, scale: 100, nullable: true },
+    { key: 'min_interest_coverage', label: 'Int Cov >',   suffix: 'x', min: 0, max: 50, step: 0.5, decimals: 1, nullable: true },
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -205,6 +214,9 @@ function enableNullableBadge(key) {
         min_revenue_growth:  -0.10,
         min_earnings_growth: -0.20,
         min_dividend_yield:  0.01,
+        max_peg_ratio:        1.5,
+        min_gross_margin:     0.40,
+        min_interest_coverage: 4.0,
     };
     _state.params[key] = activationDefaults[key] ?? 0;
     renderParamBadges();
@@ -222,6 +234,16 @@ function toggleWatchlistUniverse() {
     _persistParams();
     const btn = document.getElementById('btn-watchlist-universe');
     if (btn) btn.classList.toggle('active', _state.params.restrict_to_watchlist_universe);
+}
+
+function applyValueScreenPreset() {
+    _state.params.min_interest_coverage = 4.0;
+    _state.params.min_gross_margin      = 0.40;
+    _state.params.min_revenue_growth    = 0.10;
+    _state.params.max_peg_ratio         = 1.5;
+    renderParamBadges();
+    _persistParams();
+    startScan();
 }
 
 function openParamEdit(key) {
@@ -472,6 +494,9 @@ function _buildQueryString() {
     if (p.min_revenue_growth  !== null && p.min_revenue_growth  !== undefined) qs.set('min_revenue_growth',  p.min_revenue_growth);
     if (p.min_earnings_growth !== null && p.min_earnings_growth !== undefined) qs.set('min_earnings_growth', p.min_earnings_growth);
     if (p.min_dividend_yield  !== null && p.min_dividend_yield  !== undefined) qs.set('min_dividend_yield',  p.min_dividend_yield);
+    if (p.max_peg_ratio         !== null && p.max_peg_ratio         !== undefined) qs.set('max_peg_ratio',         p.max_peg_ratio);
+    if (p.min_gross_margin      !== null && p.min_gross_margin      !== undefined) qs.set('min_gross_margin',      p.min_gross_margin);
+    if (p.min_interest_coverage !== null && p.min_interest_coverage !== undefined) qs.set('min_interest_coverage', p.min_interest_coverage);
     if (_state.params.restrict_to_watchlist_universe) qs.set('restrict_to_watchlist_universe', 'true');
     if (_state.params.sectors && _state.params.sectors.length) qs.set('sectors', _state.params.sectors.join(','));
     return qs.toString();
