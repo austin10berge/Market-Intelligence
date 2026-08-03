@@ -257,12 +257,12 @@ class TestFetchFundamentalsBatchGrossMarginAndInterestCoverage:
         return mock_ticker
 
     def test_gross_margin_read_from_info(self):
-        info = {**_make_ticker_info("AAPL"), "grossMargins": 0.48653}
+        info = {**_make_ticker_info("AAPL"), "grossMargins": 0.4865}
         mock_ticker = self._mock_ticker(info, _make_income_stmt_df(33.81e9, 6.80e9))
         with patch("src.market_data.refresh.yf.Ticker", return_value=mock_ticker):
             rows = _fetch_fundamentals_batch(["AAPL"])
 
-        assert rows[0]["gross_margin"] == pytest.approx(0.48653)
+        assert rows[0]["gross_margin"] == pytest.approx(0.4865)
 
     def test_gross_margin_missing_is_none(self):
         info = _make_ticker_info("AAPL")  # no grossMargins key

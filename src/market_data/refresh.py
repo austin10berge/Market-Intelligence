@@ -134,7 +134,7 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
                 "dividend_yield": round(dividend_yield, 4) if dividend_yield is not None else None,
                 "forward_pe": round(forward_pe, 2) if forward_pe is not None else None,
                 "peg_ratio": round(peg_ratio, 2) if peg_ratio is not None else None,
-                "gross_margin": round(gross_margin, 5) if gross_margin is not None else None,
+                "gross_margin": round(gross_margin, 4) if gross_margin is not None else None,
                 "interest_coverage": round(interest_coverage, 2) if interest_coverage is not None else None,
                 "sector": sector,
             })
