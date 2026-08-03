@@ -10,6 +10,10 @@ RUN apt-get update && apt-get install -y curl ca-certificates libgomp1 git && rm
 COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
+# Cap idle-session memory growth in mcp-proxy/fastmcp's streamable-HTTP
+# transport (see docker/sitecustomize.py for why this is needed).
+COPY docker/sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
+
 # Copy all source
 COPY src/ src/
 COPY discord_bot/ discord_bot/
