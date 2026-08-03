@@ -173,6 +173,8 @@ class ScannerParams:
     min_dividend_yield:  float | None = DEFAULT_MIN_DIVIDEND_YIELD
     max_forward_pe:          float | None = None
     max_peg_ratio:           float | None = None
+    min_gross_margin:        float | None = None
+    min_interest_coverage:   float | None = None
     max_dividend_yield:      float | None = None   # e.g. 0.025 → 2.5%
     rv20_max:                float | None = None   # e.g. 45.0 (annualised %)
     bb_width_pct_min:        float | None = None   # e.g. 4.0
@@ -213,6 +215,8 @@ class ScannerParams:
         min_dividend_yield: float | None = DEFAULT_MIN_DIVIDEND_YIELD,
         max_forward_pe: float | None = None,
         max_peg_ratio: float | None = None,
+        min_gross_margin: float | None = None,
+        min_interest_coverage: float | None = None,
         max_dividend_yield: float | None = None,
         rv20_max: float | None = None,
         bb_width_pct_min: float | None = None,
@@ -251,6 +255,8 @@ class ScannerParams:
             min_dividend_yield   = min_dividend_yield,
             max_forward_pe       = max_forward_pe,
             max_peg_ratio        = max_peg_ratio,
+            min_gross_margin      = min_gross_margin,
+            min_interest_coverage = min_interest_coverage,
             max_dividend_yield   = max_dividend_yield,
             rv20_max             = rv20_max,
             bb_width_pct_min     = bb_width_pct_min,
@@ -559,6 +565,18 @@ def _fundamental_filter_from_store(
             if peg_ratio > params.max_peg_ratio:
                 continue
 
+        # Gross margin gate
+        gross_margin = row.get("gross_margin")
+        if params.min_gross_margin is not None and gross_margin is not None:
+            if gross_margin < params.min_gross_margin:
+                continue
+
+        # Interest coverage gate
+        interest_coverage = row.get("interest_coverage")
+        if params.min_interest_coverage is not None and interest_coverage is not None:
+            if interest_coverage < params.min_interest_coverage:
+                continue
+
         # Sector filter
         if params.sectors:
             row_sector = row.get("sector") or ""
@@ -575,6 +593,8 @@ def _fundamental_filter_from_store(
             "fcf":          row.get("fcf"),
             "forward_pe":   row.get("forward_pe"),
             "peg_ratio":    row.get("peg_ratio"),
+            "gross_margin":      row.get("gross_margin"),
+            "interest_coverage": row.get("interest_coverage"),
             "sector":       row.get("sector"),
         })
 

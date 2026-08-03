@@ -116,3 +116,53 @@ class TestDividendYieldGate:
     def test_none_data_passes_active_gate(self):
         result = _run([_row(symbol="A", dividend_yield=None)], min_dividend_yield=0.02)
         assert "A" in result
+
+
+class TestGrossMarginGate:
+    def test_high_margin_passes(self):
+        result = _run([_row(symbol="A", gross_margin=0.55)], min_gross_margin=0.40)
+        assert "A" in result
+
+    def test_low_margin_fails(self):
+        result = _run([_row(symbol="A", gross_margin=0.25)], min_gross_margin=0.40)
+        assert "A" not in result
+
+    def test_none_margin_passes(self):
+        result = _run([_row(symbol="A", gross_margin=None)], min_gross_margin=0.40)
+        assert "A" in result
+
+    def test_gate_disabled_by_default(self):
+        result = _run([_row(symbol="A", gross_margin=0.01)])
+        assert "A" in result
+
+
+class TestInterestCoverageGate:
+    def test_high_coverage_passes(self):
+        result = _run([_row(symbol="A", interest_coverage=5.0)], min_interest_coverage=4.0)
+        assert "A" in result
+
+    def test_low_coverage_fails(self):
+        result = _run([_row(symbol="A", interest_coverage=2.0)], min_interest_coverage=4.0)
+        assert "A" not in result
+
+    def test_none_coverage_passes(self):
+        """Debt-free companies store None (no InterestExpense line) — gate is skipped,
+        which is the correct outcome (no debt = trivially solvent)."""
+        result = _run([_row(symbol="A", interest_coverage=None)], min_interest_coverage=4.0)
+        assert "A" in result
+
+    def test_gate_disabled_by_default(self):
+        result = _run([_row(symbol="A", interest_coverage=0.1)])
+        assert "A" in result
+
+
+class TestFromQueryGrossMarginAndInterestCoverage:
+    def test_from_query_threads_new_params(self):
+        params = ScannerParams.from_query(min_gross_margin=0.40, min_interest_coverage=4.0)
+        assert params.min_gross_margin == pytest.approx(0.40)
+        assert params.min_interest_coverage == pytest.approx(4.0)
+
+    def test_from_query_defaults_to_none(self):
+        params = ScannerParams.from_query()
+        assert params.min_gross_margin is None
+        assert params.min_interest_coverage is None
