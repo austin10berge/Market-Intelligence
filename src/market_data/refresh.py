@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 _FUNDAMENTAL_BATCH_SIZE = 50
 _FUNDAMENTAL_BATCH_SLEEP_S = 1.0
 _FUNDAMENTAL_TICKER_SLEEP_S = 0.3  # between individual .info calls to avoid rate limits
+_INCOME_STMT_SLEEP_S = 0.3  # extra throttle after the heavier get_income_stmt() call
 
 # yf.download batch size — avoids URL-length limits on huge ticker lists
 _OHLCV_DOWNLOAD_BATCH_SIZE = 100
@@ -66,12 +67,36 @@ def _to_float(value: object) -> float | None:
         return None
 
 
+def _fetch_interest_coverage(ticker: "yf.Ticker") -> float | None:
+    """EBIT / |InterestExpense| from the latest annual income statement.
+
+    Returns None if the statement is unavailable, EBIT/InterestExpense are
+    missing, or InterestExpense is 0 (near-debt-free companies commonly
+    report no InterestExpense line at all — treated as "gate skipped",
+    not "infinite coverage").
+    """
+    try:
+        stmt = ticker.get_income_stmt(freq="yearly")
+        if stmt is None or stmt.empty:
+            return None
+        if "EBIT" not in stmt.index or "InterestExpense" not in stmt.index:
+            return None
+        ebit = _to_float(stmt.loc["EBIT"].iloc[0])
+        interest_expense = _to_float(stmt.loc["InterestExpense"].iloc[0])
+        if ebit is None or interest_expense is None or interest_expense == 0:
+            return None
+        return ebit / abs(interest_expense)
+    except Exception:
+        return None
+
+
 def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
     """Fetch fundamentals via yf.Ticker().info for a batch of symbols."""
     rows: list[dict] = []
     for symbol in symbols:
         try:
-            info = yf.Ticker(symbol).info
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
             if info.get("quoteType", "").upper() != "EQUITY":
                 continue
 
@@ -91,6 +116,9 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
             dividend_yield = _to_float(info.get("dividendYield"))
             forward_pe = _to_float(info.get("forwardPE"))
             peg_ratio = _to_float(info.get("trailingPegRatio"))
+            gross_margin = _to_float(info.get("grossMargins"))
+            interest_coverage = _fetch_interest_coverage(ticker)
+            time.sleep(_INCOME_STMT_SLEEP_S)  # second, heavier network call — extra throttle
             sector = info.get("sector") or None
 
             rows.append({
@@ -106,6 +134,8 @@ def _fetch_fundamentals_batch(symbols: list[str]) -> list[dict]:
                 "dividend_yield": round(dividend_yield, 4) if dividend_yield is not None else None,
                 "forward_pe": round(forward_pe, 2) if forward_pe is not None else None,
                 "peg_ratio": round(peg_ratio, 2) if peg_ratio is not None else None,
+                "gross_margin": round(gross_margin, 5) if gross_margin is not None else None,
+                "interest_coverage": round(interest_coverage, 2) if interest_coverage is not None else None,
                 "sector": sector,
             })
         except Exception as exc:

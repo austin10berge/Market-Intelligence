@@ -234,6 +234,80 @@ class TestFetchFundamentalsBatch:
         assert rows[0]["iv_pct"] is None
 
 
+def _make_income_stmt_df(ebit: float | None, interest_expense: float | None) -> pd.DataFrame:
+    """Mimic yf.Ticker().get_income_stmt(freq='yearly') — one column (latest period),
+    indexed by line-item name. Omits a row entirely when its value is None, matching
+    how yfinance omits line items a company doesn't report (e.g. InterestExpense for
+    debt-free companies)."""
+    data = {}
+    if ebit is not None:
+        data["EBIT"] = ebit
+    if interest_expense is not None:
+        data["InterestExpense"] = interest_expense
+    return pd.DataFrame({"2025-12-31": pd.Series(data)})
+
+
+class TestFetchFundamentalsBatchGrossMarginAndInterestCoverage:
+    def _mock_ticker(self, info: dict, income_stmt: pd.DataFrame | None = None) -> MagicMock:
+        mock_ticker = MagicMock()
+        mock_ticker.info = info
+        mock_ticker.get_income_stmt.return_value = (
+            income_stmt if income_stmt is not None else pd.DataFrame()
+        )
+        return mock_ticker
+
+    def test_gross_margin_read_from_info(self):
+        info = {**_make_ticker_info("AAPL"), "grossMargins": 0.48653}
+        mock_ticker = self._mock_ticker(info, _make_income_stmt_df(33.81e9, 6.80e9))
+        with patch("src.market_data.refresh.yf.Ticker", return_value=mock_ticker):
+            rows = _fetch_fundamentals_batch(["AAPL"])
+
+        assert rows[0]["gross_margin"] == pytest.approx(0.48653)
+
+    def test_gross_margin_missing_is_none(self):
+        info = _make_ticker_info("AAPL")  # no grossMargins key
+        mock_ticker = self._mock_ticker(info, _make_income_stmt_df(33.81e9, 6.80e9))
+        with patch("src.market_data.refresh.yf.Ticker", return_value=mock_ticker):
+            rows = _fetch_fundamentals_batch(["AAPL"])
+
+        assert rows[0]["gross_margin"] is None
+
+    def test_interest_coverage_computed_from_ebit_and_interest_expense(self):
+        info = _make_ticker_info("T")
+        mock_ticker = self._mock_ticker(info, _make_income_stmt_df(33.811e9, 6.804e9))
+        with patch("src.market_data.refresh.yf.Ticker", return_value=mock_ticker):
+            rows = _fetch_fundamentals_batch(["T"])
+
+        assert rows[0]["interest_coverage"] == pytest.approx(4.969, abs=0.01)
+
+    def test_interest_coverage_none_when_interest_expense_missing(self):
+        """Debt-free companies (e.g. AAPL) report no InterestExpense line at all."""
+        info = _make_ticker_info("AAPL")
+        mock_ticker = self._mock_ticker(info, _make_income_stmt_df(120e9, None))
+        with patch("src.market_data.refresh.yf.Ticker", return_value=mock_ticker):
+            rows = _fetch_fundamentals_batch(["AAPL"])
+
+        assert rows[0]["interest_coverage"] is None
+
+    def test_interest_coverage_none_when_interest_expense_is_zero(self):
+        info = _make_ticker_info("AAPL")
+        mock_ticker = self._mock_ticker(info, _make_income_stmt_df(120e9, 0.0))
+        with patch("src.market_data.refresh.yf.Ticker", return_value=mock_ticker):
+            rows = _fetch_fundamentals_batch(["AAPL"])
+
+        assert rows[0]["interest_coverage"] is None
+
+    def test_interest_coverage_none_when_income_stmt_raises(self):
+        """A failure fetching the income statement must not drop the whole ticker."""
+        mock_ticker = self._mock_ticker(_make_ticker_info("AAPL"))
+        mock_ticker.get_income_stmt.side_effect = RuntimeError("network error")
+        with patch("src.market_data.refresh.yf.Ticker", return_value=mock_ticker):
+            rows = _fetch_fundamentals_batch(["AAPL"])
+
+        assert rows[0]["interest_coverage"] is None
+        assert rows[0]["symbol"] == "AAPL"  # rest of the row still populated
+
+
 # ── refresh_universe — incremental mode ──────────────────────────────────────
 
 class TestRefreshUniverseIncremental:
