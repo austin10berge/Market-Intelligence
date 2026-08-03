@@ -16,6 +16,7 @@
         min_fcf_b: 0, max_debt_to_equity: 2.0, min_revenue_growth: -0.10,
         min_earnings_growth: null, min_dividend_yield: null,
         max_forward_pe: null, max_dividend_yield: null,
+        max_peg_ratio: null, min_gross_margin: null, min_interest_coverage: null,
         rv20_max: null, bb_width_pct_min: null, bb_width_pct_max: null,
         volume_ratio_max: null, pct_from_52wk_high_max: null,
         adr20_pct_max: null, price_vs_ema200_pct_min: null,
@@ -62,7 +63,10 @@
         { key: 'min_dividend_yield',  label: 'Div Yield >',  suffix: '%', min: 0,    max: 20,   step: 0.1,  decimals: 1, scale: 100, nullable: true },
         { key: 'max_forward_pe',      label: 'Fwd PE <',    suffix: '',   min: 5,    max: 200,  step: 1,    decimals: 0, nullable: true },
         { key: 'max_dividend_yield',  label: 'Div Yield <', suffix: '%',  min: 0,    max: 20,   step: 0.1,  decimals: 1, scale: 100, nullable: true },
-        // Technical numeric — indices 17–23 (nullable; rendered in Technical Numeric section)
+        { key: 'max_peg_ratio',           label: 'PEG <',          suffix: '',  min: 0,   max: 10,  step: 0.1,  decimals: 1, nullable: true },
+        { key: 'min_gross_margin',        label: 'Gross Margin >', suffix: '%', min: 0,   max: 100, step: 1,    decimals: 0, scale: 100, nullable: true },
+        { key: 'min_interest_coverage',   label: 'Int Coverage >', suffix: 'x', min: 0,   max: 50,  step: 0.5,  decimals: 1, nullable: true },
+        // Technical numeric — indices 20–26 (nullable; rendered in Technical Numeric section)
         { key: 'rv20_max',                label: 'RV20 <',      suffix: '%', min: 10,  max: 100, step: 1,    decimals: 0, nullable: true },
         { key: 'bb_width_pct_min',        label: 'BB Width >',  suffix: '%', min: 0,   max: 50,  step: 0.5,  decimals: 1, nullable: true },
         { key: 'bb_width_pct_max',        label: 'BB Width <',  suffix: '%', min: 0,   max: 100, step: 0.5,  decimals: 1, nullable: true },
@@ -98,6 +102,9 @@
             if (typeof saved.min_dividend_yield  === 'number' || saved.min_dividend_yield  === null) p.min_dividend_yield  = saved.min_dividend_yield;
             if (typeof saved.max_forward_pe      === 'number' || saved.max_forward_pe      === null) p.max_forward_pe      = saved.max_forward_pe;
             if (typeof saved.max_dividend_yield  === 'number' || saved.max_dividend_yield  === null) p.max_dividend_yield  = saved.max_dividend_yield;
+            if (typeof saved.max_peg_ratio         === 'number' || saved.max_peg_ratio         === null) p.max_peg_ratio         = saved.max_peg_ratio;
+            if (typeof saved.min_gross_margin      === 'number' || saved.min_gross_margin      === null) p.min_gross_margin      = saved.min_gross_margin;
+            if (typeof saved.min_interest_coverage === 'number' || saved.min_interest_coverage === null) p.min_interest_coverage = saved.min_interest_coverage;
             if (typeof saved.rv20_max                === 'number' || saved.rv20_max                === null) p.rv20_max                = saved.rv20_max;
             if (typeof saved.bb_width_pct_min        === 'number' || saved.bb_width_pct_min        === null) p.bb_width_pct_min        = saved.bb_width_pct_min;
             if (typeof saved.bb_width_pct_max        === 'number' || saved.bb_width_pct_max        === null) p.bb_width_pct_max        = saved.bb_width_pct_max;
@@ -171,6 +178,9 @@
         if (p.min_dividend_yield  !== null && p.min_dividend_yield  !== undefined) qs.set('min_dividend_yield',  p.min_dividend_yield);
         if (p.max_forward_pe      !== null && p.max_forward_pe      !== undefined) qs.set('max_forward_pe',      p.max_forward_pe);
         if (p.max_dividend_yield  !== null && p.max_dividend_yield  !== undefined) qs.set('max_dividend_yield',  p.max_dividend_yield);
+        if (p.max_peg_ratio         !== null && p.max_peg_ratio         !== undefined) qs.set('max_peg_ratio',         p.max_peg_ratio);
+        if (p.min_gross_margin      !== null && p.min_gross_margin      !== undefined) qs.set('min_gross_margin',      p.min_gross_margin);
+        if (p.min_interest_coverage !== null && p.min_interest_coverage !== undefined) qs.set('min_interest_coverage', p.min_interest_coverage);
         if (p.rv20_max                !== null && p.rv20_max                !== undefined) qs.set('rv20_max',                p.rv20_max);
         if (p.bb_width_pct_min        !== null && p.bb_width_pct_min        !== undefined) qs.set('bb_width_pct_min',        p.bb_width_pct_min);
         if (p.bb_width_pct_max        !== null && p.bb_width_pct_max        !== undefined) qs.set('bb_width_pct_max',        p.bb_width_pct_max);
@@ -471,8 +481,8 @@
                     placeholder="any">
             </div>`;
         };
-        const fundFields     = PARAM_CONFIG.slice(10, 17).map(_nullableField).join('');
-        const techNumFields  = PARAM_CONFIG.slice(17).map(_nullableField).join('');
+        const fundFields     = PARAM_CONFIG.slice(10, 20).map(_nullableField).join('');
+        const techNumFields  = PARAM_CONFIG.slice(20).map(_nullableField).join('');
 
         // Condition chips
         const condChips = _state.availableConditions.map(cond => {
@@ -529,6 +539,7 @@
             <div class="scn-sheet-footer">
                 <button class="scn-sheet-apply" onclick="ScannerView.applyAndScan()">Apply &amp; Scan</button>
                 <button class="scn-sheet-rescan" onclick="ScannerView.forceRescan()">Force Rescan</button>
+                <button class="scn-sheet-rescan" onclick="ScannerView.applyValueScreenPreset()">Reddit Value Screen</button>
             </div>
         </div>`;
     }
@@ -597,6 +608,21 @@
 
     function applyAndScan() {
         _readSheetIntoParams();
+        _persistParams();
+        closeFilterSheet();
+        _renderHeader();
+        _renderActiveParams();
+        runScan();
+    }
+
+    // ── Value-screen preset ─────────────────────────────────────────────────────
+
+    function applyValueScreenPreset() {
+        const p = _state.params;
+        p.min_interest_coverage = 4.0;
+        p.min_gross_margin      = 0.40;
+        p.min_revenue_growth    = 0.10;
+        p.max_peg_ratio         = 1.5;
         _persistParams();
         closeFilterSheet();
         _renderHeader();
@@ -730,7 +756,7 @@
             _state.perfSort.column = key;
             _renderPerfTable();
         },
-        openFilterSheet, closeFilterSheet, applyAndScan, forceRescan,
+        openFilterSheet, closeFilterSheet, applyAndScan, forceRescan, applyValueScreenPreset,
     };
 
 })();
