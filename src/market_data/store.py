@@ -5,7 +5,8 @@ Tables
   universe_daily_ohlcv   — (symbol, date, open, high, low, close, volume)
   universe_fundamentals  — (symbol, market_cap_b, price, beta, iv_pct,
                             fcf, debt_to_equity, revenue_growth, earnings_growth,
-                            dividend_yield, forward_pe, peg_ratio, universes, updated_at)
+                            dividend_yield, forward_pe, peg_ratio, gross_margin,
+                            interest_coverage, universes, updated_at)
 
 All writes use INSERT … ON CONFLICT … DO UPDATE so they are safe to call
 repeatedly without creating duplicates.
@@ -56,6 +57,8 @@ CREATE TABLE IF NOT EXISTS universe_fundamentals (
     dividend_yield  REAL,
     forward_pe      REAL,
     peg_ratio       REAL,
+    gross_margin       REAL,
+    interest_coverage  REAL,
     universes       TEXT NOT NULL DEFAULT '',
     sector          TEXT,
     updated_at      TEXT NOT NULL
@@ -80,6 +83,8 @@ _NEW_FUNDAMENTAL_COLUMNS = [
     "dividend_yield REAL",
     "forward_pe REAL",
     "peg_ratio REAL",
+    "gross_margin REAL",
+    "interest_coverage REAL",
     "universes TEXT NOT NULL DEFAULT ''",
     "sector TEXT",
 ]
@@ -302,7 +307,7 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
     """Upsert fundamental data rows.
 
     Each row dict should have: symbol, market_cap_b, price, beta, iv_pct,
-    and optionally: fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield, forward_pe, peg_ratio, universes, sector.
+    and optionally: fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield, forward_pe, peg_ratio, gross_margin, interest_coverage, universes, sector.
     Returns the number of rows upserted.
     """
     if not rows:
@@ -325,6 +330,8 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
                 r.get("dividend_yield"),
                 r.get("forward_pe"),
                 r.get("peg_ratio"),
+                r.get("gross_margin"),
+                r.get("interest_coverage"),
                 r.get("universes", ""),
                 r.get("sector"),
                 now,
@@ -336,8 +343,8 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
             INSERT INTO universe_fundamentals
                 (symbol, market_cap_b, price, beta, iv_pct,
                  fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
-                 forward_pe, peg_ratio, universes, sector, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 forward_pe, peg_ratio, gross_margin, interest_coverage, universes, sector, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol) DO UPDATE SET
                 market_cap_b    = excluded.market_cap_b,
                 price           = excluded.price,
@@ -350,6 +357,8 @@ def bulk_upsert_fundamentals(rows: list[dict]) -> int:
                 dividend_yield  = excluded.dividend_yield,
                 forward_pe      = excluded.forward_pe,
                 peg_ratio       = excluded.peg_ratio,
+                gross_margin       = excluded.gross_margin,
+                interest_coverage  = excluded.interest_coverage,
                 universes       = excluded.universes,
                 sector          = excluded.sector,
                 updated_at      = excluded.updated_at
@@ -371,7 +380,7 @@ def get_all_fundamentals() -> list[dict]:
         rows = conn.execute(
             """SELECT symbol, market_cap_b, price, beta, iv_pct,
                       fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
-                      forward_pe, peg_ratio, universes, sector, updated_at
+                      forward_pe, peg_ratio, gross_margin, interest_coverage, universes, sector, updated_at
                FROM universe_fundamentals"""
         ).fetchall()
         return [dict(r) for r in rows]
@@ -389,7 +398,7 @@ def get_fundamentals_for_tickers(tickers: list[str]) -> list[dict]:
         rows = conn.execute(
             f"""SELECT symbol, market_cap_b, price, beta, iv_pct,
                        fcf, debt_to_equity, revenue_growth, earnings_growth, dividend_yield,
-                       forward_pe, peg_ratio, universes, sector, updated_at
+                       forward_pe, peg_ratio, gross_margin, interest_coverage, universes, sector, updated_at
                 FROM universe_fundamentals WHERE symbol IN ({placeholders})""",
             tickers,
         ).fetchall()

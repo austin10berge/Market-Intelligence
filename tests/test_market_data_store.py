@@ -272,6 +272,36 @@ class TestFundamentalsNewColumns:
         ensure_tables()
         ensure_tables()
 
+    def test_gross_margin_and_interest_coverage_upsert_and_read(self):
+        ensure_tables()
+        rows = [{
+            "symbol": "VALCOL",
+            "market_cap_b": 50.0,
+            "price": 100.0,
+            "beta": 1.0,
+            "iv_pct": 25.0,
+            "gross_margin": 0.486,
+            "interest_coverage": 4.97,
+        }]
+        count = bulk_upsert_fundamentals(rows)
+        assert count == 1
+
+        result = get_fundamentals_for_tickers(["VALCOL"])
+        assert len(result) == 1
+        r = result[0]
+        assert r["gross_margin"] == pytest.approx(0.486)
+        assert r["interest_coverage"] == pytest.approx(4.97)
+
+    def test_gross_margin_and_interest_coverage_default_to_none_when_omitted(self):
+        ensure_tables()
+        rows = [{"symbol": "VALCOL2", "market_cap_b": 10.0, "price": 50.0, "beta": 1.0, "iv_pct": None}]
+        bulk_upsert_fundamentals(rows)
+
+        result = get_fundamentals_for_tickers(["VALCOL2"])
+        r = result[0]
+        assert r["gross_margin"] is None
+        assert r["interest_coverage"] is None
+
 
 # ── Universe tickers ──────────────────────────────────────────────────────────
 
