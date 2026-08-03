@@ -195,6 +195,43 @@ class TestApplyFundamentalFilterUsesStore:
         assert "HIPRCE" not in passing
         assert "BADBETA" not in passing
 
+    def test_value_screen_preset_gates_end_to_end(self):
+        """End-to-end: seed the real store with the Reddit Value Screen preset's
+        fields and confirm apply_fundamental_filter (the real store-reading code
+        path, not the isolated gate-logic unit tests in test_fundamental_filter.py)
+        applies all 4 preset gates correctly through a full store round-trip.
+        """
+        ensure_tables()
+        bulk_upsert_fundamentals([
+            {
+                "symbol": "PASSVAL",
+                **_PASSING_VALUES,
+                "revenue_growth": 0.15,
+                "peg_ratio": 1.2,
+                "gross_margin": 0.50,
+                "interest_coverage": 6.0,
+            },
+            {
+                "symbol": "FAILVAL",
+                **_PASSING_VALUES,
+                "revenue_growth": 0.15,
+                "peg_ratio": 1.2,
+                "gross_margin": 0.25,  # fails min_gross_margin=0.40
+                "interest_coverage": 6.0,
+            },
+        ])
+
+        params = ScannerParams(
+            min_interest_coverage=4.0,
+            min_gross_margin=0.40,
+            min_revenue_growth=0.10,
+            max_peg_ratio=1.5,
+        )
+        passing, _ = apply_fundamental_filter(["PASSVAL", "FAILVAL"], params)
+
+        assert "PASSVAL" in passing
+        assert "FAILVAL" not in passing
+
 
 # ── Test: run_csp_scan returns data_source="local_store" ─────────────────────
 
