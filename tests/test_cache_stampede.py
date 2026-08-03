@@ -124,6 +124,8 @@ async def test_csp_scan_endpoint_dedupes_concurrent_cache_misses(monkeypatch):
         min_dividend_yield=None,
         max_forward_pe=None,
         max_peg_ratio=None,
+        min_gross_margin=None,
+        min_interest_coverage=None,
         max_dividend_yield=None,
         rv20_max=None,
         bb_width_pct_min=None,
