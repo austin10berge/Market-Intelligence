@@ -233,6 +233,7 @@ def insert_note(conn: sqlite3.Connection, note: dict) -> None:
 
 
 def get_open_positions(conn: sqlite3.Connection) -> list[dict]:
+    _prev = conn.row_factory
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
@@ -244,11 +245,12 @@ def get_open_positions(conn: sqlite3.Connection) -> list[dict]:
         ORDER BY p.asset_type DESC, p.dte ASC NULLS LAST
         """
     ).fetchall()
-    conn.row_factory = None
+    conn.row_factory = _prev
     return [dict(r) for r in rows]
 
 
 def get_cycles(conn: sqlite3.Connection, status: str | None = None, limit: int = 50) -> list[dict]:
+    _prev = conn.row_factory
     conn.row_factory = sqlite3.Row
     if status:
         rows = conn.execute(
@@ -260,17 +262,18 @@ def get_cycles(conn: sqlite3.Connection, status: str | None = None, limit: int =
             "SELECT * FROM wt_cycles ORDER BY status ASC, opened_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    conn.row_factory = None
+    conn.row_factory = _prev
     return [dict(r) for r in rows]
 
 
 def get_cycle_trades(conn: sqlite3.Connection, cycle_id: int) -> list[dict]:
+    _prev = conn.row_factory
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT * FROM wt_trades WHERE cycle_id = ? ORDER BY executed_at",
         (cycle_id,),
     ).fetchall()
-    conn.row_factory = None
+    conn.row_factory = _prev
     return [dict(r) for r in rows]
 
 
