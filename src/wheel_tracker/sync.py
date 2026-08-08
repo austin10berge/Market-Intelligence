@@ -239,23 +239,25 @@ async def _fetch_deltas(
         (account_id,),
     ).fetchall()
 
-    fetched_underlyings: dict[str, str] = {}  # underlying → chain raw text
+    fetched_chains: dict[tuple[str, str], str] = {}  # (underlying, expiration) → raw text
 
     for symbol, underlying, option_type, strike, expiration in rows:
         if not underlying:
             continue
-        if underlying not in fetched_underlyings:
+        exp_key = expiration[:10] if expiration else ""
+        cache_key = (underlying, exp_key)
+        if cache_key not in fetched_chains:
             result = await session.call_tool(
                 "get_option_chain",
                 {
                     "symbol": underlying,
                     "contractType": option_type or "ALL",
-                    "expirationDate": expiration[:10] if expiration else None,
+                    "expirationDate": exp_key or None,
                 },
             )
-            fetched_underlyings[underlying] = result.content[0].text if result.content else ""
+            fetched_chains[cache_key] = result.content[0].text if result.content else ""
 
-        chain_raw = fetched_underlyings[underlying]
+        chain_raw = fetched_chains[cache_key]
         delta = _extract_delta(chain_raw, option_type or "", strike or 0.0, expiration or "")
         if delta is not None:
             update_position_delta(conn, account_id, symbol, delta)
@@ -276,43 +278,44 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
     summary = {"accounts_synced": 0, "trades_imported": 0, "positions_refreshed": 0}
 
     try:
-        url = _schwab_url()
-    except Exception as exc:
-        logger.error("wheel_tracker: cannot read Schwab MCP config: %s", exc)
-        return summary
+        try:
+            url = _schwab_url()
+        except Exception as exc:
+            logger.error("wheel_tracker: cannot read Schwab MCP config: %s", exc)
+            return summary
 
-    today = date.today().isoformat()
+        today = date.today().isoformat()
 
-    try:
-        async with streamablehttp_client(url) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
+        try:
+            async with streamablehttp_client(url) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
 
-                accts_result = await session.call_tool("get_accounts", {})
-                raw_accounts = accts_result.content[0].text if accts_result.content else "[]"
-                account_ids = _parse_accounts(raw_accounts)
-                logger.info("wheel_tracker: found %d account(s)", len(account_ids))
+                    accts_result = await session.call_tool("get_accounts", {})
+                    raw_accounts = accts_result.content[0].text if accts_result.content else "[]"
+                    account_ids = _parse_accounts(raw_accounts)
+                    logger.info("wheel_tracker: found %d account(s)", len(account_ids))
 
-                for account_id in account_ids:
-                    if not account_id:
-                        continue
-                    last = get_last_executed_at(conn, account_id)
-                    start = (
-                        (date.fromisoformat(last[:10]) + timedelta(days=1)).isoformat()
-                        if last
-                        else "2020-01-01"
-                    )
-                    imported = await _sync_account(conn, session, account_id, start, today)
-                    summary["trades_imported"] += imported
+                    for account_id in account_ids:
+                        if not account_id:
+                            continue
+                        last = get_last_executed_at(conn, account_id)
+                        start = (
+                            (date.fromisoformat(last[:10]) + timedelta(days=1)).isoformat()
+                            if last
+                            else "2020-01-01"
+                        )
+                        imported = await _sync_account(conn, session, account_id, start, today)
+                        summary["trades_imported"] += imported
 
-                    active = await _sync_positions(conn, session, account_id)
-                    summary["positions_refreshed"] += len(active)
+                        active = await _sync_positions(conn, session, account_id)
+                        summary["positions_refreshed"] += len(active)
 
-                    await _fetch_deltas(conn, session, account_id)
-                    summary["accounts_synced"] += 1
+                        await _fetch_deltas(conn, session, account_id)
+                        summary["accounts_synced"] += 1
 
-    except Exception as exc:
-        logger.error("wheel_tracker sync failed: %s", exc, exc_info=True)
+        except Exception as exc:
+            logger.error("wheel_tracker sync failed: %s", exc, exc_info=True)
 
     finally:
         if _owns_conn and conn:
