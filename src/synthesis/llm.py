@@ -102,7 +102,8 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
 
     for attempt in range(_GEMINI_RETRIES + 1):
         try:
-            response = client.models.generate_content(
+            response = await asyncio.to_thread(
+                client.models.generate_content,
                 model="gemini-2.5-flash",
                 contents=user_prompt,
                 config=genai.types.GenerateContentConfig(

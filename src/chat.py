@@ -425,7 +425,6 @@ async def call_claude_chat(prompt: str, timeout: int = 240) -> str | None:
             str(_MCP_CONFIG_PATH),
             str(_SCHWAB_MCP_CONFIG_PATH),
             str(_MI_MCP_CONFIG_PATH),
-            "--strict-mcp-config",
             # ToolSearch is required for the model to discover MCP tool schemas
             # at all — without it, mcp__alpaca__*/mcp__schwab__* tools connect
             # successfully (server-side "hasTools:true") but the model has no
@@ -454,9 +453,10 @@ async def call_claude_chat(prompt: str, timeout: int = 240) -> str | None:
             logger.warning("chat: claude -p returned empty output")
             return None
         logger.warning(
-            "chat: claude -p exited with code %d — %s",
+            "chat: claude -p exited with code %d — stdout: %s | stderr: %s",
             proc.returncode,
-            stderr_bytes.decode().strip()[:500],
+            stdout_bytes.decode().strip()[:300],
+            stderr_bytes.decode().strip()[:300],
         )
         return None
     except TimeoutError:
