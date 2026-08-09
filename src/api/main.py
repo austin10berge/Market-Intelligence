@@ -66,6 +66,12 @@ from ..screener.csp_scanner import (
 )
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
+from ..wheel_tracker.store import (
+    get_open_positions as wt_get_positions,
+    get_cycles as wt_get_cycles,
+    get_cycle_trades as wt_get_cycle_trades,
+    get_wheel_stats as wt_get_stats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -915,3 +921,30 @@ async def api_market_data_refresh(
         "mode": "full" if full else "incremental",
         "message": "Data refresh started in the background. Check /api/market-data/status for progress.",
     }
+
+
+# ── Wheel Tracker ─────────────────────────────────────────────────────────────
+
+@app.get("/api/wheel/positions")
+def wheel_positions(req: Request):
+    with closing(sqlite3.connect(settings.db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        return {"positions": wt_get_positions(conn)}
+
+
+@app.get("/api/wheel/cycles")
+def wheel_cycles(req: Request, status: str | None = None, limit: int = 50):
+    with closing(sqlite3.connect(settings.db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        cycles = wt_get_cycles(conn, status=status, limit=limit)
+        # Attach trade legs to each cycle
+        for cycle in cycles:
+            cycle["trades"] = wt_get_cycle_trades(conn, cycle["id"])
+        return {"cycles": cycles}
+
+
+@app.get("/api/wheel/stats")
+def wheel_stats(req: Request):
+    with closing(sqlite3.connect(settings.db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        return wt_get_stats(conn)
