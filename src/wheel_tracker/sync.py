@@ -314,6 +314,14 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
                         await _fetch_deltas(conn, session, account_id)
                         summary["accounts_synced"] += 1
 
+            # MCP session closed — now do CPU-only work on the populated tables
+            from .cycles import link_cycles
+            from .alerts import check_alerts
+
+            new_cycles = link_cycles(conn)
+            logger.info("wheel_tracker: linked %d new cycle(s)", new_cycles)
+            await check_alerts(conn)
+
         except Exception as exc:
             logger.error("wheel_tracker sync failed: %s", exc, exc_info=True)
 
