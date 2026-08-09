@@ -20,6 +20,9 @@ async function loadStats() {
             d.max_short_put_delta != null ? d.max_short_put_delta.toFixed(2) : '—';
     } catch (e) {
         console.error('stats load error', e);
+        ['stat-mtd', 'stat-ytd', 'stat-winrate', 'stat-open', 'stat-delta'].forEach(id => {
+            document.getElementById(id).textContent = 'Error';
+        });
     }
 }
 
@@ -52,6 +55,8 @@ async function loadPositions() {
         }).join('');
     } catch (e) {
         console.error('positions load error', e);
+        document.getElementById('positions-rows').innerHTML =
+            '<div class="trade-item">Error fetching positions</div>';
     }
 }
 
@@ -87,6 +92,8 @@ async function loadCycles() {
         }).join('');
     } catch (e) {
         console.error('cycles load error', e);
+        document.getElementById('cycles-list').innerHTML =
+            '<div class="trade-item">Error fetching wheel cycles</div>';
     }
 }
 
