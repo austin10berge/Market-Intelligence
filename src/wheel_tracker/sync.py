@@ -251,11 +251,18 @@ async def _fetch_deltas(
                 "get_option_chain",
                 {
                     "symbol": underlying,
-                    "contractType": option_type or "ALL",
-                    "expirationDate": exp_key or None,
+                    "contract_type": option_type or "ALL",
+                    "from_date": exp_key,
+                    "to_date": exp_key,
                 },
             )
-            fetched_chains[cache_key] = result.content[0].text if result.content else ""
+            if result.isError:
+                logger.warning(
+                    "wheel_tracker: get_option_chain error for %s: %s", underlying, result.content
+                )
+                fetched_chains[cache_key] = ""
+            else:
+                fetched_chains[cache_key] = result.content[0].text if result.content else ""
 
         chain_raw = fetched_chains[cache_key]
         delta = _extract_delta(chain_raw, option_type or "", strike or 0.0, expiration or "")

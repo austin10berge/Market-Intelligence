@@ -125,15 +125,18 @@ class TradeChatCog(commands.Cog):
         trade_id = entity_id if kind == "trade" else None
         cycle_id = entity_id if kind == "cycle" else None
 
-        with closing(sqlite3.connect(settings.db_path)) as conn:
-            insert_note(conn, {
-                "trade_id": trade_id,
-                "cycle_id": cycle_id,
-                "source": "discord",
-                "content": content.strip(),
-            })
-
-        await message.add_reaction("✅")
+        try:
+            with closing(sqlite3.connect(settings.db_path)) as conn:
+                insert_note(conn, {
+                    "trade_id": trade_id,
+                    "cycle_id": cycle_id,
+                    "source": "discord",
+                    "content": content.strip(),
+                })
+            await message.add_reaction("✅")
+        except Exception as exc:
+            logger.error("wheel_tracker _handle_note failed: %s", exc)
+            await message.reply("Failed to save note. Try again later.")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:

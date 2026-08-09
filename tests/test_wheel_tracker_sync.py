@@ -217,3 +217,80 @@ async def test_run_sync_check_alerts_failure_is_caught_non_fatally(conn):
 
         assert summary == {"accounts_synced": 0, "trades_imported": 0, "positions_refreshed": 0}
         mock_link.assert_called_once_with(conn)
+
+
+# --- compact chain format fixture ---
+_COMPACT_CHAIN = """\
+"450.0"[1,]{strike,bid,ask,delta,openInterest}:
+450.0,3.50,3.60,-0.25,100
+"460.0"[1,]{strike,bid,ask,delta,openInterest}:
+460.0,5.00,5.10,-0.35,200
+"""
+
+
+def test_extract_delta_returns_matching_strike():
+    from src.wheel_tracker.sync import _extract_delta
+
+    delta = _extract_delta(_COMPACT_CHAIN, "PUT", 450.0, "2025-01-17")
+    assert delta == pytest.approx(-0.25)
+
+
+def test_extract_delta_returns_none_when_not_found():
+    from src.wheel_tracker.sync import _extract_delta
+
+    delta = _extract_delta(_COMPACT_CHAIN, "PUT", 999.0, "2025-01-17")
+    assert delta is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_deltas_uses_correct_param_names(conn):
+    """_fetch_deltas must call get_option_chain with snake_case param names
+    (contract_type, from_date, to_date) and must NOT use contractType or expirationDate."""
+    from src.wheel_tracker.sync import _fetch_deltas
+    from src.wheel_tracker.store import upsert_position
+    from datetime import datetime, timezone
+
+    # Insert one open short option position so _fetch_deltas has something to process
+    refreshed_at = datetime.now(timezone.utc).isoformat()
+    upsert_position(conn, {
+        "account_id": "ACC1",
+        "symbol": "AAPL  250117P00450000",
+        "underlying": "AAPL",
+        "asset_type": "OPTION",
+        "option_type": "PUT",
+        "strike": 450.0,
+        "expiration": "2025-01-17",
+        "dte": 10,
+        "quantity": -1.0,
+        "average_price": 3.50,
+        "current_price": 3.55,
+        "market_value": -355.0,
+        "unrealized_pnl": -5.0,
+        "delta": None,
+        "refreshed_at": refreshed_at,
+    })
+
+    call_args_list = []
+
+    async def _recording_call_tool(name, args=None):
+        call_args_list.append((name, args))
+        result = MagicMock()
+        result.isError = False
+        result.content = [MagicMock(text=_COMPACT_CHAIN)]
+        return result
+
+    session = AsyncMock()
+    session.call_tool = AsyncMock(side_effect=_recording_call_tool)
+
+    await _fetch_deltas(conn, session, "ACC1")
+
+    # Verify get_option_chain was called at least once
+    chain_calls = [(name, args) for name, args in call_args_list if name == "get_option_chain"]
+    assert len(chain_calls) == 1, f"Expected 1 get_option_chain call, got {len(chain_calls)}"
+
+    _, params = chain_calls[0]
+    assert "contract_type" in params, "Expected snake_case 'contract_type' param"
+    assert "from_date" in params, "Expected 'from_date' param"
+    assert "to_date" in params, "Expected 'to_date' param"
+    assert "contractType" not in params, "Must NOT use camelCase 'contractType'"
+    assert "expirationDate" not in params, "Must NOT use 'expirationDate'"
