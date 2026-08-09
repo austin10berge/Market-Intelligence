@@ -9,7 +9,6 @@ from .store import (
     get_distinct_accounts,
     get_unlinked_trades,
     set_trade_cycle,
-    update_cycle,
 )
 
 logger = logging.getLogger(__name__)

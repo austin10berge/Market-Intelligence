@@ -57,6 +57,7 @@ def test_csp_expired_worthless(conn):
     cycle = conn.execute("SELECT * FROM wt_cycles").fetchone()
     assert cycle["status"] == "CLOSED"
     assert cycle["total_premium"] == pytest.approx(149.35)
+    assert cycle["realized_pnl"] == pytest.approx(149.35)
     linked = conn.execute("SELECT COUNT(*) FROM wt_trades WHERE cycle_id = ?", (cycle["id"],)).fetchone()[0]
     assert linked == 2
 
@@ -74,6 +75,7 @@ def test_csp_bought_back(conn):
     assert n == 1
     cycle = conn.execute("SELECT * FROM wt_cycles").fetchone()
     assert cycle["status"] == "CLOSED"
+    assert cycle["realized_pnl"] == pytest.approx(119.35)
 
 
 def test_csp_open_no_close(conn):
@@ -90,7 +92,7 @@ def test_csp_open_no_close(conn):
 
 
 def test_full_wheel_cycle(conn):
-    """CSP assigned → shares bought → CC expired worthless → 1 closed cycle with all 4 trades linked."""
+    """CSP assigned → shares bought → CC expired worthless → cycle still OPEN (shares held), all 5 trades linked."""
     trades = [
         _t(schwab_transaction_id="t1", instruction="SELL_TO_OPEN",
            executed_at="2025-01-01T10:00:00", net_amount=149.35,
