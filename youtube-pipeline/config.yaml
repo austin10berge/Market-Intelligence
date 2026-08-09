@@ -11,11 +11,13 @@ channels:
     url: "https://www.youtube.com/@CreditSpreadInvesting"
   - name: "InTheMoney"
     url: "https://www.youtube.com/@InTheMoneyAdam"
+  - name: "Options with Henry"
+    url: "https://www.youtube.com/@OptionsWithHenry"
 
 pipeline:
   # How far back to look on each run. Tracked-last-run wins when larger;
   # this is the fallback floor and the cold-start window.
-  lookback_hours: 26
+  lookback_hours: 120
 
   # Skip Shorts and other micro-content below this duration.
   min_duration_seconds: 120
