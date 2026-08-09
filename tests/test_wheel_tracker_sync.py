@@ -125,3 +125,95 @@ async def test_sync_upserts_positions(conn):
     await _sync_positions(conn, session, "ACC1")
     count = conn.execute("SELECT COUNT(*) FROM wt_positions WHERE account_id='ACC1'").fetchone()[0]
     assert count == 1
+
+
+def _mock_async_cm(value):
+    """Return a MagicMock usable as `async with mock as value:`."""
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=value)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
+
+
+def _patch_mcp_transport(session):
+    """Patch run_sync's MCP transport (streamablehttp_client + ClientSession) so that
+    `async with streamablehttp_client(url) as (read, write, _)` and
+    `async with ClientSession(read, write) as session` resolve without any network I/O."""
+    stream_cm = _mock_async_cm((MagicMock(), MagicMock(), MagicMock()))
+    session_cm = _mock_async_cm(session)
+    return (
+        patch("src.wheel_tracker.sync.streamablehttp_client", MagicMock(return_value=stream_cm)),
+        patch("src.wheel_tracker.sync.ClientSession", MagicMock(return_value=session_cm)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_sync_calls_link_cycles_and_check_alerts(conn):
+    """Task 5 wiring: after a successful MCP sync, run_sync must invoke
+    cycles.link_cycles and alerts.check_alerts on the populated tables."""
+    from src.wheel_tracker.sync import run_sync
+
+    session = _mock_session("[]", "[]", "{}")
+    patch_stream, patch_client_session = _patch_mcp_transport(session)
+
+    with (
+        patch_stream,
+        patch_client_session,
+        patch("src.wheel_tracker.sync._schwab_url", return_value="http://fake-schwab-mcp"),
+        patch("src.wheel_tracker.cycles.link_cycles", return_value=3) as mock_link,
+        patch(
+            "src.wheel_tracker.alerts.check_alerts", new=AsyncMock(return_value=["alert1", "alert2"])
+        ) as mock_alerts,
+    ):
+        await run_sync(conn)
+
+        mock_link.assert_called_once_with(conn)
+        mock_alerts.assert_called_once_with(conn)
+
+
+@pytest.mark.asyncio
+async def test_run_sync_link_cycles_failure_is_caught_non_fatally(conn):
+    """A raised exception from link_cycles must be caught by run_sync's existing
+    exception handling (logged, not propagated) — same pattern as MCP failures."""
+    from src.wheel_tracker.sync import run_sync
+
+    session = _mock_session("[]", "[]", "{}")
+    patch_stream, patch_client_session = _patch_mcp_transport(session)
+
+    with (
+        patch_stream,
+        patch_client_session,
+        patch("src.wheel_tracker.sync._schwab_url", return_value="http://fake-schwab-mcp"),
+        patch("src.wheel_tracker.cycles.link_cycles", side_effect=RuntimeError("boom")),
+        patch(
+            "src.wheel_tracker.alerts.check_alerts", new=AsyncMock(return_value=[])
+        ) as mock_alerts,
+    ):
+        summary = await run_sync(conn)  # must not raise
+
+        assert summary == {"accounts_synced": 0, "trades_imported": 0, "positions_refreshed": 0}
+        mock_alerts.assert_not_called()  # never reached — link_cycles raised first
+
+
+@pytest.mark.asyncio
+async def test_run_sync_check_alerts_failure_is_caught_non_fatally(conn):
+    """A raised exception from check_alerts must be caught by run_sync's existing
+    exception handling (logged, not propagated)."""
+    from src.wheel_tracker.sync import run_sync
+
+    session = _mock_session("[]", "[]", "{}")
+    patch_stream, patch_client_session = _patch_mcp_transport(session)
+
+    with (
+        patch_stream,
+        patch_client_session,
+        patch("src.wheel_tracker.sync._schwab_url", return_value="http://fake-schwab-mcp"),
+        patch("src.wheel_tracker.cycles.link_cycles", return_value=0) as mock_link,
+        patch(
+            "src.wheel_tracker.alerts.check_alerts", new=AsyncMock(side_effect=RuntimeError("boom"))
+        ),
+    ):
+        summary = await run_sync(conn)  # must not raise
+
+        assert summary == {"accounts_synced": 0, "trades_imported": 0, "positions_refreshed": 0}
+        mock_link.assert_called_once_with(conn)

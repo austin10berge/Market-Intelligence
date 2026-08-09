@@ -320,7 +320,8 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
 
             new_cycles = link_cycles(conn)
             logger.info("wheel_tracker: linked %d new cycle(s)", new_cycles)
-            await check_alerts(conn)
+            alerts_sent = await check_alerts(conn)
+            logger.info("wheel_tracker: sent %d alert(s)", len(alerts_sent))
 
         except Exception as exc:
             logger.error("wheel_tracker sync failed: %s", exc, exc_info=True)

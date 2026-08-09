@@ -286,8 +286,8 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
 
         await _run_algo_detective_steps(today)
 
-        # Step 5: Wheel tracker sync
-        logger.info("Step 5: wheel tracker Schwab sync")
+        # Wheel tracker sync (runs after algo-detective steps)
+        logger.info("Wheel tracker: Schwab sync")
         try:
             from .wheel_tracker import run_sync as wheel_sync
 
