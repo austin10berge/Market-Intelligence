@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 
 import discord
@@ -93,10 +95,58 @@ class TradeChatCog(commands.Cog):
             ephemeral=True,
         )
 
+    async def _handle_note(self, message: discord.Message) -> None:
+        """Handle !note trade:<id> <text> or !note cycle:<id> <text>."""
+        try:
+            from src.config import settings
+            from src.wheel_tracker.store import insert_note
+        except ImportError:
+            await message.reply("Wheel tracker not available.")
+            return
+
+        parts = message.content[len("!note "):].strip().split(None, 1)
+        if len(parts) < 2 or ":" not in parts[0]:
+            await message.reply(
+                "Usage: `!note trade:<id> <text>` or `!note cycle:<id> <text>`"
+            )
+            return
+
+        ref, content = parts[0], parts[1]
+        kind, _, raw_id = ref.partition(":")
+        if kind not in ("trade", "cycle"):
+            await message.reply("Use `trade:<id>` or `cycle:<id>`.")
+            return
+        try:
+            entity_id = int(raw_id)
+        except ValueError:
+            await message.reply(f"Invalid ID: `{raw_id}`")
+            return
+
+        trade_id = entity_id if kind == "trade" else None
+        cycle_id = entity_id if kind == "cycle" else None
+
+        with closing(sqlite3.connect(settings.db_path)) as conn:
+            insert_note(conn, {
+                "trade_id": trade_id,
+                "cycle_id": cycle_id,
+                "source": "discord",
+                "content": content.strip(),
+            })
+
+        await message.add_reaction("✅")
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
+
+        # !note command — save a note to a trade or cycle. Checked first so it
+        # short-circuits before the trade-chat channel/thread routing below and
+        # works in any channel the bot can see, not just the configured one.
+        if message.content.startswith("!note "):
+            await self._handle_note(message)
+            return
+
         if message.type not in (discord.MessageType.default, discord.MessageType.reply):
             return
         if self.trade_channel_id is None:
