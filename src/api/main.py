@@ -927,24 +927,33 @@ async def api_market_data_refresh(
 
 @app.get("/api/wheel/positions")
 def wheel_positions(req: Request):
-    with closing(sqlite3.connect(settings.db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        return {"positions": wt_get_positions(conn)}
+    try:
+        with closing(sqlite3.connect(settings.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            return {"positions": wt_get_positions(conn)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/wheel/cycles")
 def wheel_cycles(req: Request, status: str | None = None, limit: int = 50):
-    with closing(sqlite3.connect(settings.db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        cycles = wt_get_cycles(conn, status=status, limit=limit)
-        # Attach trade legs to each cycle
-        for cycle in cycles:
-            cycle["trades"] = wt_get_cycle_trades(conn, cycle["id"])
-        return {"cycles": cycles}
+    try:
+        with closing(sqlite3.connect(settings.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cycles = wt_get_cycles(conn, status=status, limit=limit)
+            # Attach trade legs to each cycle
+            for cycle in cycles:
+                cycle["trades"] = wt_get_cycle_trades(conn, cycle["id"])
+            return {"cycles": cycles}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/wheel/stats")
 def wheel_stats(req: Request):
-    with closing(sqlite3.connect(settings.db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        return wt_get_stats(conn)
+    try:
+        with closing(sqlite3.connect(settings.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            return wt_get_stats(conn)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
