@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wheel Tracker — Market Intelligence</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+<div id="app">
+    <header class="glass">
+        <div class="header-content">
+            <h1>AI Market Intelligence</h1>
+            <p>Automated Macro Sentiment & Options Scanning</p>
+        </div>
+    </header>
+
+    <nav style="display:flex;gap:1.25rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+        <a href="/" style="color:var(--text-secondary);text-decoration:none;font-size:.88rem;padding-bottom:2px;transition:color .2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">Dashboard</a>
+        <a href="/scanner.html" style="color:var(--text-secondary);text-decoration:none;font-size:.88rem;padding-bottom:2px;transition:color .2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">CSP Scanner</a>
+        <a href="/technical-analysis.html" style="color:var(--text-secondary);text-decoration:none;font-size:.88rem;padding-bottom:2px;transition:color .2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">Technical Analysis</a>
+        <a href="/watchlist.html" style="color:var(--text-secondary);text-decoration:none;font-size:.88rem;padding-bottom:2px;transition:color .2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">Watchlist</a>
+        <a href="/backtest.html" style="color:var(--text-secondary);text-decoration:none;font-size:.88rem;padding-bottom:2px;transition:color .2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">Backtester</a>
+        <a href="/wheel.html" style="color:var(--accent-blue);text-decoration:none;font-size:.88rem;border-bottom:2px solid var(--accent-blue);padding-bottom:2px;">Wheel</a>
+    </nav>
+
+    <main>
+        <!-- Stats bar -->
+        <section id="stats-section" class="glass card full-width" style="margin-bottom:1.5rem;">
+            <div class="card-header"><h2>Wheel Stats</h2></div>
+            <div id="stats-bar" style="display:flex;gap:2rem;padding:1rem;flex-wrap:wrap;">
+                <div><div class="th-label">Premium MTD</div><div id="stat-mtd" class="loading-text">—</div></div>
+                <div><div class="th-label">Premium YTD</div><div id="stat-ytd" class="loading-text">—</div></div>
+                <div><div class="th-label">Win Rate</div><div id="stat-winrate" class="loading-text">—</div></div>
+                <div><div class="th-label">Open Cycles</div><div id="stat-open" class="loading-text">—</div></div>
+                <div><div class="th-label">Max Short Δ</div><div id="stat-delta" class="loading-text">—</div></div>
+            </div>
+        </section>
+
+        <!-- Open Positions -->
+        <section id="positions-section" class="glass card full-width" style="margin-bottom:1.5rem;">
+            <div class="card-header">
+                <h2>Open Positions</h2>
+                <div class="badge blue">Live</div>
+            </div>
+            <div class="stocks-scroll-wrapper">
+                <div class="table-headers" id="positions-headers" style="display:none;grid-template-columns:repeat(9,1fr);">
+                    <div class="th-label">Symbol</div>
+                    <div class="th-label">Type</div>
+                    <div class="th-label">Strike</div>
+                    <div class="th-label">Expiration</div>
+                    <div class="th-label">DTE</div>
+                    <div class="th-label">Qty</div>
+                    <div class="th-label">Avg Cost</div>
+                    <div class="th-label">Unreal P/L</div>
+                    <div class="th-label">Delta</div>
+                </div>
+                <div id="positions-rows"></div>
+            </div>
+        </section>
+
+        <!-- Wheel Cycles -->
+        <section id="cycles-section" class="glass card full-width">
+            <div class="card-header"><h2>Wheel Cycles</h2></div>
+            <div id="cycles-list"></div>
+        </section>
+    </main>
+</div>
+<script src="config.js"></script>
+<script src="wheel.js"></script>
+</body>
+</html>

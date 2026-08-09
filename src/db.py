@@ -122,6 +122,73 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_trade_chat_history_thread
             ON trade_chat_history(thread_id);
     """)
+
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS wt_cycles (
+            id             INTEGER PRIMARY KEY,
+            underlying     TEXT    NOT NULL,
+            account_id     TEXT    NOT NULL,
+            status         TEXT    NOT NULL DEFAULT 'OPEN',
+            opened_at      TEXT,
+            closed_at      TEXT,
+            total_premium  REAL    DEFAULT 0,
+            realized_pnl   REAL,
+            auto_detected  INTEGER NOT NULL DEFAULT 1
+        );
+
+        CREATE TABLE IF NOT EXISTS wt_trades (
+            id                    INTEGER PRIMARY KEY,
+            schwab_transaction_id TEXT    UNIQUE NOT NULL,
+            account_id            TEXT    NOT NULL,
+            executed_at           TEXT    NOT NULL,
+            settled_date          TEXT,
+            asset_type            TEXT    NOT NULL,
+            symbol                TEXT    NOT NULL,
+            underlying            TEXT,
+            option_type           TEXT,
+            strike                REAL,
+            expiration            TEXT,
+            instruction           TEXT    NOT NULL,
+            quantity              REAL    NOT NULL,
+            price                 REAL,
+            commission            REAL    DEFAULT 0,
+            net_amount            REAL,
+            cycle_id              INTEGER REFERENCES wt_cycles(id),
+            imported_at           TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS wt_positions (
+            id              INTEGER PRIMARY KEY,
+            account_id      TEXT    NOT NULL,
+            symbol          TEXT    NOT NULL,
+            underlying      TEXT,
+            asset_type      TEXT    NOT NULL,
+            option_type     TEXT,
+            strike          REAL,
+            expiration      TEXT,
+            dte             INTEGER,
+            quantity        REAL    NOT NULL,
+            average_price   REAL,
+            current_price   REAL,
+            market_value    REAL,
+            unrealized_pnl  REAL,
+            delta           REAL,
+            cycle_id        INTEGER REFERENCES wt_cycles(id),
+            last_dte_alerted   TEXT,
+            last_delta_alerted TEXT,
+            refreshed_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(account_id, symbol)
+        );
+
+        CREATE TABLE IF NOT EXISTS wt_notes (
+            id         INTEGER PRIMARY KEY,
+            trade_id   INTEGER REFERENCES wt_trades(id),
+            cycle_id   INTEGER REFERENCES wt_cycles(id),
+            source     TEXT    NOT NULL,
+            content    TEXT    NOT NULL,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+    """)
     conn.commit()
 
 

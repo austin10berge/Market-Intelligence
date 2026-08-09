@@ -286,6 +286,16 @@ async def run_pipeline(output_mode: str = "notify") -> dict | None:
 
         await _run_algo_detective_steps(today)
 
+        # Wheel tracker sync (runs after algo-detective steps)
+        logger.info("Wheel tracker: Schwab sync")
+        try:
+            from .wheel_tracker import run_sync as wheel_sync
+
+            sync_summary = await wheel_sync()
+            logger.info("Wheel sync: %s", sync_summary)
+        except Exception as exc:
+            logger.error("Wheel sync failed (non-fatal): %s", exc, exc_info=True)
+
         logger.info("✅ Pipeline complete!")
 
         # Return structured data (used by Discord / on-demand path)
