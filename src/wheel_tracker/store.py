@@ -277,6 +277,91 @@ def get_cycle_trades(conn: sqlite3.Connection, cycle_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+_OPTION_STRATEGY_LABELS = {
+    ("PUT", "SELL_TO_OPEN"): "Cash-Secured Put",
+    ("PUT", "BUY_TO_CLOSE"): "CSP Closed",
+    ("PUT", "EXPIRED"): "CSP Closed",
+    ("PUT", "BUY_TO_OPEN"): "Long Put",
+    ("PUT", "SELL_TO_CLOSE"): "Long Put Closed",
+    ("PUT", "ASSIGNED"): "Put Assigned",
+    ("CALL", "SELL_TO_OPEN"): "Covered Call",
+    ("CALL", "BUY_TO_CLOSE"): "Covered Call Closed",
+    ("CALL", "EXPIRED"): "Covered Call Closed",
+    ("CALL", "BUY_TO_OPEN"): "Long Call",
+    ("CALL", "SELL_TO_CLOSE"): "Long Call Closed",
+    ("CALL", "ASSIGNED"): "Call Assigned",
+}
+_EQUITY_STRATEGY_LABELS = {
+    "BUY": "Shares Bought",
+    "BUY_TO_OPEN": "Shares Bought",
+    "SELL": "Shares Sold",
+    "SELL_TO_CLOSE": "Shares Sold",
+}
+
+
+def _strategy_label(asset_type: str, option_type: str | None, instruction: str) -> str:
+    """Pure mapping from a trade's (asset_type, option_type, instruction) to a
+    human strategy label. Falls back to the raw instruction so no row is ever
+    unlabeled — new/unseen instruction values still render something useful."""
+    if asset_type == "OPTION":
+        return _OPTION_STRATEGY_LABELS.get((option_type, instruction), instruction)
+    if asset_type == "EQUITY":
+        return _EQUITY_STRATEGY_LABELS.get(instruction, instruction)
+    return instruction
+
+
+def get_ticker_ledger(conn: sqlite3.Connection) -> list[dict]:
+    """One entry per ticker (underlying, or symbol for equity rows), each with
+    every EQUITY/OPTION trade for that ticker tagged with a strategy label, plus
+    rollup totals. Replaces the old cycle-based grouping — no linking step that
+    can drop a trade for not fitting a fixed CSP->assignment->CC sequence."""
+    _prev = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    trade_rows = conn.execute(
+        """
+        SELECT * FROM wt_trades
+        WHERE asset_type IN ('EQUITY', 'OPTION')
+        ORDER BY executed_at
+        """
+    ).fetchall()
+    position_rows = conn.execute(
+        """
+        SELECT underlying, symbol FROM wt_positions
+        WHERE asset_type IN ('EQUITY', 'OPTION')
+        """
+    ).fetchall()
+    conn.row_factory = _prev
+
+    active_underlyings = {(r["underlying"] or r["symbol"]) for r in position_rows}
+
+    groups: dict[str, list[dict]] = {}
+    for row in trade_rows:
+        trade = dict(row)
+        trade["strategy"] = _strategy_label(trade["asset_type"], trade["option_type"], trade["instruction"])
+        key = trade["underlying"] or trade["symbol"]
+        groups.setdefault(key, []).append(trade)
+
+    tickers = []
+    for underlying, trades in groups.items():
+        total_premium = sum(
+            t["net_amount"] or 0 for t in trades if t["asset_type"] == "OPTION" and (t["net_amount"] or 0) > 0
+        )
+        realized_pnl = sum(t["net_amount"] or 0 for t in trades)
+        tickers.append({
+            "underlying": underlying,
+            "status": "ACTIVE" if underlying in active_underlyings else "CLOSED",
+            "total_premium": round(total_premium, 2),
+            "realized_pnl": round(realized_pnl, 2),
+            "trades": trades,
+        })
+
+    # Stable sort twice: recency first (secondary), then status (primary) —
+    # a stable sort preserves the recency order within each status group.
+    tickers.sort(key=lambda tk: tk["trades"][-1]["executed_at"], reverse=True)
+    tickers.sort(key=lambda tk: tk["status"] != "ACTIVE")
+    return tickers
+
+
 def get_wheel_stats(conn: sqlite3.Connection) -> dict:
     from datetime import date
 
