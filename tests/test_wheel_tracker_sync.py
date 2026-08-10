@@ -164,6 +164,95 @@ def test_parse_accounts_reads_account_hash():
     assert account_ids == ["ACC1"]
 
 
+# Real schwab-mcp raw text (captured live 2026-08-10, not the idealized json.dumps()
+# fixtures above). schwab-mcp's YAML dumper annotates EVERY list-valued key with its
+# item count — not just the outer document wrapper — e.g. 'transferItems[2]:' and
+# 'positions[1]:'. yaml.safe_load then produces a literal dict key "transferItems[2]"
+# instead of "transferItems", so txn.get("transferItems") silently returns nothing.
+REAL_ANNOTATED_TRANSACTIONS = """\
+[1]:
+  - activityId: 28797213822
+    time: "2021-06-25T18:30:36+0000"
+    type: TRADE
+    netAmount: -36.21
+    transferItems[2]:
+      -
+        instrument:
+          assetType: CURRENCY
+          symbol: CURRENCY_USD
+        amount: 0
+        feeType: COMMISSION
+      -
+        instrument:
+          assetType: EQUITY
+          symbol: BB
+        amount: 3.0
+        cost: -36.21
+        price: 12.07
+        positionEffect: OPENING
+"""
+
+REAL_ANNOTATED_POSITIONS = """\
+securitiesAccount:
+  positions[1]:
+    - shortQuantity: 1.0
+      longQuantity: 0
+      averagePrice: 2.6
+      instrument:
+        assetType: OPTION
+        symbol: CRM   260828C00220000
+        putCall: CALL
+        underlyingSymbol: CRM
+      marketValue: -270.5
+      currentDayProfitLoss: -10.5
+"""
+
+
+def test_parse_transactions_handles_annotated_transfer_items_key():
+    """schwab-mcp emits 'transferItems[2]:' not 'transferItems:' — the parser must
+    strip the '[N]' annotation or every real transaction is silently dropped."""
+    from src.wheel_tracker.sync import _parse_transactions
+
+    trades = _parse_transactions(REAL_ANNOTATED_TRANSACTIONS, "ACC1")
+    assert len(trades) == 1
+    assert trades[0]["symbol"] == "BB"
+    assert trades[0]["instruction"] == "BUY_TO_OPEN"
+
+
+def test_parse_positions_handles_annotated_positions_key():
+    """schwab-mcp emits 'positions[1]:' not 'positions:' on the real (verbose)
+    get_account payload — same annotation bug as transferItems."""
+    from src.wheel_tracker.sync import _parse_positions
+
+    positions = _parse_positions(REAL_ANNOTATED_POSITIONS, "ACC1", "2026-08-10T00:00:00+00:00")
+    assert len(positions) == 1
+    assert positions[0]["symbol"] == "CRM   260828C00220000"
+
+
+@pytest.mark.asyncio
+async def test_sync_positions_requests_verbose_output(conn):
+    """get_account's default (non-verbose) response reduces positions to a compact
+    CSV-style table with no 'instrument' sub-object at all — _parse_positions can't
+    read it. _sync_positions must pass verbose=True to get the full payload."""
+    from src.wheel_tracker.sync import _sync_positions
+
+    call_args_list = []
+
+    async def _recording_call_tool(name, args=None):
+        call_args_list.append((name, args))
+        result = MagicMock()
+        result.content = [MagicMock(text="{}")]
+        return result
+
+    session = AsyncMock()
+    session.call_tool = AsyncMock(side_effect=_recording_call_tool)
+
+    await _sync_positions(conn, session, "ACC1")
+
+    _, params = call_args_list[0]
+    assert params.get("verbose") is True
+
+
 def test_parse_occ_symbol_extracts_strike_and_expiration():
     from src.wheel_tracker.sync import _parse_occ_symbol
 

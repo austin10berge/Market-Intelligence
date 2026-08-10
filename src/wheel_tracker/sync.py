@@ -49,10 +49,19 @@ def _parse_schwab_text(raw: str):
     # Strip '[N]:' outer wrapper — e.g. '[1]:\n  -\n    key: val' → '-\n  key: val'
     lines = raw.splitlines()
     if lines and re.match(r"^\[\d+\]:\s*$", lines[0]):
+        if len(lines) == 1:
+            return []  # e.g. '[0]:' — an explicitly empty list, not a parse failure
         # Dedent the body by 2 spaces (standard indent after the wrapper key)
         body = "\n".join(line[2:] if line.startswith("  ") else line for line in lines[1:])
     else:
         body = raw
+
+    # schwab-mcp also annotates every NESTED list-valued key with its item count,
+    # e.g. 'transferItems[5]:' or 'positions[10]:'. Left alone, yaml.safe_load turns
+    # that into a literal dict key "transferItems[5]" instead of "transferItems", so
+    # lookups like txn.get("transferItems") silently return nothing. Strip the '[N]'
+    # suffix from any key line so the key name matches what callers expect.
+    body = re.sub(r"^(\s*\S+)\[\d+\](:\s*)$", r"\1\2", body, flags=re.MULTILINE)
 
     try:
         return yaml.safe_load(body)
@@ -327,7 +336,10 @@ async def _sync_positions(
 
     result = await session.call_tool(
         "get_account",
-        {"account_hash": account_id, "include_positions": True},
+        # verbose=True is required — the default compact response reduces positions
+        # to a symbol/quantity/marketValue/averagePrice/unrealizedPL table with no
+        # "instrument" sub-object, which _parse_positions cannot read.
+        {"account_hash": account_id, "include_positions": True, "verbose": True},
     )
     raw = result.content[0].text if result.content else "{}"
     positions = _parse_positions(raw, account_id, refreshed_at)
