@@ -312,6 +312,83 @@ def test_create_and_update_cycle():
     assert row["realized_pnl"] == pytest.approx(149.35)
 
 
+def test_wheel_stats_win_rate_counts_closed_legs_only():
+    """A symbol with only an opening trade (still open) must not count toward
+    win_rate at all — win_rate is closed-leg wins / closed-leg total."""
+    from src.wheel_tracker.store import upsert_trade, get_wheel_stats
+
+    conn = _conn()
+    conn.execute("DELETE FROM wt_trades")
+    conn.execute("DELETE FROM wt_positions")
+    conn.commit()
+    # Closed, net positive -> win
+    upsert_trade(conn, _trade(
+        schwab_transaction_id="w1", symbol="AAA   250117P00010000",
+        instruction="SELL_TO_OPEN", executed_at="2025-01-01T10:00:00", net_amount=100.0,
+    ))
+    upsert_trade(conn, _trade(
+        schwab_transaction_id="w2", symbol="AAA   250117P00010000",
+        instruction="EXPIRED", executed_at="2025-01-17T21:00:00", net_amount=0.0,
+    ))
+    # Closed, net negative -> loss
+    upsert_trade(conn, _trade(
+        schwab_transaction_id="l1", symbol="BBB   250117P00010000",
+        instruction="SELL_TO_OPEN", executed_at="2025-01-01T10:00:00", net_amount=50.0,
+    ))
+    upsert_trade(conn, _trade(
+        schwab_transaction_id="l2", symbol="BBB   250117P00010000",
+        instruction="BUY_TO_CLOSE", executed_at="2025-01-10T10:00:00", net_amount=-200.0,
+    ))
+    # Still open -> excluded entirely
+    upsert_trade(conn, _trade(
+        schwab_transaction_id="o1", symbol="CCC   250117P00010000",
+        instruction="SELL_TO_OPEN", executed_at="2025-01-01T10:00:00", net_amount=75.0,
+    ))
+
+    stats = get_wheel_stats(conn)
+    assert stats["win_rate"] == pytest.approx(0.5)
+
+
+def test_wheel_stats_win_rate_none_when_no_closed_legs():
+    from src.wheel_tracker.store import upsert_trade, get_wheel_stats
+
+    conn = _conn()
+    conn.execute("DELETE FROM wt_trades")
+    conn.execute("DELETE FROM wt_positions")
+    conn.commit()
+    upsert_trade(conn, _trade(schwab_transaction_id="o1", instruction="SELL_TO_OPEN"))
+
+    stats = get_wheel_stats(conn)
+    assert stats["win_rate"] is None
+
+
+def test_wheel_stats_ticker_counts():
+    from src.wheel_tracker.store import upsert_trade, upsert_position, get_wheel_stats
+
+    conn = _conn()
+    conn.execute("DELETE FROM wt_trades")
+    conn.execute("DELETE FROM wt_positions")
+    conn.commit()
+    upsert_trade(conn, _trade(
+        schwab_transaction_id="t1", symbol="AAA   250117P00010000",
+        underlying="AAA", instruction="SELL_TO_OPEN",
+    ))
+    upsert_trade(conn, _trade(
+        schwab_transaction_id="t2", symbol="BBB   250117P00010000",
+        underlying="BBB", instruction="SELL_TO_OPEN",
+    ))
+    upsert_position(conn, dict(
+        account_id="ACC1", symbol="AAA   250117P00010000", underlying="AAA",
+        asset_type="OPTION", option_type="PUT", strike=10.0, expiration="2025-01-17",
+        dte=10, quantity=-1.0, average_price=1.0, current_price=0.5, market_value=-50.0,
+        unrealized_pnl=50.0, delta=-0.2, refreshed_at="2025-01-07T17:00:00",
+    ))
+
+    stats = get_wheel_stats(conn)
+    assert stats["total_tickers"] == 2
+    assert stats["active_tickers"] == 1
+
+
 def test_insert_note():
     from src.wheel_tracker.store import insert_note
 

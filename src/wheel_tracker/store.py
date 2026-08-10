@@ -381,11 +381,35 @@ def get_wheel_stats(conn: sqlite3.Connection) -> dict:
         ).fetchone()
         return row[0]
 
-    total_csps = conn.execute("SELECT COUNT(*) FROM wt_cycles").fetchone()[0]
-    closed_profitable = conn.execute(
-        "SELECT COUNT(*) FROM wt_cycles WHERE status='CLOSED' AND realized_pnl > 0"
+    _OPEN_INSTR = ("SELL_TO_OPEN", "BUY_TO_OPEN")
+    _CLOSE_INSTR = ("BUY_TO_CLOSE", "SELL_TO_CLOSE", "EXPIRED", "ASSIGNED")
+
+    leg_rows = conn.execute(
+        "SELECT symbol, instruction, net_amount FROM wt_trades WHERE asset_type = 'OPTION'"
+    ).fetchall()
+    legs: dict[str, dict] = {}
+    for symbol, instruction, net_amount in leg_rows:
+        leg = legs.setdefault(symbol, {"opened": False, "closed": False, "net": 0.0})
+        leg["net"] += net_amount or 0
+        if instruction in _OPEN_INSTR:
+            leg["opened"] = True
+        if instruction in _CLOSE_INSTR:
+            leg["closed"] = True
+    closed_legs = [leg for leg in legs.values() if leg["opened"] and leg["closed"]]
+    won_legs = [leg for leg in closed_legs if leg["net"] > 0]
+
+    total_tickers = conn.execute(
+        """
+        SELECT COUNT(DISTINCT COALESCE(underlying, symbol))
+        FROM wt_trades WHERE asset_type IN ('EQUITY', 'OPTION')
+        """
     ).fetchone()[0]
-    closed_total = conn.execute("SELECT COUNT(*) FROM wt_cycles WHERE status='CLOSED'").fetchone()[0]
+    active_tickers = conn.execute(
+        """
+        SELECT COUNT(DISTINCT COALESCE(underlying, symbol))
+        FROM wt_positions WHERE asset_type IN ('EQUITY', 'OPTION')
+        """
+    ).fetchone()[0]
 
     max_delta_row = conn.execute(
         "SELECT MAX(ABS(delta)) FROM wt_positions WHERE asset_type='OPTION' AND quantity < 0 AND option_type='PUT'"
@@ -394,8 +418,8 @@ def get_wheel_stats(conn: sqlite3.Connection) -> dict:
     return {
         "premium_mtd": round(_premium(mtd_start), 2),
         "premium_ytd": round(_premium(ytd_start), 2),
-        "win_rate": round(closed_profitable / closed_total, 3) if closed_total else None,
-        "total_cycles": total_csps,
-        "open_cycles": total_csps - closed_total,
+        "win_rate": round(len(won_legs) / len(closed_legs), 3) if closed_legs else None,
+        "total_tickers": total_tickers,
+        "active_tickers": active_tickers,
         "max_short_put_delta": max_delta_row[0],
     }
