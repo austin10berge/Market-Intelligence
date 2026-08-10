@@ -26,11 +26,12 @@ const NAV_ICONS = {
     scanner:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>`,
     backtester: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>`,
     analysis:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
+    wheel:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`,
 };
 
 const NAV_LABELS = {
     overview: 'Overview', watchlist: 'Watchlist',
-    scanner: 'Scanner', backtester: 'Backtest', analysis: 'Charts',
+    scanner: 'Scanner', backtester: 'Backtest', analysis: 'Charts', wheel: 'Wheel',
 };
 
 function renderBottomNav() {
@@ -47,6 +48,7 @@ function switchTab(tab) {
     if (activeTab === 'scanner'    && tab !== 'scanner'    && window.ScannerView)    window.ScannerView.teardown();
     if (activeTab === 'backtester' && tab !== 'backtester' && window.BacktesterView) window.BacktesterView.teardown();
     if (activeTab === 'analysis'   && tab !== 'analysis'   && window.AnalysisView)   window.AnalysisView.teardown();
+    if (activeTab === 'wheel'      && tab !== 'wheel'      && window.WheelView)      window.WheelView.teardown();
     activeTab = tab;
     renderBottomNav();
     const mainContent = document.getElementById('main-content');
@@ -56,6 +58,7 @@ function switchTab(tab) {
         case 'scanner':    window.ScannerView.render(mainContent); break;
         case 'backtester': window.BacktesterView.render(mainContent); break;
         case 'analysis':   window.AnalysisView.render(mainContent); break;
+        case 'wheel':      window.WheelView.render(mainContent); break;
     }
 }
 
