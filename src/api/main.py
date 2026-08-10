@@ -68,8 +68,7 @@ from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
 from ..wheel_tracker.store import (
     get_open_positions as wt_get_positions,
-    get_cycles as wt_get_cycles,
-    get_cycle_trades as wt_get_cycle_trades,
+    get_ticker_ledger as wt_get_ticker_ledger,
     get_wheel_stats as wt_get_stats,
 )
 
@@ -935,16 +934,12 @@ def wheel_positions(req: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/wheel/cycles")
-def wheel_cycles(req: Request, status: str | None = None, limit: int = 50):
+@app.get("/api/wheel/tickers")
+def wheel_tickers(req: Request):
     try:
         with closing(sqlite3.connect(settings.db_path)) as conn:
             conn.row_factory = sqlite3.Row
-            cycles = wt_get_cycles(conn, status=status, limit=limit)
-            # Attach trade legs to each cycle
-            for cycle in cycles:
-                cycle["trades"] = wt_get_cycle_trades(conn, cycle["id"])
-            return {"cycles": cycles}
+            return {"tickers": wt_get_ticker_ledger(conn)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
