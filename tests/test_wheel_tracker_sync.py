@@ -1,11 +1,13 @@
 """Tests for Schwab sync — uses mocked MCP responses."""
+
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from src.wheel_tracker.store import ensure_wheel_tables
@@ -46,64 +48,83 @@ def _mock_session(accounts_json: str, transactions_json: str, positions_json: st
     return session
 
 
-SAMPLE_ACCOUNTS = json.dumps([{"accountNumber": "ACC1", "hashValue": "ACC1"}])
+SAMPLE_ACCOUNTS = json.dumps(
+    [{"securitiesAccount": {"accountNumber": "13879857", "accountHash": "ACC1"}}]
+)
 
-SAMPLE_TRANSACTIONS = json.dumps([
-    {
-        "activityId": "TXN001",
-        "time": "2025-01-01T10:00:00+0000",
-        "type": "TRADE",
-        "description": "SELL TO OPEN 1 AAPL 01/17/2025 200.00 P",
-        "netAmount": 149.35,
-        "transactionItem": {
-            "accountNumber": "ACC1",
-            "amount": 1.0,
-            "price": 1.50,
-            "cost": 150.0,
-            "instruction": "SELL_TO_OPEN",
-            "instrument": {
-                "symbol": "AAPL  250117P00200000",
-                "assetType": "OPTION",
-                "putCall": "PUT",
-                "underlyingSymbol": "AAPL",
-                "optionExpirationDate": "2025-01-17",
-                "strikePrice": 200.0,
-            },
-        },
-    }
-])
-
-SAMPLE_POSITIONS = json.dumps({
-    "securitiesAccount": {
-        "positions": [
-            {
-                "instrument": {
-                    "symbol": "AAPL  250117P00200000",
-                    "assetType": "OPTION",
-                    "putCall": "PUT",
-                    "underlyingSymbol": "AAPL",
-                    "optionExpirationDate": "2025-01-17",
-                    "strikePrice": 200.0,
+# Real schwab-mcp shape: transferItems is a list mixing CURRENCY fee entries with the
+# actual traded instrument; there is no "transactionItem"/"instruction" field — the
+# direction is derived from positionEffect + the sign of "amount".
+SAMPLE_TRANSACTIONS = json.dumps(
+    [
+        {
+            "activityId": "TXN001",
+            "time": "2025-01-01T10:00:00+0000",
+            "type": "TRADE",
+            "netAmount": 149.35,
+            "settlementDate": "2025-01-02T00:00:00+0000",
+            "transferItems": [
+                {
+                    "instrument": {"assetType": "CURRENCY", "symbol": "CURRENCY_USD"},
+                    "amount": 0.65,
+                    "cost": -0.65,
+                    "feeType": "COMMISSION",
                 },
-                "shortQuantity": 1.0,
-                "longQuantity": 0.0,
-                "averagePrice": 1.50,
-                "marketValue": -80.0,
-                "currentDayProfitLoss": 70.0,
-                "currentDayCost": 0,
-            }
-        ]
+                {
+                    "instrument": {
+                        "symbol": "AAPL  250117P00200000",
+                        "assetType": "OPTION",
+                        "putCall": "PUT",
+                        "underlyingSymbol": "AAPL",
+                        "expirationDate": "2025-01-17T00:00:00+0000",
+                        "strikePrice": 200.0,
+                    },
+                    "amount": -1.0,
+                    "price": 1.50,
+                    "positionEffect": "OPENING",
+                },
+            ],
+        }
+    ]
+)
+
+# Real schwab-mcp shape: get_account's positions never include strikePrice/
+# optionExpirationDate on the instrument — only symbol/putCall/underlyingSymbol.
+# strike/expiration must be derived from the OCC-format symbol.
+SAMPLE_POSITIONS = json.dumps(
+    {
+        "securitiesAccount": {
+            "positions": [
+                {
+                    "instrument": {
+                        "symbol": "AAPL  250117P00200000",
+                        "assetType": "OPTION",
+                        "putCall": "PUT",
+                        "underlyingSymbol": "AAPL",
+                    },
+                    "shortQuantity": 1.0,
+                    "longQuantity": 0.0,
+                    "averagePrice": 1.50,
+                    "marketValue": -80.0,
+                    "currentDayProfitLoss": 70.0,
+                    "currentDayCost": 0,
+                }
+            ]
+        }
     }
-})
+)
 
 
 @pytest.mark.asyncio
 async def test_sync_imports_transactions(conn):
     from src.wheel_tracker.sync import _sync_account
+
     session = _mock_session(SAMPLE_ACCOUNTS, SAMPLE_TRANSACTIONS, SAMPLE_POSITIONS)
     count = await _sync_account(conn, session, "ACC1", "2020-01-01", "2025-12-31")
     assert count == 1
-    row = conn.execute("SELECT instruction, net_amount FROM wt_trades WHERE account_id='ACC1'").fetchone()
+    row = conn.execute(
+        "SELECT instruction, net_amount FROM wt_trades WHERE account_id='ACC1'"
+    ).fetchone()
     assert row["instruction"] == "SELL_TO_OPEN"
     assert row["net_amount"] == pytest.approx(149.35)
 
@@ -111,6 +132,7 @@ async def test_sync_imports_transactions(conn):
 @pytest.mark.asyncio
 async def test_sync_is_idempotent(conn):
     from src.wheel_tracker.sync import _sync_account
+
     session = _mock_session(SAMPLE_ACCOUNTS, SAMPLE_TRANSACTIONS, SAMPLE_POSITIONS)
     await _sync_account(conn, session, "ACC1", "2020-01-01", "2025-12-31")
     await _sync_account(conn, session, "ACC1", "2020-01-01", "2025-12-31")
@@ -121,10 +143,91 @@ async def test_sync_is_idempotent(conn):
 @pytest.mark.asyncio
 async def test_sync_upserts_positions(conn):
     from src.wheel_tracker.sync import _sync_positions
+
     session = _mock_session(SAMPLE_ACCOUNTS, SAMPLE_TRANSACTIONS, SAMPLE_POSITIONS)
     await _sync_positions(conn, session, "ACC1")
     count = conn.execute("SELECT COUNT(*) FROM wt_positions WHERE account_id='ACC1'").fetchone()[0]
     assert count == 1
+    row = conn.execute(
+        "SELECT strike, expiration FROM wt_positions WHERE account_id='ACC1'"
+    ).fetchone()
+    # instrument has no strikePrice/optionExpirationDate — must be derived from the
+    # OCC symbol 'AAPL  250117P00200000' (see _parse_occ_symbol).
+    assert row["strike"] == pytest.approx(200.0)
+    assert row["expiration"] == "2025-01-17"
+
+
+def test_parse_accounts_reads_account_hash():
+    from src.wheel_tracker.sync import _parse_accounts
+
+    account_ids = _parse_accounts(SAMPLE_ACCOUNTS)
+    assert account_ids == ["ACC1"]
+
+
+def test_parse_occ_symbol_extracts_strike_and_expiration():
+    from src.wheel_tracker.sync import _parse_occ_symbol
+
+    strike, expiration = _parse_occ_symbol("CRM   270617C00190000")
+    assert strike == pytest.approx(190.0)
+    assert expiration == "2027-06-17"
+
+
+@pytest.mark.asyncio
+async def test_sync_account_call_uses_account_hash_param(conn):
+    """_sync_account must call get_transactions with account_hash/start_date/end_date/
+    transaction_type — not the raw Schwab REST field names (accountNumber/startDate/
+    endDate/types) that the actual schwab-mcp tool schema rejects."""
+    from src.wheel_tracker.sync import _sync_account
+
+    call_args_list = []
+
+    async def _recording_call_tool(name, args=None):
+        call_args_list.append((name, args))
+        result = MagicMock()
+        result.content = [MagicMock(text="[]")]
+        return result
+
+    session = AsyncMock()
+    session.call_tool = AsyncMock(side_effect=_recording_call_tool)
+
+    await _sync_account(conn, session, "ACC1", "2025-01-01", "2025-06-01")
+
+    _, params = call_args_list[0]
+    assert params["account_hash"] == "ACC1"
+    assert "start_date" in params and "end_date" in params
+    assert "transaction_type" in params
+    assert "accountNumber" not in params
+    assert "startDate" not in params
+    assert "types" not in params
+
+
+@pytest.mark.asyncio
+async def test_sync_account_chunks_ranges_over_a_year(conn):
+    """Schwab's transactions API rejects date ranges over a year, so a backfill
+    spanning more must be split into <=365-day windows."""
+    from src.wheel_tracker.sync import _sync_account
+
+    call_args_list = []
+
+    async def _recording_call_tool(name, args=None):
+        call_args_list.append((name, args))
+        result = MagicMock()
+        result.content = [MagicMock(text="[]")]
+        return result
+
+    session = AsyncMock()
+    session.call_tool = AsyncMock(side_effect=_recording_call_tool)
+
+    await _sync_account(conn, session, "ACC1", "2020-01-01", "2025-12-31")
+
+    assert len(call_args_list) > 1
+    from datetime import date as _date
+
+    for _, params in call_args_list:
+        span = (
+            _date.fromisoformat(params["end_date"]) - _date.fromisoformat(params["start_date"])
+        ).days
+        assert span <= 365
 
 
 def _mock_async_cm(value):
@@ -162,7 +265,8 @@ async def test_run_sync_calls_link_cycles_and_check_alerts(conn):
         patch("src.wheel_tracker.sync._schwab_url", return_value="http://fake-schwab-mcp"),
         patch("src.wheel_tracker.cycles.link_cycles", return_value=3) as mock_link,
         patch(
-            "src.wheel_tracker.alerts.check_alerts", new=AsyncMock(return_value=["alert1", "alert2"])
+            "src.wheel_tracker.alerts.check_alerts",
+            new=AsyncMock(return_value=["alert1", "alert2"]),
         ) as mock_alerts,
     ):
         await run_sync(conn)
@@ -246,29 +350,33 @@ def test_extract_delta_returns_none_when_not_found():
 async def test_fetch_deltas_uses_correct_param_names(conn):
     """_fetch_deltas must call get_option_chain with snake_case param names
     (contract_type, from_date, to_date) and must NOT use contractType or expirationDate."""
-    from src.wheel_tracker.sync import _fetch_deltas
-    from src.wheel_tracker.store import upsert_position
     from datetime import datetime, timezone
+
+    from src.wheel_tracker.store import upsert_position
+    from src.wheel_tracker.sync import _fetch_deltas
 
     # Insert one open short option position so _fetch_deltas has something to process
     refreshed_at = datetime.now(timezone.utc).isoformat()
-    upsert_position(conn, {
-        "account_id": "ACC1",
-        "symbol": "AAPL  250117P00450000",
-        "underlying": "AAPL",
-        "asset_type": "OPTION",
-        "option_type": "PUT",
-        "strike": 450.0,
-        "expiration": "2025-01-17",
-        "dte": 10,
-        "quantity": -1.0,
-        "average_price": 3.50,
-        "current_price": 3.55,
-        "market_value": -355.0,
-        "unrealized_pnl": -5.0,
-        "delta": None,
-        "refreshed_at": refreshed_at,
-    })
+    upsert_position(
+        conn,
+        {
+            "account_id": "ACC1",
+            "symbol": "AAPL  250117P00450000",
+            "underlying": "AAPL",
+            "asset_type": "OPTION",
+            "option_type": "PUT",
+            "strike": 450.0,
+            "expiration": "2025-01-17",
+            "dte": 10,
+            "quantity": -1.0,
+            "average_price": 3.50,
+            "current_price": 3.55,
+            "market_value": -355.0,
+            "unrealized_pnl": -5.0,
+            "delta": None,
+            "refreshed_at": refreshed_at,
+        },
+    )
 
     call_args_list = []
 

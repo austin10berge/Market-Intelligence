@@ -1,4 +1,5 @@
 """Nightly Schwab sync: transactions, open positions, and delta refresh."""
+
 from __future__ import annotations
 
 import json
@@ -8,7 +9,6 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import yaml
-
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -61,13 +61,13 @@ def _parse_schwab_text(raw: str):
 
 
 def _parse_accounts(raw: str) -> list[str]:
-    """Return list of account hash values (used as accountNumber in subsequent calls)."""
+    """Return list of account hash values (used as account_hash in subsequent calls)."""
     data = _parse_schwab_text(raw)
     if data is None:
         logger.warning("Could not parse accounts response: %r", raw[:200])
         return []
 
-    # schwab-mcp wraps the list: [{securitiesAccount: {hashValue/accountNumber: ...}}]
+    # schwab-mcp wraps the list: [{securitiesAccount: {accountHash: ...}}]
     if not isinstance(data, list):
         logger.warning("Unexpected accounts format: %r", raw[:200])
         return []
@@ -77,7 +77,7 @@ def _parse_accounts(raw: str) -> list[str]:
         if not isinstance(item, dict):
             continue
         acct = item.get("securitiesAccount", item)
-        acct_id = acct.get("hashValue") or acct.get("accountNumber")
+        acct_id = acct.get("accountHash") or acct.get("hashValue") or acct.get("accountNumber")
         if acct_id:
             result.append(str(acct_id))
     return result
@@ -87,14 +87,20 @@ def _parse_transactions(raw: str, account_id: str) -> list[dict]:
     """
     Parse Schwab get_transactions response into a list of trade dicts ready for upsert_trade().
 
-    Expected shape (Schwab Individual Trader API):
-    [{"activityId": "...", "time": "ISO8601", "type": "TRADE", "netAmount": float,
-      "transactionItem": {"amount": float, "price": float, "instruction": str,
-                          "instrument": {"symbol": str, "assetType": str, "putCall": str|None,
-                                         "underlyingSymbol": str|None, "optionExpirationDate": str|None,
-                                         "strikePrice": float|None}}}]
+    Actual shape (Schwab Individual Trader API, verified against live schwab-mcp):
+    [{"activityId": ..., "time": "ISO8601", "type": "TRADE", "netAmount": float,
+      "settlementDate": str|None,
+      "transferItems": [
+          {"instrument": {"assetType": "CURRENCY", ...}, "amount": float, "feeType": str},
+          ...,
+          {"instrument": {"symbol": str, "assetType": str, "putCall": str|None,
+                          "underlyingSymbol": str|None, "expirationDate": str|None,
+                          "strikePrice": float|None},
+           "amount": float, "price": float, "positionEffect": "OPENING"|"CLOSING"}]}]
 
-    Adjust this parser if the schwab-mcp wrapper reformats the response.
+    There is no top-level "transactionItem"/"instruction" — transferItems is a list mixing
+    fee entries (assetType CURRENCY) with the actual traded instrument, and the buy/sell
+    direction must be derived from positionEffect + the sign of "amount" (negative = sold).
     """
     data = _parse_schwab_text(raw)
     if data is None:
@@ -109,8 +115,31 @@ def _parse_transactions(raw: str, account_id: str) -> list[dict]:
     for txn in data:
         if txn.get("type") != "TRADE":
             continue
-        item = txn.get("transactionItem", {})
+        transfer_items = txn.get("transferItems", [])
+        item = next(
+            (
+                ti
+                for ti in transfer_items
+                if ti.get("instrument", {}).get("assetType") != "CURRENCY"
+            ),
+            None,
+        )
+        if item is None:
+            logger.warning("No traded instrument found in transaction %s", txn.get("activityId"))
+            continue
         instrument = item.get("instrument", {})
+        commission_item = next(
+            (ti for ti in transfer_items if ti.get("feeType") == "COMMISSION"), None
+        )
+        commission = float(commission_item.get("amount", 0) or 0) if commission_item else 0.0
+
+        amount = float(item.get("amount", 0) or 0)
+        position_effect = item.get("positionEffect")
+        side = "BUY" if amount > 0 else "SELL" if amount < 0 else None
+        effect = {"OPENING": "OPEN", "CLOSING": "CLOSE"}.get(position_effect)
+        instruction = f"{side}_TO_{effect}" if side and effect else "UNKNOWN"
+
+        expiration = instrument.get("expirationDate")
         try:
             trades.append(
                 {
@@ -123,11 +152,11 @@ def _parse_transactions(raw: str, account_id: str) -> list[dict]:
                     "underlying": instrument.get("underlyingSymbol"),
                     "option_type": instrument.get("putCall"),
                     "strike": instrument.get("strikePrice"),
-                    "expiration": instrument.get("optionExpirationDate"),
-                    "instruction": item.get("instruction", "UNKNOWN"),
-                    "quantity": float(item.get("amount", 0)),
+                    "expiration": expiration[:10] if expiration else None,
+                    "instruction": instruction,
+                    "quantity": abs(amount),
                     "price": float(item.get("price", 0) or 0),
-                    "commission": float(txn.get("fees", {}).get("commission", 0) or 0),
+                    "commission": commission,
                     "net_amount": float(txn.get("netAmount", 0)),
                 }
             )
@@ -146,13 +175,36 @@ def _dte(expiration: str | None) -> int | None:
         return None
 
 
+def _parse_occ_symbol(symbol: str) -> tuple[float | None, str | None]:
+    """Extract (strike, expiration ISO date) from an OCC-format option symbol,
+    e.g. 'CRM   270617C00190000' -> (190.0, '2027-06-17').
+
+    schwab-mcp's get_account positions payload does not include strikePrice/
+    optionExpirationDate on the instrument (unlike the transactions payload) —
+    those details are only encoded in the OCC symbol's last 15 characters
+    (YYMMDD + C/P + 8-digit strike*1000).
+    """
+    if len(symbol) < 15:
+        return None, None
+    suffix = symbol[-15:]
+    date_part, strike_part = suffix[:6], suffix[7:15]
+    try:
+        expiration = f"20{date_part[0:2]}-{date_part[2:4]}-{date_part[4:6]}"
+        date.fromisoformat(expiration)
+        strike = int(strike_part) / 1000.0
+    except (ValueError, IndexError):
+        return None, None
+    return strike, expiration
+
+
 def _parse_positions(raw: str, account_id: str, refreshed_at: str) -> list[dict]:
     """
     Parse Schwab get_account positions response.
 
     Expected shape: {"securitiesAccount": {"positions": [...]}}
-    Each position has "instrument" (same shape as transaction), "shortQuantity",
-    "longQuantity", "averagePrice", "marketValue", "currentDayProfitLoss".
+    Each position has "instrument" (assetType/symbol/putCall/underlyingSymbol only —
+    no strikePrice/optionExpirationDate, unlike transactions; see _parse_occ_symbol),
+    "shortQuantity", "longQuantity", "averagePrice", "marketValue", "currentDayProfitLoss".
     """
     data = _parse_schwab_text(raw)
     if data is None:
@@ -171,7 +223,12 @@ def _parse_positions(raw: str, account_id: str, refreshed_at: str) -> list[dict]
         quantity = long_qty - short_qty  # negative = short
 
         symbol = instrument.get("symbol", "")
+        strike = instrument.get("strikePrice")
         expiration = instrument.get("optionExpirationDate")
+        if instrument.get("assetType") == "OPTION" and (strike is None or expiration is None):
+            occ_strike, occ_expiration = _parse_occ_symbol(symbol)
+            strike = strike if strike is not None else occ_strike
+            expiration = expiration if expiration is not None else occ_expiration
 
         positions.append(
             {
@@ -180,7 +237,7 @@ def _parse_positions(raw: str, account_id: str, refreshed_at: str) -> list[dict]
                 "underlying": instrument.get("underlyingSymbol"),
                 "asset_type": instrument.get("assetType", "EQUITY"),
                 "option_type": instrument.get("putCall"),
-                "strike": instrument.get("strikePrice"),
+                "strike": strike,
                 "expiration": expiration,
                 "dte": _dte(expiration),
                 "quantity": quantity,
@@ -226,17 +283,35 @@ async def _sync_account(
     start_date: str,
     end_date: str,
 ) -> int:
-    """Pull transactions for one account. Returns count of newly imported rows."""
-    result = await session.call_tool(
-        "get_transactions",
-        {"accountNumber": account_id, "types": "TRADE", "startDate": start_date, "endDate": end_date},
-    )
-    raw = result.content[0].text if result.content else "[]"
-    trades = _parse_transactions(raw, account_id)
+    """Pull transactions for one account. Returns count of newly imported rows.
+
+    Schwab's transactions API rejects date ranges over a year, so a backfill
+    spanning more than that (e.g. a first-ever sync) is chunked into <=365-day
+    windows. Count only rows that were actually new (ON CONFLICT DO NOTHING in
+    upsert_trade means overlapping chunks won't double-count).
+    """
     count = 0
-    for t in trades:
-        upsert_trade(conn, t)
-        count += 1
+    window_start = date.fromisoformat(start_date)
+    final_end = date.fromisoformat(end_date)
+    while window_start <= final_end:
+        window_end = min(window_start + timedelta(days=365), final_end)
+        result = await session.call_tool(
+            "get_transactions",
+            {
+                "account_hash": account_id,
+                "transaction_type": "TRADE",
+                "start_date": window_start.isoformat(),
+                "end_date": window_end.isoformat(),
+            },
+        )
+        raw = result.content[0].text if result.content else "[]"
+        trades = _parse_transactions(raw, account_id)
+        for t in trades:
+            before = conn.total_changes
+            upsert_trade(conn, t)
+            if conn.total_changes > before:
+                count += 1
+        window_start = window_end + timedelta(days=1)
     return count
 
 
@@ -252,7 +327,7 @@ async def _sync_positions(
 
     result = await session.call_tool(
         "get_account",
-        {"accountNumber": account_id, "fields": "positions"},
+        {"account_hash": account_id, "include_positions": True},
     )
     raw = result.content[0].text if result.content else "{}"
     positions = _parse_positions(raw, account_id, refreshed_at)
@@ -362,8 +437,8 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
                         summary["accounts_synced"] += 1
 
             # MCP session closed — now do CPU-only work on the populated tables
-            from .cycles import link_cycles
             from .alerts import check_alerts
+            from .cycles import link_cycles
 
             new_cycles = link_cycles(conn)
             logger.info("wheel_tracker: linked %d new cycle(s)", new_cycles)
