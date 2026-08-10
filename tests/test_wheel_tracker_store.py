@@ -288,30 +288,6 @@ def test_get_ticker_ledger_orders_active_first_then_recency():
     assert order == ["WMT", "DRAM", "IOT"]
 
 
-def test_create_and_update_cycle():
-    from src.wheel_tracker.store import create_cycle, update_cycle
-
-    conn = _conn()
-    cid = create_cycle(
-        conn,
-        dict(
-            underlying="AAPL",
-            account_id="ACC1",
-            status="OPEN",
-            opened_at="2025-01-01",
-            closed_at=None,
-            total_premium=149.35,
-            realized_pnl=None,
-            auto_detected=1,
-        ),
-    )
-    assert isinstance(cid, int) and cid > 0
-    update_cycle(conn, cid, {"status": "CLOSED", "closed_at": "2025-01-17", "realized_pnl": 149.35})
-    row = conn.execute("SELECT status, realized_pnl FROM wt_cycles WHERE id=?", (cid,)).fetchone()
-    assert row["status"] == "CLOSED"
-    assert row["realized_pnl"] == pytest.approx(149.35)
-
-
 def test_wheel_stats_win_rate_counts_closed_legs_only():
     """A symbol with only an opening trade (still open) must not count toward
     win_rate at all — win_rate is closed-leg wins / closed-leg total."""

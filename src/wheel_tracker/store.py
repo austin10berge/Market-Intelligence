@@ -157,36 +157,6 @@ def delete_stale_positions(conn: sqlite3.Connection, account_id: str, active_sym
     conn.commit()
 
 
-def create_cycle(conn: sqlite3.Connection, cycle: dict) -> int:
-    cursor = conn.execute(
-        """
-        INSERT INTO wt_cycles
-            (underlying, account_id, status, opened_at, closed_at,
-             total_premium, realized_pnl, auto_detected)
-        VALUES
-            (:underlying, :account_id, :status, :opened_at, :closed_at,
-             :total_premium, :realized_pnl, :auto_detected)
-        """,
-        cycle,
-    )
-    conn.commit()
-    return cursor.lastrowid
-
-
-def update_cycle(conn: sqlite3.Connection, cycle_id: int, updates: dict) -> None:
-    set_clause = ", ".join(f"{k} = :{k}" for k in updates)
-    conn.execute(
-        f"UPDATE wt_cycles SET {set_clause} WHERE id = :_id",
-        {**updates, "_id": cycle_id},
-    )
-    conn.commit()
-
-
-def set_trade_cycle(conn: sqlite3.Connection, trade_id: int, cycle_id: int) -> None:
-    conn.execute("UPDATE wt_trades SET cycle_id = ? WHERE id = ?", (cycle_id, trade_id))
-    conn.commit()
-
-
 def get_unlinked_trades(conn: sqlite3.Connection, account_id: str) -> list[dict]:
     rows = conn.execute(
         """
@@ -244,34 +214,6 @@ def get_open_positions(conn: sqlite3.Connection) -> list[dict]:
         FROM wt_positions p
         ORDER BY p.asset_type DESC, p.dte ASC NULLS LAST
         """
-    ).fetchall()
-    conn.row_factory = _prev
-    return [dict(r) for r in rows]
-
-
-def get_cycles(conn: sqlite3.Connection, status: str | None = None, limit: int = 50) -> list[dict]:
-    _prev = conn.row_factory
-    conn.row_factory = sqlite3.Row
-    if status:
-        rows = conn.execute(
-            "SELECT * FROM wt_cycles WHERE status = ? ORDER BY opened_at DESC LIMIT ?",
-            (status, limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM wt_cycles ORDER BY status ASC, opened_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    conn.row_factory = _prev
-    return [dict(r) for r in rows]
-
-
-def get_cycle_trades(conn: sqlite3.Connection, cycle_id: int) -> list[dict]:
-    _prev = conn.row_factory
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT * FROM wt_trades WHERE cycle_id = ? ORDER BY executed_at",
-        (cycle_id,),
     ).fetchall()
     conn.row_factory = _prev
     return [dict(r) for r in rows]

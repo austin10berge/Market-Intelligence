@@ -340,9 +340,10 @@ def _patch_mcp_transport(session):
 
 
 @pytest.mark.asyncio
-async def test_run_sync_calls_link_cycles_and_check_alerts(conn):
-    """Task 5 wiring: after a successful MCP sync, run_sync must invoke
-    cycles.link_cycles and alerts.check_alerts on the populated tables."""
+async def test_run_sync_calls_check_alerts(conn):
+    """After a successful MCP sync, run_sync must invoke alerts.check_alerts
+    on the populated tables (cycle-linking was removed — see ticker-ledger
+    design, 2026-08-10)."""
     from src.wheel_tracker.sync import run_sync
 
     session = _mock_session("[]", "[]", "{}")
@@ -352,7 +353,6 @@ async def test_run_sync_calls_link_cycles_and_check_alerts(conn):
         patch_stream,
         patch_client_session,
         patch("src.wheel_tracker.sync._schwab_url", return_value="http://fake-schwab-mcp"),
-        patch("src.wheel_tracker.cycles.link_cycles", return_value=3) as mock_link,
         patch(
             "src.wheel_tracker.alerts.check_alerts",
             new=AsyncMock(return_value=["alert1", "alert2"]),
@@ -360,32 +360,7 @@ async def test_run_sync_calls_link_cycles_and_check_alerts(conn):
     ):
         await run_sync(conn)
 
-        mock_link.assert_called_once_with(conn)
         mock_alerts.assert_called_once_with(conn)
-
-
-@pytest.mark.asyncio
-async def test_run_sync_link_cycles_failure_is_caught_non_fatally(conn):
-    """A raised exception from link_cycles must be caught by run_sync's existing
-    exception handling (logged, not propagated) — same pattern as MCP failures."""
-    from src.wheel_tracker.sync import run_sync
-
-    session = _mock_session("[]", "[]", "{}")
-    patch_stream, patch_client_session = _patch_mcp_transport(session)
-
-    with (
-        patch_stream,
-        patch_client_session,
-        patch("src.wheel_tracker.sync._schwab_url", return_value="http://fake-schwab-mcp"),
-        patch("src.wheel_tracker.cycles.link_cycles", side_effect=RuntimeError("boom")),
-        patch(
-            "src.wheel_tracker.alerts.check_alerts", new=AsyncMock(return_value=[])
-        ) as mock_alerts,
-    ):
-        summary = await run_sync(conn)  # must not raise
-
-        assert summary == {"accounts_synced": 0, "trades_imported": 0, "positions_refreshed": 0}
-        mock_alerts.assert_not_called()  # never reached — link_cycles raised first
 
 
 @pytest.mark.asyncio
@@ -401,7 +376,6 @@ async def test_run_sync_check_alerts_failure_is_caught_non_fatally(conn):
         patch_stream,
         patch_client_session,
         patch("src.wheel_tracker.sync._schwab_url", return_value="http://fake-schwab-mcp"),
-        patch("src.wheel_tracker.cycles.link_cycles", return_value=0) as mock_link,
         patch(
             "src.wheel_tracker.alerts.check_alerts", new=AsyncMock(side_effect=RuntimeError("boom"))
         ),
@@ -409,7 +383,6 @@ async def test_run_sync_check_alerts_failure_is_caught_non_fatally(conn):
         summary = await run_sync(conn)  # must not raise
 
         assert summary == {"accounts_synced": 0, "trades_imported": 0, "positions_refreshed": 0}
-        mock_link.assert_called_once_with(conn)
 
 
 # --- compact chain format fixture ---

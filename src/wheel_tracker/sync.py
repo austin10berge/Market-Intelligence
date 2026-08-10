@@ -450,10 +450,7 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
 
             # MCP session closed — now do CPU-only work on the populated tables
             from .alerts import check_alerts
-            from .cycles import link_cycles
 
-            new_cycles = link_cycles(conn)
-            logger.info("wheel_tracker: linked %d new cycle(s)", new_cycles)
             alerts_sent = await check_alerts(conn)
             logger.info("wheel_tracker: sent %d alert(s)", len(alerts_sent))
 
