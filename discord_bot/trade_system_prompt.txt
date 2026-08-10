@@ -119,21 +119,23 @@ wt_trades: Every executed Schwab transaction. Key columns: id, schwab_transactio
   executed_at (ISO 8601), asset_type (EQUITY|OPTION), symbol (OCC symbol or ticker), underlying,
   option_type (PUT|CALL|null), strike, expiration, instruction (SELL_TO_OPEN/BUY_TO_CLOSE/
   EXPIRED/ASSIGNED/BUY/SELL/…), quantity (negative=short), price, commission, net_amount
-  (positive=cash received), cycle_id (FK to wt_cycles, null if unlinked).
+  (positive=cash received).
 
 wt_positions: Current open positions (refreshed each nightly pipeline run). Key columns:
   id, account_id, symbol, underlying, asset_type, option_type, strike, expiration, dte,
   quantity (negative=short), average_price, current_price, market_value, unrealized_pnl, delta,
-  cycle_id, refreshed_at.
+  refreshed_at.
 
-wt_cycles: Wheel cycles grouping related trades. Key columns: id, underlying, account_id,
-  status (OPEN|CLOSED), opened_at, closed_at, total_premium (sum of option credits received),
-  realized_pnl (total P/L when closed), auto_detected (1=system-linked).
+wt_notes: User notes. Key columns: id, trade_id (FK), source (discord|dashboard), content, created_at.
 
-wt_notes: User notes. Key columns: id, trade_id (FK), cycle_id (FK), source (discord|dashboard),
-  content, created_at.
+There is no cycle/grouping table — group wt_trades yourself by COALESCE(underlying, symbol) to
+answer per-ticker questions (e.g. "show my AAPL wheel activity" -> WHERE underlying='AAPL' OR
+symbol='AAPL'). A trade's strategy (CSP, covered call, assignment, etc.) is inferred from
+(asset_type, option_type, instruction): SELL_TO_OPEN+PUT=cash-secured put,
+SELL_TO_OPEN+CALL=covered call, ASSIGNED+PUT=shares assigned in, ASSIGNED+CALL=shares called away.
 
-Use these tables to answer questions like "what are my open CSPs", "show my AAPL wheel cycle",
-"what's my total premium collected this month", "what's my win rate on CSPs".
+Use these tables to answer questions like "what are my open CSPs", "show my AAPL wheel activity",
+"what's my total premium collected this month", "what's my win rate on CSPs" (closed option legs
+only — a symbol with both an opening and closing trade, net premium > 0 = win).
 
 Example: SELECT * FROM wt_positions WHERE asset_type='OPTION' AND quantity < 0 AND option_type='PUT';
