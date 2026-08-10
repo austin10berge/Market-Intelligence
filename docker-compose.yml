@@ -108,15 +108,7 @@ services:
       # (2026-07-15): a :ro mount here made every real tool call fail with
       # "Read-only file system: token.yaml".
       - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp
-    # --callback-url must match the Schwab app's registered callback exactly,
-    # including the trailing slash — schwab-mcp's own default omits it, which
-    # makes Schwab's login page fail with a generic "We can't log you in
-    # right now" (see docs on this in ~/.local/share/schwab-mcp/REAUTH.md on
-    # the dev host). This container's callback port (8182) isn't published
-    # anyway, so it can never actually complete a browser re-auth itself —
-    # this flag just keeps the config correct/consistent, since this service
-    # shares its token.yaml with the dev host's schwab-mcp (see volumes above).
-    command: mcp-proxy --port 8002 --host 0.0.0.0 -- schwab-mcp server --no-technical-tools --callback-url https://127.0.0.1:8182/
+    command: mcp-proxy --port 8002 --host 0.0.0.0 -- schwab-mcp server --no-technical-tools
     expose:
       - "8002"  # Internal only — discord-bot reaches it via the Docker network
     restart: unless-stopped
