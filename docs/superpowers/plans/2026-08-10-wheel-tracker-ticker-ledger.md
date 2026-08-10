@@ -314,6 +314,22 @@ git commit -m "feat(wheel): add per-ticker ledger with strategy labels"
 
 Add to `tests/test_wheel_tracker_store.py`, after `test_get_ticker_ledger_orders_active_first_then_recency` (end of Task 1's additions):
 
+**Note on test isolation:** `tests/test_wheel_tracker_store.py` uses one shared on-disk sqlite
+file across the whole module (`_tmp_path`, opened fresh per test via `_conn()` but never
+truncated — see Task 1's review, which hit this same issue). `get_wheel_stats` computes a
+true global aggregate over every row in `wt_trades`/`wt_positions`, so unlike Task 1's ticker-list
+tests, this data leaking cannot be fixed by filtering the result client-side — Task 1's earlier
+tests already inserted a closed, winning SOFI leg and several tickers into this same file. Each
+of the four tests below must start with `conn = _conn()` followed immediately by clearing both
+tables, so each test's aggregate assertions are computed only over the rows it inserts itself:
+
+```python
+    conn = _conn()
+    conn.execute("DELETE FROM wt_trades")
+    conn.execute("DELETE FROM wt_positions")
+    conn.commit()
+```
+
 ```python
 def test_wheel_stats_win_rate_counts_closed_legs_only():
     """A symbol with only an opening trade (still open) must not count toward
@@ -321,6 +337,9 @@ def test_wheel_stats_win_rate_counts_closed_legs_only():
     from src.wheel_tracker.store import upsert_trade, get_wheel_stats
 
     conn = _conn()
+    conn.execute("DELETE FROM wt_trades")
+    conn.execute("DELETE FROM wt_positions")
+    conn.commit()
     # Closed, net positive -> win
     upsert_trade(conn, _trade(
         schwab_transaction_id="w1", symbol="AAA   250117P00010000",
@@ -353,6 +372,9 @@ def test_wheel_stats_win_rate_none_when_no_closed_legs():
     from src.wheel_tracker.store import upsert_trade, get_wheel_stats
 
     conn = _conn()
+    conn.execute("DELETE FROM wt_trades")
+    conn.execute("DELETE FROM wt_positions")
+    conn.commit()
     upsert_trade(conn, _trade(schwab_transaction_id="o1", instruction="SELL_TO_OPEN"))
 
     stats = get_wheel_stats(conn)
@@ -363,6 +385,9 @@ def test_wheel_stats_ticker_counts():
     from src.wheel_tracker.store import upsert_trade, upsert_position, get_wheel_stats
 
     conn = _conn()
+    conn.execute("DELETE FROM wt_trades")
+    conn.execute("DELETE FROM wt_positions")
+    conn.commit()
     upsert_trade(conn, _trade(
         schwab_transaction_id="t1", symbol="AAA   250117P00010000",
         underlying="AAA", instruction="SELL_TO_OPEN",
