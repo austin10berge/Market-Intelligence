@@ -7,6 +7,8 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
+import yaml
+
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -29,17 +31,50 @@ def _schwab_url() -> str:
     return config["mcpServers"]["schwab"]["url"]
 
 
+def _parse_schwab_text(raw: str):
+    """Parse schwab-mcp's text responses — JSON or YAML with optional [N]: wrapper.
+
+    schwab-mcp serialises Schwab API objects as YAML rather than raw JSON.
+    The outer document is often a mapping with a flow-sequence key like '[1]:'
+    (PyYAML loads that key as a tuple).  Unwrap it so callers get the real
+    payload (list or dict).
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    try:
+        data = yaml.safe_load(raw)
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if not isinstance(k, str):
+                    return v
+        return data
+    except yaml.YAMLError:
+        return None
+
+
 def _parse_accounts(raw: str) -> list[str]:
     """Return list of account hash values (used as accountNumber in subsequent calls)."""
-    try:
-        data = json.loads(raw)
-        if isinstance(data, list):
-            return [a.get("hashValue") or a.get("accountNumber") for a in data if a]
+    data = _parse_schwab_text(raw)
+    if data is None:
+        logger.warning("Could not parse accounts response: %r", raw[:200])
+        return []
+
+    # schwab-mcp wraps the list: [{securitiesAccount: {hashValue/accountNumber: ...}}]
+    if not isinstance(data, list):
         logger.warning("Unexpected accounts format: %r", raw[:200])
         return []
-    except json.JSONDecodeError:
-        logger.warning("Could not parse accounts JSON: %r", raw[:200])
-        return []
+
+    result = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        acct = item.get("securitiesAccount", item)
+        acct_id = acct.get("hashValue") or acct.get("accountNumber")
+        if acct_id:
+            result.append(str(acct_id))
+    return result
 
 
 def _parse_transactions(raw: str, account_id: str) -> list[dict]:
@@ -55,10 +90,9 @@ def _parse_transactions(raw: str, account_id: str) -> list[dict]:
 
     Adjust this parser if the schwab-mcp wrapper reformats the response.
     """
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Could not parse transactions JSON for %s: %r", account_id, raw[:200])
+    data = _parse_schwab_text(raw)
+    if data is None:
+        logger.warning("Could not parse transactions response for %s: %r", account_id, raw[:200])
         return []
 
     if not isinstance(data, list):
@@ -114,13 +148,13 @@ def _parse_positions(raw: str, account_id: str, refreshed_at: str) -> list[dict]
     Each position has "instrument" (same shape as transaction), "shortQuantity",
     "longQuantity", "averagePrice", "marketValue", "currentDayProfitLoss".
     """
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Could not parse positions JSON for %s: %r", account_id, raw[:200])
+    data = _parse_schwab_text(raw)
+    if data is None:
+        logger.warning("Could not parse positions response for %s: %r", account_id, raw[:200])
         return []
 
-    acct = data.get("securitiesAccount", data)
+    # Single account response: {securitiesAccount: {positions: [...]}}
+    acct = data.get("securitiesAccount", data) if isinstance(data, dict) else {}
     raw_positions = acct.get("positions", [])
 
     positions = []
