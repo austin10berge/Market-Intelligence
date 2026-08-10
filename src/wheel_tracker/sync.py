@@ -35,21 +35,27 @@ def _parse_schwab_text(raw: str):
     """Parse schwab-mcp's text responses — JSON or YAML with optional [N]: wrapper.
 
     schwab-mcp serialises Schwab API objects as YAML rather than raw JSON.
-    The outer document is often a mapping with a flow-sequence key like '[1]:'
-    (PyYAML loads that key as a tuple).  Unwrap it so callers get the real
-    payload (list or dict).
+    The outer document is often a mapping like '[1]:\n  - ...' where the key
+    is a YAML flow-sequence (unhashable in Python, so yaml.safe_load raises).
+    Strip that wrapper first, then parse the indented body as plain YAML.
     """
+    import re
+
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         pass
+
+    # Strip '[N]:' outer wrapper — e.g. '[1]:\n  -\n    key: val' → '-\n  key: val'
+    lines = raw.splitlines()
+    if lines and re.match(r"^\[\d+\]:\s*$", lines[0]):
+        # Dedent the body by 2 spaces (standard indent after the wrapper key)
+        body = "\n".join(line[2:] if line.startswith("  ") else line for line in lines[1:])
+    else:
+        body = raw
+
     try:
-        data = yaml.safe_load(raw)
-        if isinstance(data, dict):
-            for k, v in data.items():
-                if not isinstance(k, str):
-                    return v
-        return data
+        return yaml.safe_load(body)
     except yaml.YAMLError:
         return None
 
