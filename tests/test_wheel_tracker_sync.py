@@ -49,7 +49,7 @@ def _mock_session(accounts_json: str, transactions_json: str, positions_json: st
 
 
 SAMPLE_ACCOUNTS = json.dumps(
-    [{"securitiesAccount": {"accountNumber": "13879857", "accountHash": "ACC1"}}]
+    [{"securitiesAccount": {"accountNumber": "12345678", "accountHash": "ACC1"}}]
 )
 
 # Real schwab-mcp shape: transferItems is a list mixing CURRENCY fee entries with the
