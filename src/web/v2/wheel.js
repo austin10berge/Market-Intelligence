@@ -33,6 +33,110 @@ window.WheelView = (() => {
         return v >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
     }
 
+    // ── Performance Chart ──
+
+    function renderPerfChart(data) {
+        const portfolio = data.portfolio_curve || [];
+        const spy = data.spy_curve || [];
+        const stats = data.stats;
+
+        if (!portfolio.length) {
+            return `<div class="list-message">No equity curve data — run a trade sync to generate</div>`;
+        }
+
+        const headlinePct = stats ? stats.net_pnl_pct : 0;
+        const headlineColor = headlinePct >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
+        const headlineSign = headlinePct >= 0 ? '+' : '';
+
+        let statsHtml = '';
+        if (stats) {
+            statsHtml = `
+            <div id="whl-perf-stats" style="display:none;padding:0 14px 8px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                    <div class="overview-card">
+                        <div class="overview-card-title">Net P&amp;L</div>
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:${moneyColor(stats.net_pnl)}">
+                            ${fmtMoney(stats.net_pnl)} <span style="font-size:13px;opacity:0.7">${headlineSign}${stats.net_pnl_pct.toFixed(2)}%</span>
+                        </div>
+                    </div>
+                    <div class="overview-card">
+                        <div class="overview-card-title">Max Drawdown</div>
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--tv-red)">
+                            ${stats.max_drawdown_pct.toFixed(2)}%
+                        </div>
+                    </div>
+                    <div class="overview-card">
+                        <div class="overview-card-title">Sharpe Ratio</div>
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">
+                            ${stats.sharpe_ratio != null ? stats.sharpe_ratio.toFixed(2) : '—'}
+                        </div>
+                    </div>
+                    <div class="overview-card">
+                        <div class="overview-card-title">Sortino Ratio</div>
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">
+                            ${stats.sortino_ratio != null ? stats.sortino_ratio.toFixed(2) : '—'}
+                        </div>
+                    </div>
+                    <div class="overview-card">
+                        <div class="overview-card-title">Annualized Yield</div>
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--tv-green)">
+                            ${stats.annualized_yield_pct != null ? stats.annualized_yield_pct.toFixed(1) + '%' : '—'}
+                        </div>
+                    </div>
+                    <div class="overview-card">
+                        <div class="overview-card-title">Avg Weekly ROC</div>
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">
+                            ${stats.avg_weekly_roc_pct != null ? stats.avg_weekly_roc_pct.toFixed(3) + '%' : '—'}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        return `
+        <div style="padding:10px 14px 4px">
+            <div style="font-size:13px;font-weight:600;color:var(--tv-muted);margin-bottom:6px">Performance vs benchmark (SPY)</div>
+            <div id="whl-chart" style="height:220px;width:100%"></div>
+            <div style="display:flex;gap:16px;justify-content:center;padding:6px 0;font-size:12px;color:var(--tv-muted)">
+                <span><span style="display:inline-block;width:12px;height:2px;background:#3b82f6;vertical-align:middle;margin-right:4px"></span>Portfolio</span>
+                <span><span style="display:inline-block;width:12px;height:2px;background:#94a3b8;vertical-align:middle;margin-right:4px;border-top:1px dashed #94a3b8"></span>SPY</span>
+            </div>
+        </div>
+        <div style="padding:0 14px;cursor:pointer" onclick="(function(e){var d=document.getElementById('whl-perf-stats');var c=e.currentTarget.querySelector('.whl-stats-chevron');if(d.style.display==='none'){d.style.display='block';c.style.transform='rotate(90deg)';}else{d.style.display='none';c.style.transform='rotate(0deg)';}})(event)">
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 0 8px">
+                <span class="whl-stats-chevron" style="display:inline-block;font-size:10px;color:var(--tv-muted);transition:transform 0.15s;transform:rotate(0deg);line-height:1">▶</span>
+                <span style="font-size:13px;color:var(--tv-muted)">YTD</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:${headlineColor}">${headlineSign}${headlinePct.toFixed(2)}%</span>
+            </div>
+        </div>
+        ${statsHtml}`;
+    }
+
+    function mountPerfChart(portfolio, spy) {
+        const container = document.getElementById('whl-chart');
+        if (!container || !window.LightweightCharts || !portfolio.length) return;
+        const chart = window.LightweightCharts.createChart(container, {
+            width: container.clientWidth,
+            height: 220,
+            layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#94a3b8' },
+            grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
+            timeScale: { borderColor: 'rgba(255,255,255,0.1)' },
+            rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+        });
+        const eqSeries = chart.addAreaSeries({
+            lineColor: '#3b82f6', topColor: 'rgba(59,130,246,0.25)', bottomColor: 'rgba(59,130,246,0.0)', lineWidth: 2,
+        });
+        eqSeries.setData(portfolio.map(d => ({ time: d.date, value: d.pct })));
+        if (spy.length) {
+            const spySeries = chart.addLineSeries({ color: '#94a3b8', lineWidth: 1, lineStyle: 2 });
+            spySeries.setData(spy.map(d => ({ time: d.date, value: d.pct })));
+        }
+        chart.timeScale().fitContent();
+        const resizer = () => chart.applyOptions({ width: container.clientWidth });
+        window.addEventListener('resize', resizer);
+        container.__chartResizer = resizer;
+    }
+
     function dteColor(dte) {
         if (dte == null) return 'var(--tv-muted)';
         return dte <= 7 ? 'var(--tv-red)' : dte <= 14 ? 'var(--tv-yellow)' : 'var(--tv-muted)';
@@ -243,6 +347,8 @@ window.WheelView = (() => {
                 <span class="scanner-title">Wheel Tracker</span>
                 <span class="data-freshness-badge" id="whl-badge"></span>
             </div>
+            <div id="whl-perf-section"><div class="list-message loading">Loading…</div></div>
+
             <div id="whl-stats"><div class="list-message loading">Loading…</div></div>
 
             <div class="section-header" style="padding-top:8px">
@@ -266,13 +372,23 @@ window.WheelView = (() => {
             fetch(`${base}/wheel/stats`).then(r => r.json()),
             fetch(`${base}/wheel/positions`).then(r => r.json()),
             fetch(`${base}/wheel/tickers`).then(r => r.json()),
-        ]).then(([stats, posData, tickerData]) => {
+            fetch(`${base}/wheel/equity-curve`).then(r => r.json()).catch(() => null),
+        ]).then(([stats, posData, tickerData, curveData]) => {
             if (!document.getElementById('whl-stats')) return;
             const positions = posData.positions || [];
             document.getElementById('whl-stats').innerHTML    = renderStats(stats);
             document.getElementById('whl-holdings').innerHTML  = renderHoldings(positions);
             document.getElementById('whl-trades').innerHTML    = renderOpenTrades(positions);
             document.getElementById('whl-perf').innerHTML      = renderSymbolPerf(tickerData.tickers || []);
+
+            const perfSection = document.getElementById('whl-perf-section');
+            if (perfSection && curveData) {
+                perfSection.innerHTML = renderPerfChart(curveData);
+                mountPerfChart(curveData.portfolio_curve || [], curveData.spy_curve || []);
+            } else if (perfSection) {
+                perfSection.innerHTML = '';
+            }
+
             const badge = document.getElementById('whl-badge');
             if (badge) { badge.className = 'data-freshness-badge fresh'; badge.textContent = 'Live'; }
         }).catch(err => {
