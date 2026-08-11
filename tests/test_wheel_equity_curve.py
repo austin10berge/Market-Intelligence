@@ -50,3 +50,83 @@ def test_read_filters_by_date(conn):
 def test_read_empty_table(conn):
     result = read_equity_curve(conn, "2026-01-01")
     assert result == []
+
+
+from unittest.mock import patch
+import asyncio
+from src.wheel_tracker.equity_curve import rebuild_equity_curve, DEPOSIT_EVENTS
+
+
+def test_deposit_events_defined():
+    assert len(DEPOSIT_EVENTS) >= 2
+    for evt in DEPOSIT_EVENTS:
+        assert "date" in evt
+        assert "amount" in evt
+
+
+def _insert_test_trades(conn):
+    """Insert a minimal set of trades: one CSP open (premium in) and a stock buy."""
+    from src.wheel_tracker.store import ensure_wheel_tables
+    ensure_wheel_tables(conn)
+    conn.executemany(
+        """INSERT INTO wt_trades
+           (schwab_transaction_id, account_id, executed_at, asset_type, symbol,
+            underlying, option_type, strike, expiration, instruction, quantity,
+            price, commission, net_amount)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            ("t1", "A1", "2026-01-06T10:00:00", "OPTION", "AAPL  260117P00200000",
+             "AAPL", "PUT", 200.0, "2026-01-17", "SELL_TO_OPEN", 1, 3.50, 0.65, 349.35),
+            ("t2", "A1", "2026-01-12T10:00:00", "EQUITY", "AAPL",
+             None, None, None, None, "BUY", 100, 195.0, 0.0, -19500.0),
+        ],
+    )
+    conn.commit()
+
+
+def _make_spy_df():
+    """Build a minimal DataFrame mimicking yfinance output for SPY."""
+    import pandas as pd
+    dates = pd.bdate_range("2026-01-02", "2026-01-14")
+    closes = [480.0 + i * 0.5 for i in range(len(dates))]
+    return pd.DataFrame({"Close": closes}, index=dates)
+
+
+def _make_aapl_df():
+    """Build a minimal DataFrame mimicking yfinance output for AAPL."""
+    import pandas as pd
+    dates = pd.bdate_range("2026-01-02", "2026-01-14")
+    closes = [195.0 + i * 0.3 for i in range(len(dates))]
+    return pd.DataFrame({"Close": closes}, index=dates)
+
+
+def test_rebuild_equity_curve_basic(conn):
+    _insert_test_trades(conn)
+
+    async def mock_download(*args, **kwargs):
+        import pandas as pd
+        tickers_arg = args[0] if args else kwargs.get("tickers", "")
+        if "SPY" in tickers_arg and "AAPL" in tickers_arg:
+            spy_df = _make_spy_df()
+            aapl_df = _make_aapl_df()
+            result = pd.concat({"SPY": spy_df, "AAPL": aapl_df}, axis=1)
+            return result
+        elif "SPY" in tickers_arg:
+            return _make_spy_df()
+        return _make_aapl_df()
+
+    with patch("src.wheel_tracker.equity_curve.download_with_retry", side_effect=mock_download):
+        with patch("src.wheel_tracker.equity_curve._ytd_start", return_value="2026-01-02"):
+            count = asyncio.get_event_loop().run_until_complete(rebuild_equity_curve(conn))
+
+    assert count > 0
+    from src.wheel_tracker.store import read_equity_curve
+    curve = read_equity_curve(conn, "2026-01-01")
+    assert len(curve) == count
+    assert curve[0]["spy_close"] is not None
+    # After the AAPL buy on Jan 12 (next trading day after the Jan 10 weekend),
+    # equity should include mark-to-market stock value
+    post_buy = [r for r in curve if r["date"] >= "2026-01-10"]
+    assert len(post_buy) > 0
+    for r in post_buy:
+        assert r["equity"] > r["cash"]  # equity includes stock position value
