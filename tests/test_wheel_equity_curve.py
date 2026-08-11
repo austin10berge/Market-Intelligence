@@ -148,6 +148,36 @@ def test_rebuild_equity_curve_basic(conn):
         assert r["equity"] > r["cash"]  # equity includes stock position value
 
 
+def test_rebuild_curve_keeps_cash_equivalent_fund_value(conn):
+    """Buying SWVXX is an asset conversion, not a portfolio loss."""
+    import pandas as pd
+    from src.wheel_tracker.store import ensure_wheel_tables, read_equity_curve
+
+    ensure_wheel_tables(conn)
+    conn.execute(
+        """INSERT INTO wt_trades
+           (schwab_transaction_id, account_id, executed_at, asset_type, symbol,
+            instruction, quantity, price, commission, net_amount)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("fund-1", "A1", "2026-03-10T00:19:58+00:00", "MUTUAL_FUND", "SWVXX",
+         "BUY_TO_OPEN", 8300, 1.0, 0.0, -8300.0),
+    )
+    conn.commit()
+
+    spy_prices = pd.DataFrame(
+        {"Close": [500.0, 501.0, 502.0]},
+        index=pd.bdate_range("2026-03-09", periods=3),
+    )
+    with patch("src.wheel_tracker.equity_curve.download_with_retry", return_value=spy_prices):
+        with patch("src.wheel_tracker.equity_curve._ytd_start", return_value="2026-03-09"):
+            asyncio.get_event_loop().run_until_complete(rebuild_equity_curve(conn))
+
+    curve = read_equity_curve(conn, "2026-01-01")
+    last = curve[-1]
+    assert last["cash"] == 11700.0
+    assert last["equity"] == 20000.0
+
+
 from src.wheel_tracker.curve_stats import compute_curve_stats, compute_twr_curve, compute_spy_curve
 
 

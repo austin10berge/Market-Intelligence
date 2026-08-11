@@ -12,8 +12,16 @@ from .store import write_equity_curve
 
 logger = logging.getLogger(__name__)
 
+# Asset types with real daily price history in yfinance, so they get marked
+# to market. MUTUAL_FUND (e.g. SWVXX, a $1 NAV cash sweep) and OPTION stay at
+# trade cost since neither has usable historical pricing here.
+MARKABLE_ASSET_TYPES = ("EQUITY", "COLLECTIVE_INVESTMENT")
+
 DEPOSIT_EVENTS = [
-    {"date": "2025-12-01", "amount": 20000.0},
+    {"date": "2021-04-20", "amount": 700.0},
+    {"date": "2021-04-27", "amount": 450.0},
+    {"date": "2021-05-04", "amount": 600.0},
+    {"date": "2025-11-13", "amount": 20000.0},
     {"date": "2026-07-17", "amount": 25000.0},
 ]
 
@@ -48,7 +56,10 @@ async def rebuild_equity_curve(conn: sqlite3.Connection) -> int:
     initial_cash = _cumulative_deposits_at(ytd)
 
     cash = initial_cash
-    positions: dict[str, dict] = {}  # symbol -> {"qty": float, "avg_cost": float}
+    # All tradeable assets must remain in the replay ledger.  Cash-equivalent
+    # funds (for example SWVXX) and options still affect cash, so excluding
+    # them from positions makes a purchase look like a withdrawal.
+    positions: dict[str, dict] = {}
 
     # Replay all trades before YTD to establish starting state
     pre_ytd = [t for t in trades if t["executed_at"][:10] < ytd]
@@ -64,7 +75,7 @@ async def rebuild_equity_curve(conn: sqlite3.Connection) -> int:
     held_tickers = set()
     for t in trades:
         sym = t["underlying"] or t["symbol"]
-        if t["asset_type"] == "EQUITY":
+        if t["asset_type"] in MARKABLE_ASSET_TYPES:
             held_tickers.add(sym)
     held_tickers.add("SPY")
 
@@ -102,13 +113,19 @@ async def rebuild_equity_curve(conn: sqlite3.Connection) -> int:
         for sym, pos in positions.items():
             if pos["qty"] == 0:
                 continue
-            try:
-                if isinstance(prices_df.columns, pd.MultiIndex):
-                    close = float(prices_df.loc[dt, (sym, "Close")])
-                else:
-                    close = float(prices_df.loc[dt, "Close"])
-            except (KeyError, TypeError):
-                close = pos["avg_cost"]
+            # Equities and ETFs are marked to market. Historical prices are not
+            # available for cash-equivalent funds or options, so keep those at
+            # their trade cost rather than dropping their value from equity
+            # altogether.
+            close = pos["avg_cost"]
+            if pos["asset_type"] in MARKABLE_ASSET_TYPES:
+                try:
+                    if isinstance(prices_df.columns, pd.MultiIndex):
+                        close = float(prices_df.loc[dt, (sym, "Close")])
+                    else:
+                        close = float(prices_df.loc[dt, "Close"])
+                except (KeyError, TypeError):
+                    pass
             if pd.isna(close):
                 close = pos["avg_cost"]
             stock_value += pos["qty"] * close
@@ -147,21 +164,32 @@ def _apply_trade(
     net = trade["net_amount"] or 0
     cash += net
 
-    if trade["asset_type"] == "EQUITY":
-        sym = trade["symbol"]
-        qty = abs(trade["quantity"] or 0)
-        price = abs(net) / qty if qty > 0 else 0
+    sym = trade["symbol"]
+    qty = abs(trade["quantity"] or 0)
+    if not sym or qty == 0:
+        return cash, positions
 
-        if trade["instruction"] in ("BUY", "BUY_TO_OPEN"):
-            pos = positions.setdefault(sym, {"qty": 0, "avg_cost": 0})
-            total_cost = pos["qty"] * pos["avg_cost"] + qty * price
-            pos["qty"] += qty
-            pos["avg_cost"] = total_cost / pos["qty"] if pos["qty"] > 0 else 0
-        elif trade["instruction"] in ("SELL", "SELL_TO_CLOSE"):
-            pos = positions.get(sym)
-            if pos:
-                pos["qty"] = max(0, pos["qty"] - qty)
-                if pos["qty"] == 0:
-                    pos["avg_cost"] = 0
+    price = abs(net) / qty
+    instruction = trade["instruction"] or ""
+    direction = 1 if instruction in ("BUY", "BUY_TO_OPEN", "BUY_TO_CLOSE") else -1
+    pos = positions.setdefault(sym, {
+        "qty": 0.0,
+        "avg_cost": 0.0,
+        "asset_type": trade["asset_type"],
+    })
+
+    old_qty = pos["qty"]
+    new_qty = old_qty + direction * qty
+    # Weighted cost is meaningful only while adding to a same-side position.
+    # When a trade closes or reverses a position, the remaining shares/contracts
+    # carry the execution price of the opening leg on the new side.
+    if old_qty == 0 or old_qty * direction > 0:
+        total_cost = abs(old_qty) * pos["avg_cost"] + qty * price
+        pos["avg_cost"] = total_cost / abs(new_qty) if new_qty else 0.0
+    elif new_qty == 0:
+        pos["avg_cost"] = 0.0
+    elif old_qty * new_qty < 0:
+        pos["avg_cost"] = price
+    pos["qty"] = new_qty
 
     return cash, positions
