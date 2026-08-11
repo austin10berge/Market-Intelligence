@@ -252,11 +252,287 @@ def _strategy_label(asset_type: str, option_type: str | None, instruction: str) 
     return instruction
 
 
+_OPEN_INSTRUCTIONS = {"SELL_TO_OPEN", "BUY_TO_OPEN"}
+_CLOSE_INSTRUCTIONS = {"BUY_TO_CLOSE", "SELL_TO_CLOSE", "EXPIRED", "ASSIGNED"}
+
+
+def _reconcile_options(trades: list[dict], active_option_symbols: set[str]) -> list[dict]:
+    """Pair option opens with their closes by contract symbol (FIFO).
+
+    After pairing, applies two corrections:
+    1. If expiration < today and still OPEN → mark EXPIRED
+    2. If contract not in active_option_symbols → mark CLOSED (inferred)
+
+    Then detects credit/debit spreads (same underlying, expiration, open_date,
+    option_type, one sell + one buy) and merges them into a single line."""
+    from datetime import date, datetime
+
+    today = date.today().isoformat()
+
+    by_symbol: dict[str, list[dict]] = {}
+    for t in trades:
+        if t["asset_type"] != "OPTION":
+            continue
+        by_symbol.setdefault(t["symbol"], []).append(t)
+
+    reconciled = []
+    for sym, legs in by_symbol.items():
+        pending_opens: list[dict] = []
+        for leg in legs:
+            instr = leg["instruction"]
+            if instr in _OPEN_INSTRUCTIONS:
+                pending_opens.append(leg)
+            elif instr in _CLOSE_INSTRUCTIONS and pending_opens:
+                opener = pending_opens.pop(0)
+                open_dt = opener["executed_at"][:10]
+                close_dt = leg["executed_at"][:10]
+                try:
+                    days = (datetime.fromisoformat(close_dt) - datetime.fromisoformat(open_dt)).days
+                except (ValueError, TypeError):
+                    days = None
+                net = (opener["net_amount"] or 0) + (leg["net_amount"] or 0)
+                strategy = _strategy_label(opener["asset_type"], opener["option_type"], opener["instruction"])
+                reconciled.append({
+                    "type": "option",
+                    "strategy": strategy,
+                    "option_type": opener["option_type"],
+                    "strike": opener["strike"],
+                    "expiration": opener["expiration"],
+                    "open_date": open_dt,
+                    "close_date": close_dt,
+                    "close_reason": instr,
+                    "days_held": days,
+                    "net": round(net, 2),
+                    "status": "CLOSED",
+                    "_open_instr": opener["instruction"],
+                    "_contract": sym,
+                })
+            elif instr in _CLOSE_INSTRUCTIONS:
+                net = leg["net_amount"] or 0
+                strategy = _strategy_label(leg["asset_type"], leg["option_type"], leg["instruction"])
+                reconciled.append({
+                    "type": "option",
+                    "strategy": strategy,
+                    "option_type": leg["option_type"],
+                    "strike": leg["strike"],
+                    "expiration": leg["expiration"],
+                    "open_date": leg["executed_at"][:10],
+                    "close_date": leg["executed_at"][:10],
+                    "close_reason": instr,
+                    "days_held": 0,
+                    "net": round(net, 2),
+                    "status": "CLOSED",
+                    "_open_instr": instr,
+                    "_contract": sym,
+                })
+        for opener in pending_opens:
+            strategy = _strategy_label(opener["asset_type"], opener["option_type"], opener["instruction"])
+            exp = opener["expiration"] or ""
+            if exp and exp < today:
+                open_dt = opener["executed_at"][:10]
+                try:
+                    days = (datetime.fromisoformat(exp) - datetime.fromisoformat(open_dt)).days
+                except (ValueError, TypeError):
+                    days = None
+                reconciled.append({
+                    "type": "option",
+                    "strategy": strategy,
+                    "option_type": opener["option_type"],
+                    "strike": opener["strike"],
+                    "expiration": exp,
+                    "open_date": open_dt,
+                    "close_date": exp,
+                    "close_reason": "EXPIRED",
+                    "days_held": days,
+                    "net": round(opener["net_amount"] or 0, 2),
+                    "status": "CLOSED",
+                    "_open_instr": opener["instruction"],
+                    "_contract": sym,
+                })
+            elif sym not in active_option_symbols:
+                open_dt = opener["executed_at"][:10]
+                reconciled.append({
+                    "type": "option",
+                    "strategy": strategy,
+                    "option_type": opener["option_type"],
+                    "strike": opener["strike"],
+                    "expiration": exp,
+                    "open_date": open_dt,
+                    "close_date": None,
+                    "close_reason": "INFERRED",
+                    "days_held": None,
+                    "net": round(opener["net_amount"] or 0, 2),
+                    "status": "CLOSED",
+                    "_open_instr": opener["instruction"],
+                    "_contract": sym,
+                })
+            else:
+                reconciled.append({
+                    "type": "option",
+                    "strategy": strategy,
+                    "option_type": opener["option_type"],
+                    "strike": opener["strike"],
+                    "expiration": exp,
+                    "open_date": opener["executed_at"][:10],
+                    "close_date": None,
+                    "close_reason": None,
+                    "days_held": None,
+                    "net": round(opener["net_amount"] or 0, 2),
+                    "status": "OPEN",
+                    "_open_instr": opener["instruction"],
+                    "_contract": sym,
+                })
+
+    reconciled.sort(key=lambda r: r["open_date"])
+    reconciled = _merge_spreads(reconciled)
+
+    for r in reconciled:
+        r.pop("_open_instr", None)
+        r.pop("_contract", None)
+    return reconciled
+
+
+def _merge_spreads(reconciled: list[dict]) -> list[dict]:
+    """Detect vertical spreads: two legs with same option_type, expiration, and
+    open_date where one is SELL_TO_OPEN and the other BUY_TO_OPEN.  Merge into
+    a single spread line."""
+    used: set[int] = set()
+    merged: list[dict] = []
+
+    for i, a in enumerate(reconciled):
+        if i in used or a["type"] != "option":
+            continue
+        for j, b in enumerate(reconciled):
+            if j <= i or j in used or b["type"] != "option":
+                continue
+            if (
+                a["option_type"] == b["option_type"]
+                and a["expiration"] == b["expiration"]
+                and a["open_date"] == b["open_date"]
+                and a["close_date"] == b["close_date"]
+                and a.get("_open_instr") in _OPEN_INSTRUCTIONS
+                and b.get("_open_instr") in _OPEN_INSTRUCTIONS
+                and a.get("_open_instr") != b.get("_open_instr")
+            ):
+                sell_leg = a if a["_open_instr"] == "SELL_TO_OPEN" else b
+                buy_leg = b if a["_open_instr"] == "SELL_TO_OPEN" else a
+                net = round(a["net"] + b["net"], 2)
+                is_credit = (sell_leg["net"] + (buy_leg.get("net") or 0)) > 0 if a["status"] != "CLOSED" else net > 0
+                spread_type = "Credit" if sell_leg["strike"] > buy_leg["strike"] and a["option_type"] == "PUT" else "Credit" if sell_leg["strike"] < buy_leg["strike"] and a["option_type"] == "CALL" else "Debit"
+                opt_label = "Put" if a["option_type"] == "PUT" else "Call"
+                strategy = f"{opt_label} {spread_type} Spread"
+                hi_strike = max(sell_leg["strike"], buy_leg["strike"])
+                lo_strike = min(sell_leg["strike"], buy_leg["strike"])
+                days = a["days_held"] if a["days_held"] is not None else b["days_held"]
+                merged.append({
+                    "type": "option",
+                    "strategy": strategy,
+                    "option_type": a["option_type"],
+                    "strike": hi_strike,
+                    "strike_low": lo_strike,
+                    "expiration": a["expiration"],
+                    "open_date": a["open_date"],
+                    "close_date": a["close_date"],
+                    "close_reason": a["close_reason"] or b["close_reason"],
+                    "days_held": days,
+                    "net": net,
+                    "status": a["status"],
+                    "_open_instr": "SPREAD",
+                    "_contract": a.get("_contract", ""),
+                })
+                used.add(i)
+                used.add(j)
+                break
+        if i not in used:
+            merged.append(a)
+    return merged
+
+
+def _reconcile_equity(trades: list[dict], positions: dict[str, dict]) -> list[dict]:
+    """Collapse equity buy/sell trades into holdings with current valuation.
+
+    Returns one row per ticker showing shares_held, cost_basis, current_value,
+    and unrealized_pnl (from live position data) or realized P&L if fully sold."""
+    by_ticker: dict[str, list[dict]] = {}
+    for t in trades:
+        if t["asset_type"] != "EQUITY":
+            continue
+        by_ticker.setdefault(t["symbol"], []).append(t)
+
+    result = []
+    for ticker, legs in by_ticker.items():
+        shares_held = 0.0
+        total_cost = 0.0
+        realized = 0.0
+        first_buy = None
+        for leg in legs:
+            qty = abs(leg["quantity"] or 0)
+            if leg["instruction"] in ("BUY", "BUY_TO_OPEN"):
+                if first_buy is None:
+                    first_buy = leg["executed_at"][:10]
+                shares_held += qty
+                total_cost += abs(leg["net_amount"] or 0)
+            elif leg["instruction"] in ("SELL", "SELL_TO_CLOSE"):
+                if shares_held > 0:
+                    avg_cost = total_cost / shares_held
+                    realized += (leg["net_amount"] or 0) - avg_cost * qty
+                    total_cost -= avg_cost * qty
+                    shares_held -= qty
+
+        pos = positions.get(ticker)
+        if shares_held > 0 and pos:
+            current_price = pos.get("current_price") or 0
+            current_value = round(current_price * shares_held, 2)
+            unrealized = round(current_value - total_cost, 2)
+            avg_cost = round(total_cost / shares_held, 2) if shares_held else 0
+            result.append({
+                "type": "equity",
+                "strategy": "Shares Held",
+                "ticker": ticker,
+                "shares": shares_held,
+                "avg_cost": avg_cost,
+                "current_price": round(current_price, 2),
+                "current_value": current_value,
+                "unrealized_pnl": unrealized,
+                "first_buy": first_buy,
+                "status": "OPEN",
+            })
+        elif shares_held > 0:
+            avg_cost = round(total_cost / shares_held, 2) if shares_held else 0
+            result.append({
+                "type": "equity",
+                "strategy": "Shares Held",
+                "ticker": ticker,
+                "shares": shares_held,
+                "avg_cost": avg_cost,
+                "current_price": None,
+                "current_value": None,
+                "unrealized_pnl": None,
+                "first_buy": first_buy,
+                "status": "OPEN",
+            })
+        else:
+            result.append({
+                "type": "equity",
+                "strategy": "Shares Sold",
+                "ticker": ticker,
+                "shares": 0,
+                "avg_cost": None,
+                "current_price": None,
+                "current_value": None,
+                "unrealized_pnl": None,
+                "realized_pnl": round(realized, 2),
+                "first_buy": first_buy,
+                "status": "CLOSED",
+            })
+    return result
+
+
 def get_ticker_ledger(conn: sqlite3.Connection) -> list[dict]:
-    """One entry per ticker (underlying, or symbol for equity rows), each with
-    every EQUITY/OPTION trade for that ticker tagged with a strategy label, plus
-    rollup totals. Replaces the old cycle-based grouping — no linking step that
-    can drop a trade for not fitting a fixed CSP->assignment->CC sequence."""
+    """Per-ticker summary with reconciled trade legs.
+
+    Options are paired open→close by contract symbol (FIFO).
+    Equity trades are collapsed into current holdings with live valuation."""
     _prev = conn.row_factory
     conn.row_factory = sqlite3.Row
     trade_rows = conn.execute(
@@ -268,38 +544,61 @@ def get_ticker_ledger(conn: sqlite3.Connection) -> list[dict]:
     ).fetchall()
     position_rows = conn.execute(
         """
-        SELECT underlying, symbol FROM wt_positions
-        WHERE asset_type IN ('EQUITY', 'OPTION')
+        SELECT symbol, underlying, asset_type, current_price, average_price,
+               market_value, unrealized_pnl, quantity
+        FROM wt_positions
         """
     ).fetchall()
     conn.row_factory = _prev
 
-    active_underlyings = {(r["underlying"] or r["symbol"]) for r in position_rows}
+    active_underlyings: set[str] = set()
+    active_option_symbols: set[str] = set()
+    equity_positions: dict[str, dict] = {}
+    for r in position_rows:
+        p = dict(r)
+        key = p["underlying"] or p["symbol"]
+        active_underlyings.add(key)
+        if p["asset_type"] == "OPTION":
+            active_option_symbols.add(p["symbol"])
+        elif p["asset_type"] == "EQUITY":
+            equity_positions[p["symbol"]] = p
 
     groups: dict[str, list[dict]] = {}
     for row in trade_rows:
         trade = dict(row)
-        trade["strategy"] = _strategy_label(trade["asset_type"], trade["option_type"], trade["instruction"])
         key = trade["underlying"] or trade["symbol"]
         groups.setdefault(key, []).append(trade)
 
     tickers = []
     for underlying, trades in groups.items():
-        total_premium = sum(
-            t["net_amount"] or 0 for t in trades if t["asset_type"] == "OPTION" and (t["net_amount"] or 0) > 0
-        )
-        realized_pnl = sum(t["net_amount"] or 0 for t in trades)
+        rec_options = _reconcile_options(trades, active_option_symbols)
+        rec_equity = _reconcile_equity(trades, equity_positions)
+        reconciled = rec_options + rec_equity
+
+        option_premium = sum(r["net"] for r in rec_options if r["status"] == "CLOSED")
+        equity_return = 0.0
+        for eq in rec_equity:
+            if eq["status"] == "OPEN" and eq.get("unrealized_pnl") is not None:
+                equity_return += eq["unrealized_pnl"]
+            elif eq["status"] == "CLOSED":
+                equity_return += eq.get("realized_pnl", 0)
+
+        total_return = round(option_premium + equity_return, 2)
+        total_premium = sum(r["net"] for r in rec_options if r["net"] > 0)
+
+        last_date = trades[-1]["executed_at"][:10] if trades else ""
+
         tickers.append({
             "underlying": underlying,
             "status": "ACTIVE" if underlying in active_underlyings else "CLOSED",
             "total_premium": round(total_premium, 2),
-            "realized_pnl": round(realized_pnl, 2),
-            "trades": trades,
+            "total_return": total_return,
+            "trade_count": len(reconciled),
+            "last_trade_date": last_date,
+            "reconciled_trades": reconciled,
         })
 
-    # Stable sort twice: recency first (secondary), then status (primary) —
-    # a stable sort preserves the recency order within each status group.
-    tickers.sort(key=lambda tk: tk["trades"][-1]["executed_at"], reverse=True)
+    tickers.sort(key=lambda tk: tk["last_trade_date"], reverse=True)
     tickers.sort(key=lambda tk: tk["status"] != "ACTIVE")
     return tickers
 

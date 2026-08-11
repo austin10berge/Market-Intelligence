@@ -213,7 +213,10 @@ def _parse_positions(raw: str, account_id: str, refreshed_at: str) -> list[dict]
     Expected shape: {"securitiesAccount": {"positions": [...]}}
     Each position has "instrument" (assetType/symbol/putCall/underlyingSymbol only —
     no strikePrice/optionExpirationDate, unlike transactions; see _parse_occ_symbol),
-    "shortQuantity", "longQuantity", "averagePrice", "marketValue", "currentDayProfitLoss".
+    "shortQuantity", "longQuantity", "averagePrice", "marketValue", and the total
+    open return since cost basis in "longOpenProfitLoss"/"shortOpenProfitLoss"
+    (NOT "currentDayProfitLoss", which is only today's session move and understates
+    or overstates the wheel's actual return for anything held longer than a day).
     """
     data = _parse_schwab_text(raw)
     if data is None:
@@ -259,7 +262,13 @@ def _parse_positions(raw: str, account_id: str, refreshed_at: str) -> list[dict]
                     else None
                 ),
                 "market_value": float(pos.get("marketValue", 0) or 0),
-                "unrealized_pnl": float(pos.get("currentDayProfitLoss", 0) or 0),
+                "unrealized_pnl": (
+                    float(pos.get("longOpenProfitLoss", 0) or 0)
+                    if quantity > 0
+                    else float(pos.get("shortOpenProfitLoss", 0) or 0)
+                    if quantity < 0
+                    else 0.0
+                ),
                 "delta": None,  # populated separately by _fetch_deltas
                 "refreshed_at": refreshed_at,
             }

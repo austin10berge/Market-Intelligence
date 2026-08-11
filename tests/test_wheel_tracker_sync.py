@@ -229,6 +229,51 @@ def test_parse_positions_handles_annotated_positions_key():
     assert positions[0]["symbol"] == "CRM   260828C00220000"
 
 
+# Real shape captured live 2026-08-11: HOOD long shares held well above their
+# average cost intraday-flat, WMT a short put deep in profit intraday-flat too.
+# currentDayProfitLoss is near-zero for both since today barely moved, but the
+# true return since cost basis (longOpenProfitLoss / shortOpenProfitLoss) is large.
+REAL_OPEN_VS_DAY_PNL_POSITIONS = """\
+securitiesAccount:
+  positions[2]:
+    - shortQuantity: 0
+      longQuantity: 110.0
+      averagePrice: 110.9014545455
+      currentDayProfitLoss: 127.6
+      instrument:
+        assetType: EQUITY
+        symbol: HOOD
+      marketValue: 10442.3
+      longOpenProfitLoss: -1756.86
+    - shortQuantity: 1.0
+      longQuantity: 0
+      averagePrice: 1.7434
+      currentDayProfitLoss: 9.68
+      instrument:
+        assetType: OPTION
+        symbol: WMT   260821P00103000
+        putCall: PUT
+        underlyingSymbol: WMT
+      marketValue: -40.0
+      shortOpenProfitLoss: 134.34
+"""
+
+
+def test_parse_positions_uses_total_open_pnl_not_current_day_pnl():
+    """unrealized_pnl must reflect the wheel's actual return since cost basis
+    (longOpenProfitLoss / shortOpenProfitLoss), not currentDayProfitLoss — the
+    latter is only today's session move and is wildly wrong for anything held
+    longer than a day (this was the root cause of the Open Holdings totals bug)."""
+    from src.wheel_tracker.sync import _parse_positions
+
+    positions = _parse_positions(
+        REAL_OPEN_VS_DAY_PNL_POSITIONS, "ACC1", "2026-08-11T00:00:00+00:00"
+    )
+    by_symbol = {p["symbol"]: p for p in positions}
+    assert by_symbol["HOOD"]["unrealized_pnl"] == pytest.approx(-1756.86)
+    assert by_symbol["WMT   260821P00103000"]["unrealized_pnl"] == pytest.approx(134.34)
+
+
 @pytest.mark.asyncio
 async def test_sync_positions_requests_verbose_output(conn):
     """get_account's default (non-verbose) response reduces positions to a compact

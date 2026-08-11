@@ -21,10 +21,24 @@ window.WheelView = (() => {
         return s.slice(0, 10);
     }
 
+    function signedMoney(v) {
+        if (v == null) return '—';
+        const n = parseFloat(v);
+        if (isNaN(n)) return '—';
+        return `${n >= 0 ? '+' : '-'}$${Math.abs(n).toFixed(0)}`;
+    }
+
+    function moneyColor(v) {
+        if (v == null) return 'var(--tv-muted)';
+        return v >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
+    }
+
     function dteColor(dte) {
         if (dte == null) return 'var(--tv-muted)';
         return dte <= 7 ? 'var(--tv-red)' : dte <= 14 ? 'var(--tv-yellow)' : 'var(--tv-muted)';
     }
+
+    // ── Stats cards ──
 
     function renderStats(s) {
         const winPct  = s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—';
@@ -52,9 +66,43 @@ window.WheelView = (() => {
         </div>`;
     }
 
-    function renderPositions(positions) {
+    // ── Open Holdings (equity positions) ──
+
+    function renderHoldings(positions) {
+        const equities = positions.filter(p => p.asset_type === 'EQUITY');
+        if (!equities.length) return `<div class="list-message">No equity holdings</div>`;
+        return equities.map((p, i) => {
+            const qty = Math.abs(p.quantity || 0);
+            const avgCost = p.average_price || 0;
+            const curPrice = p.current_price || 0;
+            const costBasis = qty * avgCost;
+            const curValue = p.market_value || (qty * curPrice);
+            const unrealized = p.unrealized_pnl ?? (curValue - costBasis);
+            const pnlColor = moneyColor(unrealized);
+            return `
+            <div class="option-card${unrealized >= 0 ? ' up' : ' down'}" style="--row-delay:${i*30}ms">
+                <div class="oc-row1">
+                    <div class="oc-sym-wrap">
+                        <span class="oc-symbol">${esc(p.symbol)}</span>
+                        <span class="oc-subname">${qty} shares · avg $${avgCost.toFixed(2)}</span>
+                    </div>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:${pnlColor}">${fmtMoney(curValue)}</span>
+                </div>
+                <div class="oc-row2">
+                    <span class="oc-name">Cost $${costBasis.toFixed(0)}</span>
+                    <span class="oc-metrics" style="color:${pnlColor};font-weight:600">
+                        ${signedMoney(unrealized)}
+                    </span>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // ── Open Trades (option positions) ──
+
+    function renderOpenTrades(positions) {
         const opts = positions.filter(p => p.asset_type === 'OPTION');
-        if (!opts.length) return `<div class="list-message">No open option positions</div>`;
+        if (!opts.length) return `<div class="list-message">No open option trades</div>`;
         return opts.map((p, i) => {
             const isShort  = (p.quantity ?? 0) < 0;
             const dte      = p.dte;
@@ -66,7 +114,7 @@ window.WheelView = (() => {
                 <div class="oc-row1">
                     <div class="oc-sym-wrap">
                         <span class="oc-symbol">${esc(p.underlying || p.symbol)}</span>
-                        <span class="oc-subname">${esc(p.option_type||'')} ${p.strike?'$'+parseFloat(p.strike).toFixed(0):''} · ${fmtDate(p.expiration)}</span>
+                        <span class="oc-subname">${esc(p.option_type||'')} $${p.strike?parseFloat(p.strike).toFixed(0):''} · ${fmtDate(p.expiration)}</span>
                     </div>
                     <span class="oc-highlight">${isShort?'SHORT':'LONG'}</span>
                 </div>
@@ -82,48 +130,112 @@ window.WheelView = (() => {
         }).join('');
     }
 
-    function renderTickers(tickers) {
-        if (!tickers.length) return `<div class="list-message">No wheel activity yet — run the nightly sync to populate</div>`;
+    // ── Symbol Performance (expandable ticker rows) ──
+
+    function renderReconciled(trade) {
+        if (trade.type === 'option') {
+            const dates = trade.close_date
+                ? `${trade.open_date} → ${trade.close_date}` + (trade.days_held != null ? ` (${trade.days_held}d)` : '')
+                : trade.status === 'CLOSED' ? `${trade.open_date} → closed`
+                : `${trade.open_date} → open`;
+            const statusPill = trade.status === 'OPEN'
+                ? `<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(41,98,255,0.12);color:#5B8AF5;font-family:'IBM Plex Mono',monospace;font-weight:600;letter-spacing:0.03em">OPEN</span>`
+                : '';
+            return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--tv-border)">
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
+                    <div style="display:flex;align-items:center;gap:6px">
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
+                        ${statusPill}
+                    </div>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">
+                        ${trade.strike_low ? '$'+parseFloat(trade.strike).toFixed(0)+'/$'+parseFloat(trade.strike_low).toFixed(0) : '$'+parseFloat(trade.strike).toFixed(0)} ${trade.expiration ? trade.expiration.slice(5) : ''} · ${dates}
+                    </span>
+                </div>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:${moneyColor(trade.net)};flex-shrink:0;margin-left:8px">
+                    ${signedMoney(trade.net)}
+                </span>
+            </div>`;
+        }
+        if (trade.type === 'equity') {
+            if (trade.status === 'OPEN' && trade.current_value != null) {
+                return `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--tv-border)">
+                    <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
+                        <div style="display:flex;align-items:center;gap:6px">
+                            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
+                            <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(41,98,255,0.12);color:#5B8AF5;font-family:'IBM Plex Mono',monospace;font-weight:600;letter-spacing:0.03em">OPEN</span>
+                        </div>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">
+                            ${trade.shares} sh · avg $${trade.avg_cost} · now $${trade.current_price}
+                        </span>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0;margin-left:8px">
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:${moneyColor(trade.unrealized_pnl)}">
+                            ${signedMoney(trade.unrealized_pnl)}
+                        </div>
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">
+                            val ${fmtMoney(trade.current_value)}
+                        </div>
+                    </div>
+                </div>`;
+            }
+            const pnl = trade.realized_pnl ?? 0;
+            return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--tv-border)">
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">${trade.ticker || ''}</span>
+                </div>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:${moneyColor(pnl)};flex-shrink:0;margin-left:8px">
+                    ${signedMoney(pnl)}
+                </span>
+            </div>`;
+        }
+        return '';
+    }
+
+    function renderSymbolPerf(tickers) {
+        if (!tickers.length) return `<div class="list-message">No wheel activity yet</div>`;
         return tickers.map((tk, i) => {
             const isActive  = tk.status === 'ACTIVE';
-            const pnl       = tk.realized_pnl;
-            const pnlColor  = pnl != null ? (pnl >= 0 ? 'var(--tv-green)' : 'var(--tv-red)') : 'var(--tv-muted)';
+            const ret       = tk.total_return;
+            const retColor  = moneyColor(ret);
             const statusBg  = isActive ? 'rgba(41,98,255,0.12)' : 'rgba(120,123,134,0.12)';
             const statusClr = isActive ? '#5B8AF5' : 'var(--tv-muted)';
-            const trades    = tk.trades || [];
-            const tradeRows = trades.map(t => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--tv-border)">
-                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--tv-muted)">
-                        ${esc(t.strategy||t.instruction||'')}${t.strike?' $'+parseFloat(t.strike).toFixed(0):''} · ${(t.executed_at||'').slice(0,10)}
-                    </span>
-                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:${(t.net_amount||0)>=0?'var(--tv-green)':'var(--tv-red)'}">
-                        ${t.net_amount!=null?((t.net_amount>=0?'+':'')+fmtMoney(t.net_amount)):'—'}
-                    </span>
-                </div>`).join('');
+            const trades    = tk.reconciled_trades || [];
+            const id        = `whl-perf-${i}`;
+
+            const tradeRows = trades.map(renderReconciled).join('');
+            const openCount = trades.filter(t => t.status === 'OPEN').length;
+            const closedCount = trades.filter(t => t.status === 'CLOSED').length;
+
             return `
-            <div class="overview-card" style="margin:6px 14px;animation:row-in 0.32s ease both;animation-delay:${i*40}ms">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${trades.length?'8px':'0'}">
+            <div class="overview-card" style="margin:6px 14px;animation:row-in 0.32s ease both;animation-delay:${i*40}ms;cursor:pointer;transition:background 0.15s"
+                 onclick="(function(e){var d=document.getElementById('${id}');var c=e.currentTarget.querySelector('.whl-chevron');if(d.style.display==='none'){d.style.display='block';c.style.transform='rotate(90deg)';}else{d.style.display='none';c.style.transform='rotate(0deg)';}})(event)">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0">
                     <div style="display:flex;align-items:center;gap:8px">
+                        <span class="whl-chevron" style="display:inline-block;font-size:10px;color:var(--tv-muted);transition:transform 0.15s;transform:rotate(0deg);line-height:1">▶</span>
                         <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:#fff">${esc(tk.underlying||'')}</span>
                         <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${statusBg};color:${statusClr};font-family:'IBM Plex Mono',monospace;font-weight:600;letter-spacing:0.03em">${esc(tk.status||'')}</span>
                     </div>
                     <div style="text-align:right">
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:${pnlColor}">
-                            ${pnl!=null?((pnl>=0?'+':'')+fmtMoney(pnl)):'—'}
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:${retColor}">
+                            ${signedMoney(ret)}
                         </div>
                         <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">
-                            premium ${fmtMoney(tk.total_premium)}
+                            ${closedCount} closed${openCount ? ' · ' + openCount + ' open' : ''} · prem ${fmtMoney(tk.total_premium)}
                         </div>
                     </div>
                 </div>
-                ${trades.length ? `
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted);letter-spacing:0.05em;text-transform:uppercase;padding:2px 0">
-                    ${trades.length} transaction${trades.length>1?'s':''}
+                <div id="${id}" style="display:none;margin-top:10px;border-top:1px solid var(--tv-border);padding-top:6px" onclick="event.stopPropagation()">
+                    ${tradeRows}
                 </div>
-                <div style="margin-top:4px">${tradeRows}</div>` : ''}
             </div>`;
         }).join('');
     }
+
+    // ── Main render ──
 
     function render(el) {
         el.innerHTML = `
@@ -132,14 +244,21 @@ window.WheelView = (() => {
                 <span class="data-freshness-badge" id="whl-badge"></span>
             </div>
             <div id="whl-stats"><div class="list-message loading">Loading…</div></div>
+
             <div class="section-header" style="padding-top:8px">
-                <span class="section-title">Open Positions</span>
+                <span class="section-title">Open Holdings</span>
             </div>
-            <div id="whl-positions"><div class="list-message loading">Loading…</div></div>
+            <div id="whl-holdings"><div class="list-message loading">Loading…</div></div>
+
             <div class="section-header" style="padding-top:4px">
-                <span class="section-title">Wheel Tickers</span>
+                <span class="section-title">Open Trades</span>
             </div>
-            <div id="whl-tickers" style="padding-bottom:16px"><div class="list-message loading">Loading…</div></div>
+            <div id="whl-trades"><div class="list-message loading">Loading…</div></div>
+
+            <div class="section-header" style="padding-top:4px">
+                <span class="section-title">Symbol Performance</span>
+            </div>
+            <div id="whl-perf" style="padding-bottom:16px"><div class="list-message loading">Loading…</div></div>
         `;
 
         const base = (window.MARKET_INTELLIGENCE_CONFIG?.apiBase) || '';
@@ -149,9 +268,11 @@ window.WheelView = (() => {
             fetch(`${base}/wheel/tickers`).then(r => r.json()),
         ]).then(([stats, posData, tickerData]) => {
             if (!document.getElementById('whl-stats')) return;
-            document.getElementById('whl-stats').innerHTML   = renderStats(stats);
-            document.getElementById('whl-positions').innerHTML = renderPositions(posData.positions || []);
-            document.getElementById('whl-tickers').innerHTML = renderTickers(tickerData.tickers || []);
+            const positions = posData.positions || [];
+            document.getElementById('whl-stats').innerHTML    = renderStats(stats);
+            document.getElementById('whl-holdings').innerHTML  = renderHoldings(positions);
+            document.getElementById('whl-trades').innerHTML    = renderOpenTrades(positions);
+            document.getElementById('whl-perf').innerHTML      = renderSymbolPerf(tickerData.tickers || []);
             const badge = document.getElementById('whl-badge');
             if (badge) { badge.className = 'data-freshness-badge fresh'; badge.textContent = 'Live'; }
         }).catch(err => {

@@ -13,7 +13,8 @@
 # Only rebuild when dependencies (pyproject.toml) change.
 #
 # WORKTREE: update WORKTREE_ROOT below when switching to a different worktree.
-# Currently pointed at: main branch (src/)
+# Currently pointed at: main branch (src/) — the feat/wheel-tracker worktree is stale
+# (main has since merged and gone past it, plus later uncommitted fixes)
 #
 # The base docker-compose.yml is unchanged so production deploys are unaffected.
 
@@ -48,3 +49,8 @@ services:
   market-data-refresh:
     volumes:
       - /home/dev/workspace/Market-Intelligence/src:/app/src
+
+  test:
+    volumes:
+      - /home/dev/workspace/Market-Intelligence/src:/app/src
+      - /home/dev/workspace/Market-Intelligence/tests:/app/tests
