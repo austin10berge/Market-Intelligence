@@ -146,3 +146,62 @@ def test_rebuild_equity_curve_basic(conn):
     assert len(post_buy) > 0
     for r in post_buy:
         assert r["equity"] > r["cash"]  # equity includes stock position value
+
+
+from src.wheel_tracker.curve_stats import compute_curve_stats, compute_twr_curve, compute_spy_curve
+
+
+def _sample_curve():
+    """20 days of steadily rising equity, no deposits after start."""
+    return [
+        {"date": f"2026-01-{d:02d}", "equity": 20000 + d * 50, "cash": 20000 + d * 50,
+         "deposits": 20000.0, "spy_close": 480.0 + d * 0.5}
+        for d in range(2, 22)
+    ]
+
+
+def test_compute_spy_curve():
+    curve = _sample_curve()
+    spy = compute_spy_curve(curve)
+    assert len(spy) == len(curve)
+    assert spy[0]["pct"] == 0.0
+    assert spy[-1]["pct"] > 0  # SPY rose over the period
+
+
+def test_compute_twr_curve_no_deposits():
+    curve = _sample_curve()
+    twr = compute_twr_curve(curve)
+    assert len(twr) == len(curve)
+    assert twr[0]["pct"] == 0.0
+    assert twr[-1]["pct"] > 0
+
+
+def test_compute_twr_curve_with_deposit():
+    curve = [
+        {"date": "2026-01-02", "equity": 20000, "cash": 20000, "deposits": 20000, "spy_close": 480},
+        {"date": "2026-01-03", "equity": 20100, "cash": 20100, "deposits": 20000, "spy_close": 481},
+        # Deposit of 5000 on Jan 6 — deposits jumps from 20000 to 25000
+        {"date": "2026-01-06", "equity": 25200, "cash": 25200, "deposits": 25000, "spy_close": 482},
+        {"date": "2026-01-07", "equity": 25400, "cash": 25400, "deposits": 25000, "spy_close": 483},
+    ]
+    twr = compute_twr_curve(curve)
+    # Without TWR, raw return = (25400 - 20000) / 20000 = 27%
+    # With TWR, the deposit is factored out — return should be much lower
+    assert twr[-1]["pct"] < 20.0
+
+
+def test_compute_stats_basic():
+    curve = _sample_curve()
+    stats = compute_curve_stats(curve)
+    assert stats["net_pnl"] > 0
+    assert stats["net_pnl_pct"] > 0
+    assert stats["max_drawdown_pct"] <= 0
+    assert stats["sharpe_ratio"] is not None
+    assert stats["annualized_yield_pct"] is not None
+    assert stats["avg_weekly_roc_pct"] is not None
+
+
+def test_compute_stats_empty():
+    stats = compute_curve_stats([])
+    assert stats["net_pnl"] == 0
+    assert stats["sharpe_ratio"] is None
