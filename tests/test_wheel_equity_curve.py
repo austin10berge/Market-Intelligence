@@ -205,3 +205,26 @@ def test_compute_stats_empty():
     stats = compute_curve_stats([])
     assert stats["net_pnl"] == 0
     assert stats["sharpe_ratio"] is None
+
+
+def test_api_equity_curve_response_shape(conn):
+    """Verify the API-layer transform produces the expected response shape."""
+    from src.wheel_tracker.store import write_equity_curve, read_equity_curve
+    from src.wheel_tracker.curve_stats import compute_curve_stats, compute_twr_curve, compute_spy_curve
+
+    rows = _sample_curve()
+    write_equity_curve(conn, rows)
+    curve = read_equity_curve(conn, f"{2026}-01-01")
+
+    portfolio = compute_twr_curve(curve)
+    spy = compute_spy_curve(curve)
+    stats = compute_curve_stats(curve)
+
+    assert len(portfolio) == len(rows)
+    assert len(spy) == len(rows)
+    assert portfolio[0]["pct"] == 0.0
+    assert spy[0]["pct"] == 0.0
+    assert "net_pnl" in stats
+    assert "sharpe_ratio" in stats
+    assert "annualized_yield_pct" in stats
+    assert "avg_weekly_roc_pct" in stats

@@ -463,6 +463,14 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
             alerts_sent = await check_alerts(conn)
             logger.info("wheel_tracker: sent %d alert(s)", len(alerts_sent))
 
+            from .equity_curve import rebuild_equity_curve
+
+            try:
+                curve_rows = await rebuild_equity_curve(conn)
+                logger.info("wheel_tracker: equity curve rebuilt (%d rows)", curve_rows)
+            except Exception as exc:
+                logger.warning("wheel_tracker: equity curve rebuild failed (non-fatal): %s", exc)
+
         except Exception as exc:
             logger.error("wheel_tracker sync failed: %s", exc, exc_info=True)
 

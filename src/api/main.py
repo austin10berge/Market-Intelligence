@@ -952,3 +952,34 @@ def wheel_stats(req: Request):
             return wt_get_stats(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/wheel/equity-curve")
+def wheel_equity_curve(req: Request):
+    from src.wheel_tracker.curve_stats import compute_curve_stats, compute_twr_curve, compute_spy_curve
+    from src.wheel_tracker.store import read_equity_curve as wt_read_curve
+    try:
+        with closing(sqlite3.connect(settings.db_path)) as conn:
+            from datetime import date
+            ytd_start = f"{date.today().year}-01-01"
+            curve = wt_read_curve(conn, ytd_start)
+            if not curve:
+                return {"portfolio_curve": [], "spy_curve": [], "stats": None}
+            return {
+                "portfolio_curve": compute_twr_curve(curve),
+                "spy_curve": compute_spy_curve(curve),
+                "stats": compute_curve_stats(curve),
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/wheel/rebuild-curve")
+async def wheel_rebuild_curve(req: Request):
+    from src.wheel_tracker.equity_curve import rebuild_equity_curve
+    try:
+        with closing(sqlite3.connect(settings.db_path)) as conn:
+            count = await rebuild_equity_curve(conn)
+            return {"rows_written": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
