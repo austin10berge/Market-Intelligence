@@ -68,6 +68,13 @@ def ensure_wheel_tables(conn: sqlite3.Connection) -> None:
             content    TEXT    NOT NULL,
             created_at TEXT    NOT NULL DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS wt_equity_curve (
+            date       TEXT PRIMARY KEY,
+            equity     REAL NOT NULL,
+            cash       REAL NOT NULL,
+            deposits   REAL NOT NULL DEFAULT 0,
+            spy_close  REAL
+        );
     """)
     conn.commit()
 
@@ -664,3 +671,26 @@ def get_wheel_stats(conn: sqlite3.Connection) -> dict:
         "active_tickers": active_tickers,
         "max_short_put_delta": max_delta_row[0],
     }
+
+
+def write_equity_curve(conn: sqlite3.Connection, rows: list[dict]) -> None:
+    conn.execute("DELETE FROM wt_equity_curve")
+    conn.executemany(
+        """
+        INSERT INTO wt_equity_curve (date, equity, cash, deposits, spy_close)
+        VALUES (:date, :equity, :cash, :deposits, :spy_close)
+        """,
+        rows,
+    )
+    conn.commit()
+
+
+def read_equity_curve(conn: sqlite3.Connection, since: str) -> list[dict]:
+    _prev = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT date, equity, cash, deposits, spy_close FROM wt_equity_curve WHERE date >= ? ORDER BY date",
+        (since,),
+    ).fetchall()
+    conn.row_factory = _prev
+    return [dict(r) for r in rows]
