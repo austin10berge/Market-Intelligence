@@ -14,8 +14,7 @@ logger = logging.getLogger(__name__)
 
 DEPOSIT_EVENTS = [
     {"date": "2025-12-01", "amount": 20000.0},
-    # Exact date TBD — will be confirmed from Schwab transaction history
-    {"date": "2026-07-01", "amount": 25000.0},
+    {"date": "2026-07-17", "amount": 25000.0},
 ]
 
 

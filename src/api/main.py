@@ -957,9 +957,10 @@ def wheel_stats(req: Request):
 @app.get("/api/wheel/equity-curve")
 def wheel_equity_curve(req: Request):
     from src.wheel_tracker.curve_stats import compute_curve_stats, compute_twr_curve, compute_spy_curve
-    from src.wheel_tracker.store import read_equity_curve as wt_read_curve
+    from src.wheel_tracker.store import ensure_wheel_tables, read_equity_curve as wt_read_curve
     try:
         with closing(sqlite3.connect(settings.db_path)) as conn:
+            ensure_wheel_tables(conn)
             from datetime import date
             ytd_start = f"{date.today().year}-01-01"
             curve = wt_read_curve(conn, ytd_start)
@@ -977,8 +978,10 @@ def wheel_equity_curve(req: Request):
 @app.post("/api/wheel/rebuild-curve")
 async def wheel_rebuild_curve(req: Request):
     from src.wheel_tracker.equity_curve import rebuild_equity_curve
+    from src.wheel_tracker.store import ensure_wheel_tables
     try:
         with closing(sqlite3.connect(settings.db_path)) as conn:
+            ensure_wheel_tables(conn)
             count = await rebuild_equity_curve(conn)
             return {"rows_written": count}
     except Exception as e:
