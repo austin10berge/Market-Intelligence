@@ -75,6 +75,7 @@ async def rebuild_equity_curve(conn: sqlite3.Connection) -> int:
         start=ytd,
         progress=False,
         auto_adjust=True,
+        group_by="ticker",
     )
 
     if prices_df is None or prices_df.empty:

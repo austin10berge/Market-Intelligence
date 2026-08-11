@@ -103,8 +103,11 @@ def _make_aapl_df():
 def test_rebuild_equity_curve_basic(conn):
     _insert_test_trades(conn)
 
+    captured_kwargs = {}
+
     async def mock_download(*args, **kwargs):
         import pandas as pd
+        captured_kwargs.update(kwargs)
         tickers_arg = args[0] if args else kwargs.get("tickers", "")
         if "SPY" in tickers_arg and "AAPL" in tickers_arg:
             spy_df = _make_spy_df()
@@ -120,6 +123,19 @@ def test_rebuild_equity_curve_basic(conn):
             count = asyncio.get_event_loop().run_until_complete(rebuild_equity_curve(conn))
 
     assert count > 0
+
+    # Regression check: rebuild_equity_curve must request group_by="ticker" so
+    # that a real (non-mocked) yf.download() call returns (Ticker, Field)
+    # column ordering — the same ordering src/fetchers/sector_etf.py relies on
+    # group_by="ticker" for. Without this, real yfinance responses default to
+    # (Field, Ticker) ordering (see src/market_data/refresh.py:162-163) and the
+    # .loc[dt, (sym, "Close")] lookups below would silently miss, falling back
+    # to cost-basis/None forever.
+    assert captured_kwargs.get("group_by") == "ticker"
+
+    # The mock's own DataFrame (built via pd.concat({"SPY": ..., "AAPL": ...}))
+    # puts Ticker as column level 0 — confirm that matches what group_by="ticker"
+    # actually produces, so this test isn't just agreeing with itself.
     from src.wheel_tracker.store import read_equity_curve
     curve = read_equity_curve(conn, "2026-01-01")
     assert len(curve) == count
