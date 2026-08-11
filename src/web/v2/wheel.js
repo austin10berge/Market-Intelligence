@@ -148,15 +148,19 @@ window.WheelView = (() => {
         const winPct  = s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—';
         const maxDelta = s.max_short_put_delta != null ? parseFloat(s.max_short_put_delta).toFixed(2) : '—';
         const deltaAlert = s.max_short_put_delta != null && parseFloat(s.max_short_put_delta) >= 0.30;
+        const premColor = (s.premium_ytd || 0) >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
+        const retColor = (s.returns_ytd || 0) >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
         return `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 14px 4px">
             <div class="overview-card">
-                <div class="overview-card-title">Premium MTD</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:var(--tv-green)">${fmtMoney(s.premium_mtd)}</div>
+                <div class="overview-card-title">Net Premium YTD</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:${premColor}">${fmtMoney(s.premium_ytd)}</div>
+                <div style="font-size:12px;color:var(--tv-muted);margin-top:2px">MTD ${fmtMoney(s.premium_mtd)}</div>
             </div>
             <div class="overview-card">
-                <div class="overview-card-title">Premium YTD</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:var(--tv-green)">${fmtMoney(s.premium_ytd)}</div>
+                <div class="overview-card-title">Net Returns YTD</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:${retColor}">${fmtMoney(s.returns_ytd)}</div>
+                <div style="font-size:12px;color:var(--tv-muted);margin-top:2px">Options + shares + LEAPS</div>
             </div>
             <div class="overview-card">
                 <div class="overview-card-title">Win Rate</div>

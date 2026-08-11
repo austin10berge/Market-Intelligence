@@ -617,17 +617,26 @@ def get_wheel_stats(conn: sqlite3.Connection) -> dict:
     mtd_start = today[:7] + "-01"
     ytd_start = today[:4] + "-01-01"
 
-    def _premium(start: str) -> float:
+    def _net_premium(start: str) -> float:
         row = conn.execute(
             """
             SELECT COALESCE(SUM(net_amount), 0)
             FROM wt_trades
-            WHERE asset_type = 'OPTION' AND net_amount > 0
+            WHERE asset_type = 'OPTION'
+              AND instruction IN ('SELL_TO_OPEN', 'BUY_TO_CLOSE')
               AND executed_at >= ?
             """,
             (start,),
         ).fetchone()
         return row[0]
+
+    def _net_returns() -> float | None:
+        row = conn.execute(
+            "SELECT equity, deposits FROM wt_equity_curve ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return row[0] - row[1]
 
     _OPEN_INSTR = ("SELL_TO_OPEN", "BUY_TO_OPEN")
     _CLOSE_INSTR = ("BUY_TO_CLOSE", "SELL_TO_CLOSE", "EXPIRED", "ASSIGNED")
@@ -664,8 +673,9 @@ def get_wheel_stats(conn: sqlite3.Connection) -> dict:
     ).fetchone()
 
     return {
-        "premium_mtd": round(_premium(mtd_start), 2),
-        "premium_ytd": round(_premium(ytd_start), 2),
+        "premium_mtd": round(_net_premium(mtd_start), 2),
+        "premium_ytd": round(_net_premium(ytd_start), 2),
+        "returns_ytd": round(nr, 2) if (nr := _net_returns()) is not None else 0,
         "win_rate": round(len(won_legs) / len(closed_legs), 3) if closed_legs else None,
         "total_tickers": total_tickers,
         "active_tickers": active_tickers,
