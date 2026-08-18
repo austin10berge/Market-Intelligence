@@ -177,8 +177,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      schwab-mcp:
-        condition: service_healthy
     restart: "no"
     profiles:
       - pipeline
