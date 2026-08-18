@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from ..config import settings
 from .store import (
@@ -430,7 +430,7 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
         today = date.today().isoformat()
 
         try:
-            async with streamablehttp_client(url) as (read, write, _):
+            async with streamable_http_client(url) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
 

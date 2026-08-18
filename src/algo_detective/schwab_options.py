@@ -15,7 +15,7 @@ import re
 from datetime import date, timedelta
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from .options_chain import _next_fridays
 from .store import upsert_options_rows
@@ -73,7 +73,7 @@ _SCHWAB_MCP_URL = "http://schwab-mcp:8002/mcp"
 
 
 async def _fetch_chain_via_mcp_async(ticker: str, from_date_str: str, to_date_str: str) -> str:
-    async with streamablehttp_client(_SCHWAB_MCP_URL) as (read, write, _):
+    async with streamable_http_client(_SCHWAB_MCP_URL) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(
