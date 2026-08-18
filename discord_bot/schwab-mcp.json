@@ -2,7 +2,7 @@
   "mcpServers": {
     "schwab": {
       "type": "http",
-      "url": "http://schwab-mcp:8002/mcp",
+      "url": "http://10.0.1.51:8002/mcp",
       "timeout": 30000
     }
   }

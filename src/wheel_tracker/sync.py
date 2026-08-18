@@ -23,12 +23,10 @@ from .store import (
 
 logger = logging.getLogger(__name__)
 
-_SCHWAB_CONFIG = Path(__file__).parent.parent.parent / "discord_bot" / "schwab-mcp.json"
-
-
 def _schwab_url() -> str:
-    config = json.loads(_SCHWAB_CONFIG.read_text())
-    return config["mcpServers"]["schwab"]["url"]
+    from ..config import settings
+
+    return settings.schwab_mcp_url
 
 
 def _parse_schwab_text(raw: str):

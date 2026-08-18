@@ -109,8 +109,8 @@ services:
       # "Read-only file system: token.yaml".
       - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp
     command: mcp-proxy --port 8002 --host 0.0.0.0 -- schwab-mcp server --no-technical-tools
-    expose:
-      - "8002"  # Internal only — discord-bot reaches it via the Docker network
+    ports:
+      - "8002:8002"  # LAN-exposed — shared with prod so both envs use one token
     restart: unless-stopped
     healthcheck:
       # No -f: the MCP endpoint 406s a bare GET (wrong Accept header) even when

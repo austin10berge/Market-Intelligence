@@ -69,11 +69,10 @@ def _select_target_delta_contract(contracts: list[dict], target_delta: float = 0
     return min(contracts, key=lambda c: abs(abs(c["delta"]) - target_delta))
 
 
-_SCHWAB_MCP_URL = "http://schwab-mcp:8002/mcp"
-
-
 async def _fetch_chain_via_mcp_async(ticker: str, from_date_str: str, to_date_str: str) -> str:
-    async with streamable_http_client(_SCHWAB_MCP_URL) as (read, write):
+    from ..config import settings
+
+    async with streamable_http_client(settings.schwab_mcp_url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(

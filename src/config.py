@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     discord_digest_webhook_url: str = Field(default="", description="Discord webhook URL for nightly digest delivery")
     discord_youtube_webhook_url: str = Field(default="", description="Discord webhook URL for youtube-summarizer service")
 
+    # ── Schwab MCP ───────────────────────────────────────
+    # Centralised on dev (10.0.1.20:8002) so a single reauth serves all envs.
+    schwab_mcp_url: str = Field(
+        default="http://10.0.1.51:8002/mcp",
+        description="URL of the schwab-mcp MCP server (shared dev instance)",
+    )
+
     # ── Logging ──────────────────────────────────────────
     log_level: str = Field(default="INFO", description="Logging level")
 
