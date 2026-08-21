@@ -84,7 +84,7 @@ async def _fetch_chain_via_mcp_async(ticker: str, from_date_str: str, to_date_st
                     "to_date": to_date_str,
                 },
             )
-            if result.is_error:
+            if result.isError:
                 raise RuntimeError(
                     f"schwab-mcp get_option_chain error for {ticker}: {result.content}"
                 )

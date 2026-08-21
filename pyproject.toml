@@ -27,7 +27,7 @@ dependencies = [
     "schwab-mcp @ git+https://github.com/jkoelker/schwab-mcp.git",
     "schwab-py @ git+https://github.com/jkoelker/schwab-py.git@proxy_support",
     "mcp-proxy>=0.12,<1",
-    "mcp>=2.0.0,<3",
+    "mcp>=1.0.0,<2",
 ]
 
 [project.optional-dependencies]
