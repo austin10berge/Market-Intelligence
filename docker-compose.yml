@@ -87,9 +87,12 @@ services:
 
   # ── Schwab MCP bridge (persistent HTTP; backs the trade chat bot's access to
   # real account data — positions, orders, transactions, balances).
-  # schwab-mcp 0.1.0 (mcp 2.x) supports native streamable-HTTP via --http,
-  # so mcp-proxy is no longer needed. ──
+  # Dev only — prod's discord-bot calls dev's schwab-mcp at 10.0.1.51:8002
+  # directly, so prod never needs a local instance. Activate with:
+  #   docker compose --profile schwab up -d
   schwab-mcp:
+    profiles:
+      - schwab
     build:
       context: .
       target: base

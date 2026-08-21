@@ -21,7 +21,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ~/.local/bin/ruff format src/ tests/
 
 # Docker — run all always-on services (api, dashboard, discord-bot, redis)
-docker compose up --build
+# Include --profile schwab on DEV to also start the local schwab-mcp bridge
+# (prod omits this — discord-bot always calls dev's schwab-mcp at 10.0.1.51:8002)
+docker compose --profile schwab up --build   # dev
+docker compose up --build                    # prod
 
 # Tests via Docker
 docker compose run --rm test python3 -m pytest tests/ --ignore=tests/test_stock_screener.py
