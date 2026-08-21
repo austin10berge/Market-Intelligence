@@ -145,6 +145,7 @@ def run_single_video(
     summarizer = Summarizer(
         timeout_seconds=int(pipeline_cfg["claude_timeout_seconds"]),
         inter_call_sleep_seconds=0,
+        model=pipeline_cfg.get("model", "haiku"),
     )
     summarizer.verify_cli_available()
     summary = summarizer.summarize(video, transcript)
@@ -210,6 +211,7 @@ def run(
         summarizer = Summarizer(
             timeout_seconds=int(pipeline_cfg["claude_timeout_seconds"]),
             inter_call_sleep_seconds=float(pipeline_cfg.get("inter_call_sleep_seconds", 3)),
+            model=pipeline_cfg.get("model", "haiku"),
         )
         cli_verified = dry_run  # skip check in dry-run mode
 

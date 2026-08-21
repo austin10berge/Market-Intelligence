@@ -195,6 +195,29 @@ class TestApplyFundamentalFilterUsesStore:
         assert "HIPRCE" not in passing
         assert "BADBETA" not in passing
 
+    def test_watchlist_only_skips_universe_and_fundamentals_gates(self):
+        """With watchlist_only=True, none of the universe (cap/price/beta) or
+        fundamentals (FCF/D-E/etc.) gates should exclude the user's own curated
+        watchlist tickers -- a $600 ETF, a beta-0.1 utility, or a negative-FCF
+        growth stock the user chose deliberately should still reach the
+        vol/technical gates rather than being screened out here.
+        """
+        ensure_tables()
+        bulk_upsert_fundamentals([
+            {"symbol": "LOWCAP", "market_cap_b": 1.0, "price": 100.0, "beta": 1.2, "iv_pct": 35.0},
+            {"symbol": "HIPRCE", "market_cap_b": 50.0, "price": 200.0, "beta": 1.2, "iv_pct": 35.0},
+            {"symbol": "BADBETA", "market_cap_b": 50.0, "price": 100.0, "beta": 0.1, "iv_pct": 35.0},
+            {"symbol": "NEGFCF", "market_cap_b": 50.0, "price": 100.0, "beta": 1.2,
+             "iv_pct": 35.0, "fcf": -5.0},
+        ])
+
+        params = ScannerParams(watchlist_only=True)
+        passing, _ = apply_fundamental_filter(
+            ["LOWCAP", "HIPRCE", "BADBETA", "NEGFCF"], params
+        )
+
+        assert set(passing) == {"LOWCAP", "HIPRCE", "BADBETA", "NEGFCF"}
+
     def test_value_screen_preset_gates_end_to_end(self):
         """End-to-end: seed the real store with the Reddit Value Screen preset's
         fields and confirm apply_fundamental_filter (the real store-reading code
@@ -391,3 +414,73 @@ def test_scanner_params_cache_key_differs_by_universe_flag():
     p1 = ScannerParams(restrict_to_watchlist_universe=False)
     p2 = ScannerParams(restrict_to_watchlist_universe=True)
     assert p1.cache_key_suffix() != p2.cache_key_suffix()
+
+
+# ── Test: watchlist_only parameter ────────────────────────────────────────────
+
+class TestWatchlistOnlyParam:
+    """run_csp_scan(watchlist_only=True) must scan only the user's CSP watchlist,
+    never the broad S&P 500 / NASDAQ 100 / large-cap universe.
+    """
+
+    def setup_method(self):
+        _seed_fundamentals()
+        _seed_ohlcv()
+
+    def test_watchlist_only_bypasses_fetch_universe(self):
+        """fetch_universe() must never be called when watchlist_only=True."""
+        params = ScannerParams(min_adx=0.0, max_adx=100.0, watchlist_only=True)
+        watchlist_subset = _TEST_TICKERS[:5]
+
+        with (
+            patch("src.screener.csp_scanner.get_watchlist", return_value=watchlist_subset),
+            patch("src.screener.csp_scanner.fetch_universe") as mock_fetch_universe,
+            patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
+        ):
+            result = run_csp_scan(params)
+
+        mock_fetch_universe.assert_not_called()
+        assert result["filter_summary"]["combined_unique"] == 5
+
+    def test_watchlist_only_empty_watchlist_returns_warning(self):
+        """An empty watchlist with watchlist_only=True returns zero candidates
+        and a warning, instead of silently falling back to the broad universe.
+        """
+        params = ScannerParams(min_adx=0.0, max_adx=100.0, watchlist_only=True)
+
+        with (
+            patch("src.screener.csp_scanner.get_watchlist", return_value=[]),
+            patch("src.screener.csp_scanner.fetch_universe") as mock_fetch_universe,
+        ):
+            result = run_csp_scan(params)
+
+        mock_fetch_universe.assert_not_called()
+        assert result["candidates"] == []
+        assert any("watchlist" in w.lower() for w in result["warnings"])
+
+    def test_watchlist_only_false_uses_broad_universe(self):
+        """Default behavior (watchlist_only=False) is unaffected — fetch_universe
+        is still called and its result still drives the scan universe.
+        """
+        params = ScannerParams(min_adx=0.0, max_adx=100.0, watchlist_only=False)
+
+        with (
+            patch("src.screener.csp_scanner.get_watchlist", return_value=[]),
+            patch(
+                "src.screener.csp_scanner.fetch_universe", return_value=_TEST_TICKERS
+            ) as mock_fetch_universe,
+            patch("src.screener.csp_scanner.screen_csp_candidates", return_value=[]),
+        ):
+            result = run_csp_scan(params)
+
+        mock_fetch_universe.assert_called_once()
+        assert result["filter_summary"]["combined_unique"] == len(_TEST_TICKERS)
+
+    def test_scanner_params_cache_key_differs_by_watchlist_only_flag(self):
+        p1 = ScannerParams(watchlist_only=False)
+        p2 = ScannerParams(watchlist_only=True)
+        assert p1.cache_key_suffix() != p2.cache_key_suffix()
+
+    def test_from_query_threads_watchlist_only(self):
+        assert ScannerParams.from_query(watchlist_only=True).watchlist_only is True
+        assert ScannerParams.from_query().watchlist_only is False

@@ -109,7 +109,7 @@ const COL_GROUPS = [
     {
         label: 'Price',
         cols: [
-            { h: 'Price', key: 'price',  fmt: c => c.price > 0 ? `$${c.price.toFixed(2)}` : '—', pill: false, cls: c => `primary ${pctCls(c.pct_1d)}` },
+            { h: 'Price', key: 'price',  fmt: c => c.price > 0 ? `${c.price.toFixed(2)}` : '—', pill: false, cls: () => 'primary' },
             { h: '1D %',  key: 'pct_1d', fmt: c => fmtPct(c.pct_1d),                              pill: true,  cls: c => pctCls(c.pct_1d) },
             { h: 'TA',    render: c => `<div class="tr-ta-col">${buildTaAnnotations(c)}</div>` },
         ],
@@ -191,7 +191,7 @@ function buildSparklineSVG(prices, isUp) {
         pts.slice(1).map(p => `L${p.x},${p.y}`).join(' ') +
         ` L${last.x},${H - pad} L${first.x},${H - pad} Z`;
 
-    const color = isUp ? '#089981' : '#F23645';
+    const color = isUp ? '#26A69A' : '#EF5350';
 
     return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
         <defs>
@@ -222,6 +222,8 @@ function renderTabs() {
 
 function renderColHeaders() {
     const group = COL_GROUPS[activeColGroup];
+    const container = document.getElementById('watchlist-content');
+    if (container) container.dataset.group = group.label;
     const hdr = document.getElementById('col-header-row');
     hdr.innerHTML = `
         <div></div><div></div>
@@ -319,7 +321,7 @@ function renderStockCandidates(candidates) {
             return `<div class="tr-col ${cls}">${val}</div>`;
         }).join('');
 
-        return `<div class="ticker-row ${rowDir}" style="--row-delay:${i * 25}ms" onclick="openTradingView('${sym}')">
+        return `<div class="ticker-row" onclick="openTradingView('${sym}')">
             <div class="tr-left">
                 <span class="tr-symbol">${sym}</span>
                 <span class="tr-name">${escHtml(c.name)}</span>
@@ -455,7 +457,7 @@ function renderCspPage() {
         const roc = parseFloat(c.roc_percent) || 0;
         const yld = c.annualized_roc ? `${parseFloat(c.annualized_roc).toFixed(1)}%y` : '—';
         const tierCls = roc >= 3 ? 'up' : roc >= 1.5 ? 'tier-mid' : '';
-        return `<div class="option-card ${tierCls}" style="--row-delay:${i * 20}ms" onclick="openTradingView('${escHtml(c.symbol)}')">
+        return `<div class="option-card ${tierCls}" onclick="openTradingView('${escHtml(c.symbol)}')">
             <div class="oc-row1">
                 <span class="oc-symbol">${escHtml(c.symbol)}</span>
                 <span class="oc-meta"><span style="color:#fff">$${c.strike.toFixed(2)}</span> · ${c.dte ?? '—'}d · Δ${c.delta != null ? c.delta.toFixed(2) : '—'}</span>
@@ -540,7 +542,7 @@ function renderLeapsPage() {
     listEl.innerHTML = slice.map((c, i) => {
         const mkup = parseFloat(c.premium_markup_percent) || 0;
         const tierCls = mkup <= 5 ? 'up' : mkup <= 15 ? 'tier-mid' : '';
-        return `<div class="option-card ${tierCls}" style="--row-delay:${i * 20}ms" onclick="openTradingView('${escHtml(c.symbol)}')">
+        return `<div class="option-card ${tierCls}" onclick="openTradingView('${escHtml(c.symbol)}')">
             <div class="oc-row1">
                 <span class="oc-symbol">${escHtml(c.symbol)}</span>
                 <span class="oc-meta"><span style="color:#fff">$${c.strike.toFixed(2)}</span> · ${c.expiration}</span>
@@ -1013,7 +1015,6 @@ async function saveCspSettingsEdit() {
 function renderOverviewView() {
     sectorView = 'etfs';
     document.getElementById('main-content').innerHTML = `
-        <div class="section-header"><span class="section-title">Market Overview</span></div>
         <div class="overview-section">
             <div class="overview-card" id="posture-detail-card">
                 <div class="overview-card-title">Market Posture</div>
@@ -1080,9 +1081,7 @@ function renderOverviewPostureSection(data) {
     }
     if (llmEl && data.llm_summary) {
         let html = escHtml(data.llm_summary);
-        ['POSTURE', 'THETA PLAY', 'WATCHLIST'].forEach(label => {
-            html = html.replace(new RegExp(`(${label}:)`, 'g'), '<strong>$1</strong>');
-        });
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         llmEl.innerHTML = html.replace(/\n/g, '<br>');
     }
 }

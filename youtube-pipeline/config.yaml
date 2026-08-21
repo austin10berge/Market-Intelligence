@@ -22,9 +22,11 @@ pipeline:
   # Skip Shorts and other micro-content below this duration.
   min_duration_seconds: 120
 
-  # Hard cap on transcript size sent to Claude. 400k chars ≈ 100k tokens —
-  # well under the 200k context window, with room for prompt + response.
-  max_transcript_chars: 400000
+  # Hard cap on transcript size sent to Claude.
+  max_transcript_chars: 150000
+
+  # Model passed to `claude -p --model`.
+  model: haiku
 
   # Per-video timeout for the `claude -p` subprocess.
   claude_timeout_seconds: 180

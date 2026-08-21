@@ -58,10 +58,12 @@ class Summarizer:
         timeout_seconds: int,
         inter_call_sleep_seconds: float,
         claude_bin: str = "claude",
+        model: str = "haiku",
     ):
         self.timeout_seconds = timeout_seconds
         self.inter_call_sleep_seconds = inter_call_sleep_seconds
         self.claude_bin = claude_bin
+        self.model = model
 
     def verify_cli_available(self) -> None:
         """Run `claude --version` to fail fast if the CLI is missing."""
@@ -133,11 +135,14 @@ class Summarizer:
             time.sleep(self.inter_call_sleep_seconds)
 
     def _invoke_claude(self, prompt: str, video_id: str) -> str | None:
-        cmd = [self.claude_bin, "-p", "--output-format", "json", prompt]
+        # Prompt goes over stdin, not argv: Linux caps a single argv element at
+        # MAX_ARG_STRLEN (128KB), well below max_transcript_chars.
+        cmd = [self.claude_bin, "-p", "--model", self.model, "--output-format", "json"]
         for attempt in (1, 2):
             try:
                 result = subprocess.run(
                     cmd,
+                    input=prompt,
                     capture_output=True,
                     text=True,
                     timeout=self.timeout_seconds,

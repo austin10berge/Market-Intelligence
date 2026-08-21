@@ -186,6 +186,9 @@ class ScannerParams:
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
     restrict_to_watchlist_universe: bool = False
+    # When True, scan only the user's CSP watchlist — skip the broad
+    # S&P 500 / NASDAQ 100 / large-cap universe entirely.
+    watchlist_only: bool = False
     # Sector filter — empty list means no filter (all sectors pass)
     sectors: list[str] = field(default_factory=list)
 
@@ -226,6 +229,7 @@ class ScannerParams:
         adr20_pct_max: float | None = None,
         price_vs_ema200_pct_min: float | None = None,
         restrict_to_watchlist_universe: bool = False,
+        watchlist_only: bool = False,
         sectors: str | None = None,
     ) -> ScannerParams:
         """Build ScannerParams from API query parameters (all optional)."""
@@ -266,6 +270,7 @@ class ScannerParams:
             adr20_pct_max        = adr20_pct_max,
             price_vs_ema200_pct_min = price_vs_ema200_pct_min,
             restrict_to_watchlist_universe = restrict_to_watchlist_universe,
+            watchlist_only   = watchlist_only,
             sectors          = sorted(parsed_sectors),
         )
 
@@ -502,93 +507,97 @@ def _fundamental_filter_from_store(
         if row is None:
             continue
 
-        # Universe membership gate
-        if params.restrict_to_watchlist_universe:
-            universes = row.get("universes") or ""
-            if "sp500" not in universes and "nasdaq100" not in universes:
-                continue
-
         market_cap_b = row.get("market_cap_b") or 0.0
         price = row.get("price") or 0.0
         beta = row.get("beta")
         iv_pct = row.get("iv_pct")
 
-        if market_cap_b <= params.min_market_cap_b:
-            continue
-        if price <= 0 or price >= params.max_price:
-            continue
-        if beta is None or not (params.min_beta <= beta <= params.max_beta):
-            continue
+        # The user's own CSP watchlist is a deliberate, curated ticker list —
+        # skip every universe/fundamentals screening gate below and let the
+        # tickers through as-is to the vol/technical stages.
+        if not params.watchlist_only:
+            # Universe membership gate
+            if params.restrict_to_watchlist_universe:
+                universes = row.get("universes") or ""
+                if "sp500" not in universes and "nasdaq100" not in universes:
+                    continue
 
-        # FCF gate (stored in billions)
-        fcf = row.get("fcf")
-        if params.min_fcf_b is not None and fcf is not None:
-            if fcf < params.min_fcf_b:
+            if market_cap_b <= params.min_market_cap_b:
                 continue
-
-        # Debt-to-equity gate
-        debt_to_equity = row.get("debt_to_equity")
-        if params.max_debt_to_equity is not None and debt_to_equity is not None:
-            if debt_to_equity > params.max_debt_to_equity:
+            if price <= 0 or price >= params.max_price:
+                continue
+            if beta is None or not (params.min_beta <= beta <= params.max_beta):
                 continue
 
-        # Revenue growth gate
-        revenue_growth = row.get("revenue_growth")
-        if params.min_revenue_growth is not None and revenue_growth is not None:
-            if revenue_growth < params.min_revenue_growth:
-                continue
+            # FCF gate (stored in billions)
+            fcf = row.get("fcf")
+            if params.min_fcf_b is not None and fcf is not None:
+                if fcf < params.min_fcf_b:
+                    continue
 
-        # Earnings growth gate
-        earnings_growth = row.get("earnings_growth")
-        if params.min_earnings_growth is not None and earnings_growth is not None:
-            if earnings_growth < params.min_earnings_growth:
-                continue
+            # Debt-to-equity gate
+            debt_to_equity = row.get("debt_to_equity")
+            if params.max_debt_to_equity is not None and debt_to_equity is not None:
+                if debt_to_equity > params.max_debt_to_equity:
+                    continue
 
-        # Dividend yield gates (min and max)
-        dividend_yield = row.get("dividend_yield")
-        if params.min_dividend_yield is not None and dividend_yield is not None:
-            if dividend_yield < params.min_dividend_yield:
-                continue
-        if params.max_dividend_yield is not None and dividend_yield is not None:
-            if dividend_yield > params.max_dividend_yield:
-                continue
+            # Revenue growth gate
+            revenue_growth = row.get("revenue_growth")
+            if params.min_revenue_growth is not None and revenue_growth is not None:
+                if revenue_growth < params.min_revenue_growth:
+                    continue
 
-        # Forward PE gate
-        forward_pe = row.get("forward_pe")
-        if params.max_forward_pe is not None and forward_pe is not None:
-            if forward_pe > params.max_forward_pe:
-                continue
+            # Earnings growth gate
+            earnings_growth = row.get("earnings_growth")
+            if params.min_earnings_growth is not None and earnings_growth is not None:
+                if earnings_growth < params.min_earnings_growth:
+                    continue
 
-        # PEG ratio gate
-        peg_ratio = row.get("peg_ratio")
-        if params.max_peg_ratio is not None and peg_ratio is not None:
-            if peg_ratio > params.max_peg_ratio:
-                continue
+            # Dividend yield gates (min and max)
+            dividend_yield = row.get("dividend_yield")
+            if params.min_dividend_yield is not None and dividend_yield is not None:
+                if dividend_yield < params.min_dividend_yield:
+                    continue
+            if params.max_dividend_yield is not None and dividend_yield is not None:
+                if dividend_yield > params.max_dividend_yield:
+                    continue
 
-        # Gross margin gate
-        gross_margin = row.get("gross_margin")
-        if params.min_gross_margin is not None and gross_margin is not None:
-            if gross_margin < params.min_gross_margin:
-                continue
+            # Forward PE gate
+            forward_pe = row.get("forward_pe")
+            if params.max_forward_pe is not None and forward_pe is not None:
+                if forward_pe > params.max_forward_pe:
+                    continue
 
-        # Interest coverage gate
-        interest_coverage = row.get("interest_coverage")
-        if params.min_interest_coverage is not None and interest_coverage is not None:
-            if interest_coverage < params.min_interest_coverage:
-                continue
+            # PEG ratio gate
+            peg_ratio = row.get("peg_ratio")
+            if params.max_peg_ratio is not None and peg_ratio is not None:
+                if peg_ratio > params.max_peg_ratio:
+                    continue
 
-        # Sector filter
-        if params.sectors:
-            row_sector = row.get("sector") or ""
-            if row_sector not in params.sectors:
-                continue
+            # Gross margin gate
+            gross_margin = row.get("gross_margin")
+            if params.min_gross_margin is not None and gross_margin is not None:
+                if gross_margin < params.min_gross_margin:
+                    continue
+
+            # Interest coverage gate
+            interest_coverage = row.get("interest_coverage")
+            if params.min_interest_coverage is not None and interest_coverage is not None:
+                if interest_coverage < params.min_interest_coverage:
+                    continue
+
+            # Sector filter
+            if params.sectors:
+                row_sector = row.get("sector") or ""
+                if row_sector not in params.sectors:
+                    continue
 
         passing_tickers.append(symbol)
         fundamental_rows.append({
             "symbol":       symbol,
             "market_cap_b": round(market_cap_b, 2),
             "price":        round(price, 2),
-            "beta":         round(beta, 2),
+            "beta":         round(beta, 2) if beta is not None else None,
             "iv":           iv_pct,
             "fcf":          row.get("fcf"),
             "forward_pe":   row.get("forward_pe"),
@@ -636,12 +645,15 @@ def _fundamental_filter_from_yfinance(
                 price = _to_float(info.get("currentPrice") or info.get("regularMarketPrice")) or 0.0
                 beta  = _to_float(info.get("beta"))
 
-                if market_cap_b <= params.min_market_cap_b:
-                    continue
-                if price <= 0 or price >= params.max_price:
-                    continue
-                if beta is None or not (params.min_beta <= beta <= params.max_beta):
-                    continue
+                # See _fundamental_filter_from_store: the user's own CSP
+                # watchlist is curated on purpose — don't second-guess it here.
+                if not params.watchlist_only:
+                    if market_cap_b <= params.min_market_cap_b:
+                        continue
+                    if price <= 0 or price >= params.max_price:
+                        continue
+                    if beta is None or not (params.min_beta <= beta <= params.max_beta):
+                        continue
 
                 iv_raw = _to_float(info.get("impliedVolatility"))
                 iv_pct = round(iv_raw * 100, 2) if iv_raw is not None else None
@@ -651,7 +663,7 @@ def _fundamental_filter_from_yfinance(
                     "symbol":       symbol,
                     "market_cap_b": round(market_cap_b, 2),
                     "price":        round(price, 2),
-                    "beta":         round(beta, 2),
+                    "beta":         round(beta, 2) if beta is not None else None,
                     "iv":           iv_pct,
                 })
             except Exception as exc:
@@ -1081,14 +1093,37 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         logger.warning("Local store is stale (%.1fh old)", store_status.get("stale_hours", 0))
 
     # 1. Universe
-    universe = fetch_universe()
+    if params.watchlist_only:
+        # Skip the broad S&P 500 / NASDAQ 100 / large-cap pull entirely —
+        # scan only the user's own CSP watchlist.
+        universe = sorted(set(get_watchlist()))
+        if not universe:
+            logger.warning("watchlist_only=True but the CSP watchlist is empty")
+            return {
+                "candidates": [],
+                "filter_summary": {
+                    "combined_unique":           0,
+                    "fundamental_passed":        0,
+                    "vol_passed":                0,
+                    "technical_passed":          0,
+                    "options_screener_returned": 0,
+                },
+                "fundamental_data": [],
+                "data_source": "watchlist_only",
+                "warnings": [
+                    "Your CSP watchlist is empty — add tickers to it (or turn off "
+                    "\"Scan my CSP watchlist only\") before scanning.",
+                ],
+            }
+    else:
+        universe = fetch_universe()
 
-    # Merge watchlist tickers so manually tracked stocks are always scanned
-    watchlist = get_watchlist()
-    watchlist_extras = [t for t in watchlist if t not in set(universe)]
-    if watchlist_extras:
-        logger.info("Injecting %d watchlist tickers not already in universe: %s", len(watchlist_extras), watchlist_extras)
-        universe = sorted(set(universe) | set(watchlist_extras))
+        # Merge watchlist tickers so manually tracked stocks are always scanned
+        watchlist = get_watchlist()
+        watchlist_extras = [t for t in watchlist if t not in set(universe)]
+        if watchlist_extras:
+            logger.info("Injecting %d watchlist tickers not already in universe: %s", len(watchlist_extras), watchlist_extras)
+            universe = sorted(set(universe) | set(watchlist_extras))
 
     logger.info("CSP scan started — universe: %d tickers, params: %s", len(universe), asdict(params))
 

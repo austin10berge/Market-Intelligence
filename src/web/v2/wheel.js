@@ -51,43 +51,32 @@ window.WheelView = (() => {
         let statsHtml = '';
         if (stats) {
             statsHtml = `
-            <div id="whl-perf-stats" style="display:none;padding:0 14px 8px">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-                    <div class="overview-card">
-                        <div class="overview-card-title">Net P&amp;L</div>
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:${moneyColor(stats.net_pnl)}">
-                            ${fmtMoney(stats.net_pnl)} <span style="font-size:13px;opacity:0.7">${headlineSign}${stats.net_pnl_pct.toFixed(2)}%</span>
-                        </div>
+            <div id="whl-perf-stats" style="display:none">
+                <div class="whl-stats-grid">
+                    <div class="whl-stat">
+                        <div class="whl-stat-label">Net P&amp;L</div>
+                        <div class="whl-stat-val" style="color:${moneyColor(stats.net_pnl)}">${fmtMoney(stats.net_pnl)}</div>
+                        <div class="whl-stat-sub">${headlineSign}${stats.net_pnl_pct.toFixed(2)}%</div>
                     </div>
-                    <div class="overview-card">
-                        <div class="overview-card-title">Max Drawdown</div>
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--tv-red)">
-                            ${stats.max_drawdown_pct.toFixed(2)}%
-                        </div>
+                    <div class="whl-stat">
+                        <div class="whl-stat-label">Max Drawdown</div>
+                        <div class="whl-stat-val" style="color:var(--tv-red)">${stats.max_drawdown_pct.toFixed(2)}%</div>
                     </div>
-                    <div class="overview-card">
-                        <div class="overview-card-title">Sharpe Ratio</div>
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">
-                            ${stats.sharpe_ratio != null ? stats.sharpe_ratio.toFixed(2) : '—'}
-                        </div>
+                    <div class="whl-stat">
+                        <div class="whl-stat-label">Sharpe Ratio</div>
+                        <div class="whl-stat-val">${stats.sharpe_ratio != null ? stats.sharpe_ratio.toFixed(2) : '—'}</div>
                     </div>
-                    <div class="overview-card">
-                        <div class="overview-card-title">Sortino Ratio</div>
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">
-                            ${stats.sortino_ratio != null ? stats.sortino_ratio.toFixed(2) : '—'}
-                        </div>
+                    <div class="whl-stat">
+                        <div class="whl-stat-label">Sortino Ratio</div>
+                        <div class="whl-stat-val">${stats.sortino_ratio != null ? stats.sortino_ratio.toFixed(2) : '—'}</div>
                     </div>
-                    <div class="overview-card">
-                        <div class="overview-card-title">Annualized Yield</div>
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--tv-green)">
-                            ${stats.annualized_yield_pct != null ? stats.annualized_yield_pct.toFixed(1) + '%' : '—'}
-                        </div>
+                    <div class="whl-stat">
+                        <div class="whl-stat-label">Annualized Yield</div>
+                        <div class="whl-stat-val" style="color:var(--tv-green)">${stats.annualized_yield_pct != null ? stats.annualized_yield_pct.toFixed(1) + '%' : '—'}</div>
                     </div>
-                    <div class="overview-card">
-                        <div class="overview-card-title">Avg Weekly ROC</div>
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">
-                            ${stats.avg_weekly_roc_pct != null ? stats.avg_weekly_roc_pct.toFixed(3) + '%' : '—'}
-                        </div>
+                    <div class="whl-stat">
+                        <div class="whl-stat-label">Avg Weekly ROC</div>
+                        <div class="whl-stat-val">${stats.avg_weekly_roc_pct != null ? stats.avg_weekly_roc_pct.toFixed(3) + '%' : '—'}</div>
                     </div>
                 </div>
             </div>`;
@@ -106,7 +95,7 @@ window.WheelView = (() => {
             <div style="display:flex;align-items:center;gap:6px;padding:4px 0 8px">
                 <span class="whl-stats-chevron" style="display:inline-block;font-size:10px;color:var(--tv-muted);transition:transform 0.15s;transform:rotate(0deg);line-height:1">▶</span>
                 <span style="font-size:13px;color:var(--tv-muted)">YTD</span>
-                <span style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:${headlineColor}">${headlineSign}${headlinePct.toFixed(2)}%</span>
+                <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:14px;font-weight:600;color:${headlineColor}">${headlineSign}${headlinePct.toFixed(2)}%</span>
             </div>
         </div>
         ${statsHtml}`;
@@ -145,31 +134,31 @@ window.WheelView = (() => {
     // ── Stats cards ──
 
     function renderStats(s) {
-        const winPct  = s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—';
+        const winPct   = s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—';
         const maxDelta = s.max_short_put_delta != null ? parseFloat(s.max_short_put_delta).toFixed(2) : '—';
         const deltaAlert = s.max_short_put_delta != null && parseFloat(s.max_short_put_delta) >= 0.30;
-        const premColor = (s.premium_ytd || 0) >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
-        const retColor = (s.returns_ytd || 0) >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
+        const premColor  = (s.premium_ytd || 0) >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
+        const retColor   = (s.returns_ytd || 0) >= 0 ? 'var(--tv-green)' : 'var(--tv-red)';
         return `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 14px 4px">
-            <div class="overview-card">
-                <div class="overview-card-title">Net Premium YTD</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:${premColor}">${fmtMoney(s.premium_ytd)}</div>
-                <div style="font-size:12px;color:var(--tv-muted);margin-top:2px">MTD ${fmtMoney(s.premium_mtd)}</div>
+        <div class="whl-stats-grid">
+            <div class="whl-stat">
+                <div class="whl-stat-label">Net Premium YTD</div>
+                <div class="whl-stat-val" style="color:${premColor}">${fmtMoney(s.premium_ytd)}</div>
+                <div class="whl-stat-sub">MTD ${fmtMoney(s.premium_mtd)}</div>
             </div>
-            <div class="overview-card">
-                <div class="overview-card-title">Net Returns YTD</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:${retColor}">${fmtMoney(s.returns_ytd)}</div>
-                <div style="font-size:12px;color:var(--tv-muted);margin-top:2px">Options + shares + LEAPS</div>
+            <div class="whl-stat">
+                <div class="whl-stat-label">Net Returns YTD</div>
+                <div class="whl-stat-val" style="color:${retColor}">${fmtMoney(s.returns_ytd)}</div>
+                <div class="whl-stat-sub">Options + shares + LEAPS</div>
             </div>
-            <div class="overview-card">
-                <div class="overview-card-title">Win Rate</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600">${winPct}</div>
-                <div style="font-size:12px;color:var(--tv-muted);margin-top:2px">${s.total_tickers ?? 0} tickers · ${s.active_tickers ?? 0} active</div>
+            <div class="whl-stat">
+                <div class="whl-stat-label">Win Rate</div>
+                <div class="whl-stat-val">${winPct}</div>
+                <div class="whl-stat-sub">${s.total_tickers ?? 0} tickers · ${s.active_tickers ?? 0} active</div>
             </div>
-            <div class="overview-card">
-                <div class="overview-card-title">Max Short Δ</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:${deltaAlert?'var(--tv-red)':'var(--tv-text)'}">${maxDelta}</div>
+            <div class="whl-stat">
+                <div class="whl-stat-label">Max Short Δ</div>
+                <div class="whl-stat-val" style="color:${deltaAlert ? 'var(--tv-red)' : 'var(--tv-text)'}">${maxDelta}</div>
             </div>
         </div>`;
     }
@@ -194,7 +183,7 @@ window.WheelView = (() => {
                         <span class="oc-symbol">${esc(p.symbol)}</span>
                         <span class="oc-subname">${qty} shares · avg $${avgCost.toFixed(2)}</span>
                     </div>
-                    <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:${pnlColor}">${fmtMoney(curValue)}</span>
+                    <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:15px;font-weight:600;color:${pnlColor}">${fmtMoney(curValue)}</span>
                 </div>
                 <div class="oc-row2">
                     <span class="oc-name">Cost $${costBasis.toFixed(0)}</span>
@@ -247,20 +236,20 @@ window.WheelView = (() => {
                 : trade.status === 'CLOSED' ? `${trade.open_date} → closed`
                 : `${trade.open_date} → open`;
             const statusPill = trade.status === 'OPEN'
-                ? `<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(41,98,255,0.12);color:#5B8AF5;font-family:'IBM Plex Mono',monospace;font-weight:600;letter-spacing:0.03em">OPEN</span>`
+                ? `<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(41,98,255,0.12);color:#5B8AF5;font-family:ui-monospace,'SF Mono','Menlo',monospace;font-weight:600;letter-spacing:0.03em">OPEN</span>`
                 : '';
             return `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--tv-border)">
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
                     <div style="display:flex;align-items:center;gap:6px">
-                        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
+                        <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
                         ${statusPill}
                     </div>
-                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">
+                    <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:11px;color:var(--tv-muted)">
                         ${trade.strike_low ? '$'+parseFloat(trade.strike).toFixed(0)+'/$'+parseFloat(trade.strike_low).toFixed(0) : '$'+parseFloat(trade.strike).toFixed(0)} ${trade.expiration ? trade.expiration.slice(5) : ''} · ${dates}
                     </span>
                 </div>
-                <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:${moneyColor(trade.net)};flex-shrink:0;margin-left:8px">
+                <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:13px;font-weight:600;color:${moneyColor(trade.net)};flex-shrink:0;margin-left:8px">
                     ${signedMoney(trade.net)}
                 </span>
             </div>`;
@@ -271,18 +260,18 @@ window.WheelView = (() => {
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--tv-border)">
                     <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
                         <div style="display:flex;align-items:center;gap:6px">
-                            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
-                            <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(41,98,255,0.12);color:#5B8AF5;font-family:'IBM Plex Mono',monospace;font-weight:600;letter-spacing:0.03em">OPEN</span>
+                            <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
+                            <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(41,98,255,0.12);color:#5B8AF5;font-family:ui-monospace,'SF Mono','Menlo',monospace;font-weight:600;letter-spacing:0.03em">OPEN</span>
                         </div>
-                        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">
+                        <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:11px;color:var(--tv-muted)">
                             ${trade.shares} sh · avg $${trade.avg_cost} · now $${trade.current_price}
                         </span>
                     </div>
                     <div style="text-align:right;flex-shrink:0;margin-left:8px">
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:${moneyColor(trade.unrealized_pnl)}">
+                        <div style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:13px;font-weight:600;color:${moneyColor(trade.unrealized_pnl)}">
                             ${signedMoney(trade.unrealized_pnl)}
                         </div>
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">
+                        <div style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:11px;color:var(--tv-muted)">
                             val ${fmtMoney(trade.current_value)}
                         </div>
                     </div>
@@ -292,10 +281,10 @@ window.WheelView = (() => {
             return `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--tv-border)">
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
-                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
-                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">${trade.ticker || ''}</span>
+                    <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:12px;color:var(--tv-text);font-weight:500">${esc(trade.strategy)}</span>
+                    <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:11px;color:var(--tv-muted)">${trade.ticker || ''}</span>
                 </div>
-                <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:${moneyColor(pnl)};flex-shrink:0;margin-left:8px">
+                <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:13px;font-weight:600;color:${moneyColor(pnl)};flex-shrink:0;margin-left:8px">
                     ${signedMoney(pnl)}
                 </span>
             </div>`;
@@ -306,37 +295,36 @@ window.WheelView = (() => {
     function renderSymbolPerf(tickers) {
         if (!tickers.length) return `<div class="list-message">No wheel activity yet</div>`;
         return tickers.map((tk, i) => {
-            const isActive  = tk.status === 'ACTIVE';
-            const ret       = tk.total_return;
-            const retColor  = moneyColor(ret);
-            const statusBg  = isActive ? 'rgba(41,98,255,0.12)' : 'rgba(120,123,134,0.12)';
-            const statusClr = isActive ? '#5B8AF5' : 'var(--tv-muted)';
-            const trades    = tk.reconciled_trades || [];
-            const id        = `whl-perf-${i}`;
-
-            const tradeRows = trades.map(renderReconciled).join('');
-            const openCount = trades.filter(t => t.status === 'OPEN').length;
+            const isActive   = tk.status === 'ACTIVE';
+            const ret        = tk.total_return;
+            const retColor   = moneyColor(ret);
+            const statusBg   = isActive ? 'rgba(41,98,255,0.12)' : 'rgba(120,123,134,0.12)';
+            const statusClr  = isActive ? '#5B8AF5' : 'var(--tv-muted)';
+            const trades     = tk.reconciled_trades || [];
+            const id         = `whl-perf-${i}`;
+            const tradeRows  = trades.map(renderReconciled).join('');
+            const openCount  = trades.filter(t => t.status === 'OPEN').length;
             const closedCount = trades.filter(t => t.status === 'CLOSED').length;
 
             return `
-            <div class="overview-card" style="margin:6px 14px;animation:row-in 0.32s ease both;animation-delay:${i*40}ms;cursor:pointer;transition:background 0.15s"
+            <div class="whl-ticker-row" style="animation:row-in 0.32s ease both;animation-delay:${i*40}ms"
                  onclick="(function(e){var d=document.getElementById('${id}');var c=e.currentTarget.querySelector('.whl-chevron');if(d.style.display==='none'){d.style.display='block';c.style.transform='rotate(90deg)';}else{d.style.display='none';c.style.transform='rotate(0deg)';}})(event)">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0">
+                <div style="display:flex;align-items:center;justify-content:space-between">
                     <div style="display:flex;align-items:center;gap:8px">
-                        <span class="whl-chevron" style="display:inline-block;font-size:10px;color:var(--tv-muted);transition:transform 0.15s;transform:rotate(0deg);line-height:1">▶</span>
-                        <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:#fff">${esc(tk.underlying||'')}</span>
-                        <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${statusBg};color:${statusClr};font-family:'IBM Plex Mono',monospace;font-weight:600;letter-spacing:0.03em">${esc(tk.status||'')}</span>
+                        <span class="whl-chevron" style="display:inline-block;font-size:10px;color:var(--tv-muted);transition:transform 0.15s;line-height:1">▶</span>
+                        <span style="font-size:19px;font-weight:600;color:#fff">${esc(tk.underlying||'')}</span>
+                        <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${statusBg};color:${statusClr};font-weight:600;letter-spacing:0.03em">${esc(tk.status||'')}</span>
                     </div>
                     <div style="text-align:right">
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:${retColor}">
+                        <div style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:15px;font-weight:600;color:${retColor};font-variant-numeric:tabular-nums">
                             ${signedMoney(ret)}
                         </div>
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tv-muted)">
+                        <div style="font-size:11px;color:var(--tv-muted)">
                             ${closedCount} closed${openCount ? ' · ' + openCount + ' open' : ''} · prem ${fmtMoney(tk.total_premium)}
                         </div>
                     </div>
                 </div>
-                <div id="${id}" style="display:none;margin-top:10px;border-top:1px solid var(--tv-border);padding-top:6px" onclick="event.stopPropagation()">
+                <div id="${id}" style="display:none;margin-top:10px;border-top:0.5px solid rgba(255,255,255,0.08);padding-top:6px" onclick="event.stopPropagation()">
                     ${tradeRows}
                 </div>
             </div>`;

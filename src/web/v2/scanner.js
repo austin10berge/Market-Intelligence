@@ -20,7 +20,7 @@
         rv20_max: null, bb_width_pct_min: null, bb_width_pct_max: null,
         volume_ratio_max: null, pct_from_52wk_high_max: null,
         adr20_pct_max: null, price_vs_ema200_pct_min: null,
-        restrict_to_watchlist_universe: false, sectors: [],
+        restrict_to_watchlist_universe: false, watchlist_only: false, sectors: [],
     };
 
     const _state = {
@@ -114,6 +114,7 @@
             if (typeof saved.price_vs_ema200_pct_min === 'number' || saved.price_vs_ema200_pct_min === null) p.price_vs_ema200_pct_min = saved.price_vs_ema200_pct_min;
             if (Array.isArray(saved.conditions)) p.conditions = saved.conditions;
             if (typeof saved.restrict_to_watchlist_universe === 'boolean') p.restrict_to_watchlist_universe = saved.restrict_to_watchlist_universe;
+            if (typeof saved.watchlist_only === 'boolean') p.watchlist_only = saved.watchlist_only;
             if (Array.isArray(saved.sectors)) p.sectors = saved.sectors;
         } catch { /* corrupt storage — use defaults */ }
     }
@@ -189,6 +190,7 @@
         if (p.adr20_pct_max           !== null && p.adr20_pct_max           !== undefined) qs.set('adr20_pct_max',           p.adr20_pct_max);
         if (p.price_vs_ema200_pct_min !== null && p.price_vs_ema200_pct_min !== undefined) qs.set('price_vs_ema200_pct_min', p.price_vs_ema200_pct_min);
         if (_state.params.restrict_to_watchlist_universe) qs.set('restrict_to_watchlist_universe', 'true');
+        if (_state.params.watchlist_only) qs.set('watchlist_only', 'true');
         if (_state.params.sectors && _state.params.sectors.length) qs.set('sectors', _state.params.sectors.join(','));
         return qs.toString();
     }
@@ -224,6 +226,7 @@
         n += _state.params.conditions.length;
         n += _state.params.sectors.length;
         if (_state.params.restrict_to_watchlist_universe) n++;
+        if (_state.params.watchlist_only) n++;
         return n;
     }
 
@@ -249,6 +252,7 @@
         _state.params.conditions.forEach(id => chips.push(`<span class="scn-chip">${_escapeHtml(_conditionLabel(id))}</span>`));
         _state.params.sectors.forEach(s => chips.push(`<span class="scn-chip">${_escapeHtml(s)}</span>`));
         if (_state.params.restrict_to_watchlist_universe) chips.push('<span class="scn-chip">S&amp;P+NDX only</span>');
+        if (_state.params.watchlist_only) chips.push('<span class="scn-chip">My CSP watchlist only</span>');
         el.innerHTML = chips.length ? chips.join('') : '<span class="scn-chip muted">Default filters</span>';
     }
 
@@ -501,6 +505,7 @@
         }).join('');
 
         const restrictChecked = p.restrict_to_watchlist_universe ? ' checked' : '';
+        const watchlistOnlyChecked = p.watchlist_only ? ' checked' : '';
 
         return `<div class="scn-sheet">
             <div class="scn-sheet-header">
@@ -530,6 +535,10 @@
                 </div>
                 <div class="scn-sheet-section">
                     <div class="scn-sheet-section-title">Universe Scope</div>
+                    <label class="scn-sector-check">
+                        <input type="checkbox" id="scnf-watchlist-only"${watchlistOnlyChecked}>
+                        <span>Scan my CSP watchlist only</span>
+                    </label>
                     <label class="scn-sector-check">
                         <input type="checkbox" id="scnf-restrict"${restrictChecked}>
                         <span>Restrict to S&amp;P 500 + NASDAQ 100</span>
@@ -602,6 +611,8 @@
         // Universe scope toggle
         const restrictEl = document.getElementById('scnf-restrict');
         if (restrictEl) p.restrict_to_watchlist_universe = restrictEl.checked;
+        const watchlistOnlyEl = document.getElementById('scnf-watchlist-only');
+        if (watchlistOnlyEl) p.watchlist_only = watchlistOnlyEl.checked;
     }
 
     // ── Apply & Scan ──────────────────────────────────────────────────────────────
@@ -720,7 +731,7 @@
           <button class="scn-filters-btn" id="scn-filters-btn">Filters</button>
         </div>
         <div class="scn-active-params" id="scn-active-params"></div>
-        <div class="scn-funnel" id="scn-funnel" style="display:none"></div>
+        <div class="scn-funnel-wrap"><div class="scn-funnel" id="scn-funnel" style="display:none"></div></div>
         <div class="scn-stockperf" id="scn-stockperf" style="display:none"></div>
         <div id="scn-results"><div class="list-message loading">Loading scanner…</div></div>
         <div class="option-pagination" id="scn-pagination" style="display:none"></div>

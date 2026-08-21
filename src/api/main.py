@@ -447,6 +447,7 @@ async def get_csp_scan_candidates(
     adr20_pct_max:           float | None = Query(default=None),
     price_vs_ema200_pct_min: float | None = Query(default=None),
     restrict_to_watchlist_universe: bool = False,
+    watchlist_only: bool = False,
     sectors:             str   | None = None,
     response: Response = None,
 ):
@@ -486,6 +487,7 @@ async def get_csp_scan_candidates(
         adr20_pct_max=adr20_pct_max,
         price_vs_ema200_pct_min=price_vs_ema200_pct_min,
         restrict_to_watchlist_universe=restrict_to_watchlist_universe,
+        watchlist_only=watchlist_only,
         sectors=sectors,
     )
     if response is not None:
@@ -558,6 +560,7 @@ async def invalidate_csp_scan_cache(
     adr20_pct_max:           float | None = Query(default=None),
     price_vs_ema200_pct_min: float | None = Query(default=None),
     restrict_to_watchlist_universe: bool = False,
+    watchlist_only: bool = False,
     sectors:             str   | None = None,
 ):
     """Bust the cache for a specific param combination (or the default set)."""
@@ -586,6 +589,7 @@ async def invalidate_csp_scan_cache(
         adr20_pct_max=adr20_pct_max,
         price_vs_ema200_pct_min=price_vs_ema200_pct_min,
         restrict_to_watchlist_universe=restrict_to_watchlist_universe,
+        watchlist_only=watchlist_only,
         sectors=sectors,
     )
     cache_key = f"{KEY_SCREENER_CSP_SCAN}:{params.cache_key_suffix()}"

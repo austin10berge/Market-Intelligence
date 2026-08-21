@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from models import Video
 from summarizer import Summarizer
+
+from models import Video
 
 
 def _video():
@@ -80,3 +81,22 @@ def test_summarize_falls_back_when_inner_unparseable():
     assert summary is not None
     assert summary.summary_text == "model output that is not json"
     assert summary.takeaways == []
+
+
+def test_invoke_claude_sends_long_prompt_via_stdin_not_argv():
+    """A long prompt as a bare argv element hits the Linux kernel's
+    per-argument MAX_ARG_STRLEN (128KB) and fails with OSError E2BIG,
+    regardless of how small max_transcript_chars is set — it must go
+    over stdin instead."""
+    s = _summarizer()
+    long_prompt = "x" * 200_000
+
+    with patch("summarizer.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "{}"
+        s._invoke_claude(long_prompt, "vid1")
+
+    args, kwargs = mock_run.call_args
+    cmd = args[0]
+    assert long_prompt not in cmd, "prompt must not be passed as a CLI argument"
+    assert kwargs.get("input") == long_prompt, "prompt must be sent via stdin"
