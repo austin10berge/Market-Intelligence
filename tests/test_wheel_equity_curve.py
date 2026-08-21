@@ -120,7 +120,7 @@ def test_rebuild_equity_curve_basic(conn):
 
     with patch("src.wheel_tracker.equity_curve.download_with_retry", side_effect=mock_download):
         with patch("src.wheel_tracker.equity_curve._ytd_start", return_value="2026-01-02"):
-            count = asyncio.get_event_loop().run_until_complete(rebuild_equity_curve(conn))
+            count = asyncio.run(rebuild_equity_curve(conn))
 
     assert count > 0
 
@@ -151,6 +151,7 @@ def test_rebuild_equity_curve_basic(conn):
 def test_rebuild_curve_keeps_cash_equivalent_fund_value(conn):
     """Buying SWVXX is an asset conversion, not a portfolio loss."""
     import pandas as pd
+    from src.wheel_tracker.equity_curve import _cumulative_deposits_at
     from src.wheel_tracker.store import ensure_wheel_tables, read_equity_curve
 
     ensure_wheel_tables(conn)
@@ -164,18 +165,23 @@ def test_rebuild_curve_keeps_cash_equivalent_fund_value(conn):
     )
     conn.commit()
 
+    ytd = "2026-03-09"
+    initial_cash = _cumulative_deposits_at(ytd)
+
     spy_prices = pd.DataFrame(
         {"Close": [500.0, 501.0, 502.0]},
-        index=pd.bdate_range("2026-03-09", periods=3),
+        index=pd.bdate_range(ytd, periods=3),
     )
     with patch("src.wheel_tracker.equity_curve.download_with_retry", return_value=spy_prices):
-        with patch("src.wheel_tracker.equity_curve._ytd_start", return_value="2026-03-09"):
-            asyncio.get_event_loop().run_until_complete(rebuild_equity_curve(conn))
+        with patch("src.wheel_tracker.equity_curve._ytd_start", return_value=ytd):
+            asyncio.run(rebuild_equity_curve(conn))
 
     curve = read_equity_curve(conn, "2026-01-01")
     last = curve[-1]
-    assert last["cash"] == 11700.0
-    assert last["equity"] == 20000.0
+    # SWVXX is tracked at cost (qty * avg_cost), so buying it converts cash to
+    # a position rather than destroying portfolio value — equity stays flat.
+    assert last["cash"] == pytest.approx(initial_cash - 8300)
+    assert last["equity"] == pytest.approx(initial_cash)
 
 
 from src.wheel_tracker.curve_stats import compute_curve_stats, compute_twr_curve, compute_spy_curve

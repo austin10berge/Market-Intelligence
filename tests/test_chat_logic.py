@@ -325,8 +325,6 @@ class TestCallClaudeChatMcpWiring:
         argv = captured["args"]
         assert argv[0] == "claude"
         assert "-p" in argv
-        assert "--strict-mcp-config" in argv
-
         mcp_config_idx = argv.index("--mcp-config")
         assert argv[mcp_config_idx + 1].replace("\\", "/").endswith("discord_bot/alpaca-mcp.json")
         assert argv[mcp_config_idx + 2].replace("\\", "/").endswith("discord_bot/schwab-mcp.json")

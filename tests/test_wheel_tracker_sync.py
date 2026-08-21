@@ -376,10 +376,10 @@ def _patch_mcp_transport(session):
     """Patch run_sync's MCP transport (streamablehttp_client + ClientSession) so that
     `async with streamablehttp_client(url) as (read, write, _)` and
     `async with ClientSession(read, write) as session` resolve without any network I/O."""
-    stream_cm = _mock_async_cm((MagicMock(), MagicMock(), MagicMock()))
+    stream_cm = _mock_async_cm((MagicMock(), MagicMock()))
     session_cm = _mock_async_cm(session)
     return (
-        patch("src.wheel_tracker.sync.streamablehttp_client", MagicMock(return_value=stream_cm)),
+        patch("src.wheel_tracker.sync.streamable_http_client", MagicMock(return_value=stream_cm)),
         patch("src.wheel_tracker.sync.ClientSession", MagicMock(return_value=session_cm)),
     )
 

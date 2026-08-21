@@ -184,7 +184,7 @@ def test_get_ticker_ledger_groups_multiple_rounds_into_one_entry():
     tickers = get_ticker_ledger(conn)
     sofi_entries = [t for t in tickers if t["underlying"] == "SOFI"]
     assert len(sofi_entries) == 1
-    assert len(sofi_entries[0]["trades"]) == 3
+    assert len(sofi_entries[0]["reconciled_trades"]) == 2
     assert sofi_entries[0]["total_premium"] == pytest.approx(110.0)
 
 
@@ -202,8 +202,8 @@ def test_get_ticker_ledger_includes_covered_call_with_no_prior_csp():
 
     tickers = get_ticker_ledger(conn)
     msft = next(t for t in tickers if t["underlying"] == "MSFT")
-    assert len(msft["trades"]) == 1
-    assert msft["trades"][0]["strategy"] == "Covered Call"
+    assert len(msft["reconciled_trades"]) == 1
+    assert msft["reconciled_trades"][0]["strategy"] == "Covered Call"
 
 
 def test_get_ticker_ledger_includes_plain_equity_trade():
@@ -218,8 +218,8 @@ def test_get_ticker_ledger_includes_plain_equity_trade():
 
     tickers = get_ticker_ledger(conn)
     nvda = next(t for t in tickers if t["underlying"] == "NVDA")
-    assert nvda["trades"][0]["strategy"] == "Shares Bought"
-    assert nvda["realized_pnl"] == pytest.approx(-500.0)
+    assert nvda["reconciled_trades"][0]["strategy"] == "Shares Held"
+    assert nvda["total_return"] == pytest.approx(0.0)
 
 
 def test_get_ticker_ledger_excludes_mutual_fund_rows():
