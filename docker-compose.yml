@@ -104,7 +104,7 @@ services:
       # (2026-07-15): a :ro mount here made every real tool call fail with
       # "Read-only file system: token.yaml".
       - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp
-    command: schwab-mcp server --no-technical-tools --http --host 0.0.0.0 --port 8002
+    command: mcp-proxy --port 8002 --host 0.0.0.0 -- schwab-mcp server --no-technical-tools
     ports:
       - "8002:8002"  # LAN-exposed — shared with prod so both envs use one token
     restart: unless-stopped
