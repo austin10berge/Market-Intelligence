@@ -24,9 +24,9 @@ dependencies = [
     "requests>=2.31",
     "holidays>=0.55",
     "alpaca-mcp-server>=2.1,<3",
-    "schwab-mcp @ git+https://github.com/jkoelker/schwab-mcp.git",
+    "schwab-mcp @ git+https://github.com/jkoelker/schwab-mcp.git@1634514",
     "schwab-py @ git+https://github.com/jkoelker/schwab-py.git@proxy_support",
-    "mcp>=2.0.0,<3",
+    "mcp>=1.17.0,<2",
 ]
 
 [project.optional-dependencies]

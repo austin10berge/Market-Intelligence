@@ -390,7 +390,7 @@ async def _fetch_deltas(
                     "to_date": exp_key,
                 },
             )
-            if result.is_error:
+            if result.isError:
                 logger.warning(
                     "wheel_tracker: get_option_chain error for %s: %s", underlying, result.content
                 )
