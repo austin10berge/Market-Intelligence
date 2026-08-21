@@ -153,8 +153,6 @@ services:
         condition: service_healthy
       alpaca-mcp:
         condition: service_healthy
-      schwab-mcp:
-        condition: service_started
     restart: unless-stopped
 
   # ── Nightly pipeline (runs once then exits, triggered by cron) ───────────────
