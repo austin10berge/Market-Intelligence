@@ -86,13 +86,9 @@ services:
       start_period: 10s
 
   # ── Schwab MCP bridge (persistent HTTP; backs the trade chat bot's access to
-  # real account data — positions, orders, transactions, balances). schwab-mcp
-  # only supports stdio transport (no --transport flag, confirmed from its
-  # source), so mcp-proxy wraps it and re-exposes it over streamable-HTTP —
-  # the same fix alpaca-mcp above needed after its original per-call stdio
-  # spawn silently lost the race against claude -p's first request. Verified
-  # locally: mcp-proxy --port N -- schwab-mcp server serves a working /mcp
-  # endpoint; bare GET returns 406 (healthy) same as alpaca-mcp's endpoint. ──
+  # real account data — positions, orders, transactions, balances).
+  # schwab-mcp 0.1.0 (mcp 2.x) supports native streamable-HTTP via --http,
+  # so mcp-proxy is no longer needed. ──
   schwab-mcp:
     build:
       context: .
@@ -108,7 +104,7 @@ services:
       # (2026-07-15): a :ro mount here made every real tool call fail with
       # "Read-only file system: token.yaml".
       - ~/.local/share/schwab-mcp:/root/.local/share/schwab-mcp
-    command: mcp-proxy --port 8002 --host 0.0.0.0 -- schwab-mcp server --no-technical-tools
+    command: schwab-mcp server --no-technical-tools --http --host 0.0.0.0 --port 8002
     ports:
       - "8002:8002"  # LAN-exposed — shared with prod so both envs use one token
     restart: unless-stopped
