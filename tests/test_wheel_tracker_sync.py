@@ -373,10 +373,14 @@ def _mock_async_cm(value):
 
 
 def _patch_mcp_transport(session):
-    """Patch run_sync's MCP transport (streamablehttp_client + ClientSession) so that
-    `async with streamablehttp_client(url) as (read, write, _)` and
-    `async with ClientSession(read, write) as session` resolve without any network I/O."""
-    stream_cm = _mock_async_cm((MagicMock(), MagicMock()))
+    """Patch run_sync's MCP transport (streamable_http_client + ClientSession) so that
+    `async with streamable_http_client(url) as (read, write, _)` and
+    `async with ClientSession(read, write) as session` resolve without any network I/O.
+
+    streamable_http_client yields a 3-tuple (read, write, get_session_id) — the mock
+    must match, or run_sync's unpack silently regresses to a 2-tuple (prod outage
+    2026-08-25: `ValueError: too many values to unpack (expected 2)`)."""
+    stream_cm = _mock_async_cm((MagicMock(), MagicMock(), MagicMock()))
     session_cm = _mock_async_cm(session)
     return (
         patch("src.wheel_tracker.sync.streamable_http_client", MagicMock(return_value=stream_cm)),

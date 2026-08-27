@@ -428,7 +428,7 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
         today = date.today().isoformat()
 
         try:
-            async with streamable_http_client(url) as (read, write):
+            async with streamable_http_client(url) as (read, write, _):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
 

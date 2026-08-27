@@ -72,7 +72,7 @@ def _select_target_delta_contract(contracts: list[dict], target_delta: float = 0
 async def _fetch_chain_via_mcp_async(ticker: str, from_date_str: str, to_date_str: str) -> str:
     from ..config import settings
 
-    async with streamable_http_client(settings.schwab_mcp_url) as (read, write):
+    async with streamable_http_client(settings.schwab_mcp_url) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(
