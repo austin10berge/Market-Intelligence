@@ -6,6 +6,11 @@ import tempfile
 import os
 import pytest
 from unittest.mock import patch
+from src.wheel_tracker.store import (
+    ensure_wheel_positions_table,
+    insert_wheel_position,
+    close_wheel_position,
+)
 
 _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_path = _tmp.name
@@ -372,3 +377,74 @@ def test_insert_note():
     insert_note(conn, dict(trade_id=None, cycle_id=1, source="discord", content="Testing"))
     count = conn.execute("SELECT COUNT(*) FROM wt_notes").fetchone()[0]
     assert count >= 1
+
+
+class TestWheelPositions:
+    def test_table_created(self):
+        conn = _conn()
+        ensure_wheel_positions_table(conn)
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='wheel_positions'"
+        )
+        assert cur.fetchone() is not None
+
+    def test_insert_csp(self):
+        conn = _conn()
+        ensure_wheel_positions_table(conn)
+        row_id = insert_wheel_position(conn, {
+            "ticker": "HOOD",
+            "instrument": "CSP",
+            "open_date": "2026-08-30",
+            "expiry": "2026-10-02",
+            "strike": 22.0,
+            "delta_at_open": 0.24,
+            "premium": 0.58,
+            "contracts": 2,
+            "thesis": "Strong PFOF tailwind.",
+            "planned_exit_pct": 50.0,
+            "invalidation": "Earnings pre-announcement",
+        })
+        assert isinstance(row_id, int) and row_id > 0
+
+    def test_close_position(self):
+        conn = _conn()
+        ensure_wheel_positions_table(conn)
+        row_id = insert_wheel_position(conn, {
+            "ticker": "SOFI",
+            "instrument": "CSP",
+            "open_date": "2026-08-28",
+            "expiry": "2026-09-19",
+            "strike": 12.0,
+            "delta_at_open": 0.22,
+            "premium": 0.31,
+            "contracts": 3,
+            "thesis": "Fintech tailwind.",
+            "planned_exit_pct": 50.0,
+            "invalidation": "Fed pivot surprise",
+        })
+        close_wheel_position(conn, row_id, "2026-09-10", "profit", 46.50)
+        cur = conn.execute(
+            "SELECT close_date, close_reason, pnl FROM wheel_positions WHERE id=?", (row_id,)
+        )
+        row = cur.fetchone()
+        assert row["close_date"] == "2026-09-10"
+        assert row["close_reason"] == "profit"
+        assert abs(row["pnl"] - 46.50) < 0.01
+
+    def test_insert_leap(self):
+        conn = _conn()
+        ensure_wheel_positions_table(conn)
+        row_id = insert_wheel_position(conn, {
+            "ticker": "CRM",
+            "instrument": "LEAP",
+            "open_date": "2026-08-15",
+            "expiry": "2028-01-17",
+            "strike": 300.0,
+            "delta_at_open": 0.72,
+            "premium": 28.50,
+            "contracts": 1,
+            "thesis": "AI/CRM dominance.",
+            "planned_exit_pct": 50.0,
+            "invalidation": "Benioff exits",
+        })
+        assert row_id > 0

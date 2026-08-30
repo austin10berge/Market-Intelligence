@@ -704,3 +704,74 @@ def read_equity_curve(conn: sqlite3.Connection, since: str) -> list[dict]:
     ).fetchall()
     conn.row_factory = _prev
     return [dict(r) for r in rows]
+
+
+def ensure_wheel_positions_table(conn: sqlite3.Connection) -> None:
+    """Create wheel_positions table if absent."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS wheel_positions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker            TEXT    NOT NULL,
+            instrument        TEXT    NOT NULL,  -- CSP / CC / LEAP / PMCC
+            open_date         TEXT    NOT NULL,
+            expiry            TEXT,
+            strike            REAL,
+            delta_at_open     REAL,
+            premium           REAL,
+            contracts         INTEGER NOT NULL DEFAULT 1,
+            thesis            TEXT,
+            planned_exit_pct  REAL,
+            invalidation      TEXT,
+            rolled_from_id    INTEGER REFERENCES wheel_positions(id),
+            close_date        TEXT,
+            close_reason      TEXT,
+            pnl               REAL,
+            created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    """)
+    conn.commit()
+
+
+def insert_wheel_position(conn: sqlite3.Connection, row: dict) -> int:
+    """Insert a new position journal row; return the new id."""
+    cur = conn.execute(
+        """
+        INSERT INTO wheel_positions
+            (ticker, instrument, open_date, expiry, strike, delta_at_open,
+             premium, contracts, thesis, planned_exit_pct, invalidation, rolled_from_id)
+        VALUES
+            (:ticker, :instrument, :open_date, :expiry, :strike, :delta_at_open,
+             :premium, :contracts, :thesis, :planned_exit_pct, :invalidation, :rolled_from_id)
+        """,
+        {
+            "ticker": row["ticker"],
+            "instrument": row["instrument"],
+            "open_date": row["open_date"],
+            "expiry": row.get("expiry"),
+            "strike": row.get("strike"),
+            "delta_at_open": row.get("delta_at_open"),
+            "premium": row.get("premium"),
+            "contracts": row.get("contracts", 1),
+            "thesis": row.get("thesis"),
+            "planned_exit_pct": row.get("planned_exit_pct"),
+            "invalidation": row.get("invalidation"),
+            "rolled_from_id": row.get("rolled_from_id"),
+        },
+    )
+    conn.commit()
+    return cur.lastrowid  # type: ignore[return-value]
+
+
+def close_wheel_position(
+    conn: sqlite3.Connection,
+    row_id: int,
+    close_date: str,
+    close_reason: str,
+    pnl: float,
+) -> None:
+    """Mark an open position as closed."""
+    conn.execute(
+        "UPDATE wheel_positions SET close_date=?, close_reason=?, pnl=? WHERE id=?",
+        (close_date, close_reason, pnl, row_id),
+    )
+    conn.commit()
