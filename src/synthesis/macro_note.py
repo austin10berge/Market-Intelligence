@@ -1,4 +1,4 @@
-"""Monthly macro note generator — Exhibit 2C + 2D + 2E (fully automated).
+"""Weekly macro note generator — Exhibit 2C + 2D + 2E (fully automated).
 
 Full pipeline (one command, no user input needed):
   1. Run CSP wheel scan
@@ -12,7 +12,7 @@ Full pipeline (one command, no user input needed):
 Usage:
     docker compose run --rm pipeline python3 -m src.synthesis.macro_note
 
-Output: ./data/trade-memos/YYYY-MM.md  (copy to Obsidian after)
+Output: ./data/trade-memos/YYYY-WW.md (ISO week number)  (copy to Obsidian after)
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import calendar
 import logging
 import sqlite3
 from contextlib import closing
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from ..config import settings
@@ -286,11 +286,11 @@ def _render_note(
 ) -> str:
     iso_cal = target_week.isocalendar()
     month_str = f"Week {iso_cal.week}, {iso_cal.year}"
-    month_key = target_week.strftime("%Y-%W")
+    month_key = f"{iso_cal.year}-{iso_cal.week:02d}"
     generated_str = date.today().strftime("%Y-%m-%d")
     # Next review = following Sunday
     days_to_sunday = (6 - target_week.weekday()) % 7 or 7
-    rebalance = (target_week + __import__("datetime").timedelta(days=days_to_sunday)).strftime("%Y-%m-%d")
+    rebalance = (target_week + timedelta(days=days_to_sunday)).strftime("%Y-%m-%d")
 
     spy_str = format_spy_vix_str(snapshot)
     spy_price = snapshot.get("spy_price", "N/A")
@@ -390,7 +390,8 @@ async def generate_macro_note(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_file = out_dir / f"{target_week.strftime('%Y-%W')}.md"
+    iso_cal = target_week.isocalendar()
+    out_file = out_dir / f"{iso_cal.year}-{iso_cal.week:02d}.md"
 
     # Steps 1-2: Run scan + fetch macro context + open positions in parallel
     logger.info("Macro note: running CSP scan and fetching macro context")

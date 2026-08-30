@@ -17,11 +17,10 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from ..config import settings
 from ..screener.csp_scanner import ScannerParams, run_csp_scan
 from ..screener.wheel_scorer import score_wheel_candidates
 from ..synthesis.macro_context import build_macro_context_str, fetch_spy_vix_snapshot
@@ -165,6 +164,10 @@ async def main() -> None:
     logger.info("Scan returned %d candidates", len(candidates_raw))
 
     scored = await score_wheel_candidates(candidates_raw, macro_context=macro_str)
+
+    if caps.delta_cap is not None:
+        scored = [c for c in scored if (c.get("delta") or 1.0) <= caps.delta_cap]
+        logger.info("After delta cap (%.2f): %d candidates remain", caps.delta_cap, len(scored))
 
     _write_candidates_json(scored, caps, today)
     _write_regime_status(snapshot, caps, today)

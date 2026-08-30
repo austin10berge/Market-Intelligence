@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from src.screener.wheel_scorer import _parse_score_and_report
-from src.synthesis.macro_note import _generate_forecast, _generate_regime_plan, _render_note, find_latest_note
+from src.synthesis.macro_note import _generate_forecast, _generate_regime_plan, _render_note, find_latest_note, generate_macro_note
 
 
 # ── _parse_score_and_report ───────────────────────────────────────────────────
@@ -212,7 +212,8 @@ class TestISOWeekNaming:
     def test_render_note_uses_week_heading(self):
         snapshot = {"spy_price": 560.0, "vix": 17.0, "spy_vs_sma200": "+4.2%", "vix_regime": "normal"}
         note = _render_note(snapshot, "", "forecast", "regime", [], date(2026, 9, 7), 10)
-        assert "Week 36" in note or "2026-36" in note
+        # date(2026, 9, 7) is ISO week 37
+        assert "Week 37" in note or "2026-37" in note
 
     def test_find_latest_note_returns_newest(self):
         with tempfile.TemporaryDirectory() as d:
@@ -229,12 +230,46 @@ class TestISOWeekNaming:
 
 
 class TestGenerateMacroNoteWeekPath:
-    def test_output_path_uses_iso_week(self):
+    async def test_output_path_uses_iso_week(self):
+        """generate_macro_note must write a file named YYYY-WW.md using ISO week number."""
+        _snapshot_data = {
+            "spy_price": 550.0,
+            "spy_1d_ret": "+0.10%",
+            "spy_5d_ret": "+1.20%",
+            "spy_vs_sma200": "+5.00%",
+            "spy_sma200": 522.0,
+            "vix": 15.0,
+            "vix_regime": "low vol",
+        }
         with tempfile.TemporaryDirectory() as d:
             out_dir = Path(d)
-            target = date(2026, 9, 7)  # Week 36
-            # Compute expected filename
-            week_str = target.strftime("%Y-%W")
-            expected = out_dir / f"{week_str}.md"
-            # Verify the naming convention (not the full async run)
-            assert expected.name == "2026-36.md"
+            target = date(2026, 9, 7)  # ISO week 37
+            with (
+                patch("src.synthesis.macro_note.run_csp_scan", return_value={"candidates": []}),
+                patch(
+                    "src.synthesis.macro_note.build_macro_context_str",
+                    new_callable=AsyncMock,
+                    return_value="macro context",
+                ),
+                patch("src.synthesis.macro_note.fetch_spy_vix_snapshot", return_value=_snapshot_data),
+                patch("src.synthesis.macro_note.fetch_wiki_events", return_value="wiki text"),
+                patch("src.synthesis.macro_note._load_open_positions", return_value=[]),
+                patch(
+                    "src.synthesis.macro_note.score_wheel_candidates",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ),
+                patch(
+                    "src.synthesis.macro_note._generate_forecast",
+                    new_callable=AsyncMock,
+                    return_value="forecast text",
+                ),
+                patch(
+                    "src.synthesis.macro_note._generate_regime_plan",
+                    new_callable=AsyncMock,
+                    return_value="regime plan text",
+                ),
+            ):
+                result = await generate_macro_note(out_dir=out_dir, target_week=target)
+            assert result.name == "2026-37.md"
+            assert (out_dir / "2026-37.md").exists()
