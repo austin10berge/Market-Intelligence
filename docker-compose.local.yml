@@ -30,6 +30,7 @@ x-worktree-dashboard: &worktree-dashboard
   - /home/dev/workspace/Market-Intelligence/src/web/scanner.html:/usr/share/nginx/html/scanner.html
   - /home/dev/workspace/Market-Intelligence/src/web/scanner.js:/usr/share/nginx/html/scanner.js
   - /home/dev/workspace/Market-Intelligence/src/web/v2:/usr/share/nginx/html/v2
+  - /home/dev/workspace/Market-Intelligence/src/web/brief:/usr/share/nginx/html/brief
 
 services:
   dashboard:
