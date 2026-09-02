@@ -44,6 +44,7 @@ docker compose run --rm prewarm
 ## Deployment Topology
 
 - Docker serves from the **main workspace** (`/home/dev/workspace/Market-Intelligence/src/`). Files in git worktrees (`.claude/worktrees/<id>/`) are **not served** unless `docker-compose.local.yml` explicitly mounts that worktree's `src/`.
+- **Morning brief at `/brief/`** is served via a bind mount in `docker-compose.local.yml` only. Always start the dashboard with `-f docker-compose.yml -f docker-compose.local.yml`, otherwise the brief mount is dropped and nginx silently serves a static placeholder (still 200, no error).
 - When debugging a live issue: edits must land in the main workspace. Check `docker-compose.local.yml` `x-worktree-src` before assuming a worktree is mounted.
 - **Production is a separate host** (10.0.1.21). `dev-mi.austin10berge.com` is dev only. Diagnose prod bugs against the PROD API (`market.austin10berge.com`), not local containers.
 - Claude has no SSH/prod access. Prepare exact commands for the user to run manually.

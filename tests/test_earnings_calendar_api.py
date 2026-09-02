@@ -21,9 +21,9 @@ def upcoming_signal():
                 {"symbol": "CRM", "name": "Salesforce Inc.", "report_date": "2026-09-05", "estimate": "2.44"},
             ],
             "count": 1,
-            "lookahead_days": 7,
+            "lookahead_days": 21,
         },
-        summary="Earnings Calendar: 1 report(s) in next 7 days",
+        summary="Earnings Calendar: 1 report(s) in next 21 days",
     )
 
 
@@ -32,8 +32,8 @@ def empty_signal():
     return Signal(
         source=SignalSource.EARNINGS_CALENDAR,
         value=0.0,
-        metadata={"upcoming": [], "count": 0, "lookahead_days": 7},
-        summary="Earnings Calendar: no reports in the next 7 days",
+        metadata={"upcoming": [], "count": 0, "lookahead_days": 21},
+        summary="Earnings Calendar: no reports in the next 21 days",
     )
 
 
@@ -48,7 +48,7 @@ async def test_returns_upcoming_earnings(upcoming_signal):
     assert resp.status_code == 200
     data = resp.json()
     assert data["count"] == 1
-    assert data["lookahead_days"] == 7
+    assert data["lookahead_days"] == 21
     assert data["upcoming"][0]["symbol"] == "CRM"
 
 

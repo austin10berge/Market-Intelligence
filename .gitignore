@@ -47,3 +47,8 @@ htmlcov/
 .playwright-mcp/
 .superpowers/
 .worktrees/
+
+# Morning brief — generated at runtime, not source code; index.html contains live position data
+src/web/brief/index.html
+src/web/brief/discord-summary.txt
+data/brief-tmp/

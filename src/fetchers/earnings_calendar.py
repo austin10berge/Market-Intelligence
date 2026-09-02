@@ -1,6 +1,6 @@
 """Upcoming earnings calendar fetcher via Alpha Vantage.
 
-Fetches earnings reports due in the next 7 calendar days from the AV
+Fetches earnings reports due in the next 21 calendar days from the AV
 EARNINGS_CALENDAR endpoint. Informational signal (value=0.0) — helps the LLM
 flag earnings risk or IV-crush opportunity for watchlist and CSP tickers.
 """
@@ -19,13 +19,12 @@ from .base import BaseFetcher, get_http_client
 logger = logging.getLogger(__name__)
 
 _AV_BASE = "https://www.alphavantage.co/query"
-_LOOKAHEAD_DAYS = 7
-_MAX_EARNINGS = 30
+_LOOKAHEAD_DAYS = 21
 _REQUEST_TIMEOUT = 20
 
 
 class EarningsCalendarFetcher(BaseFetcher):
-    """Fetch upcoming earnings for the next 7 days via Alpha Vantage."""
+    """Fetch upcoming earnings for the next 21 days via Alpha Vantage."""
 
     @property
     def name(self) -> str:
@@ -54,6 +53,12 @@ class EarningsCalendarFetcher(BaseFetcher):
             logger.warning("Earnings Calendar: HTTP error — %s", exc)
             return None
 
+        # AV returns HTTP 200 with a JSON body when the free-tier quota is exhausted
+        # rather than a proper error code. Detect it by checking for a JSON envelope.
+        if csv_text.lstrip().startswith("{"):
+            logger.warning("Earnings Calendar: AV returned JSON instead of CSV — likely rate-limited")
+            return None
+
         # AV returns CSV: symbol,name,reportDate,fiscalDateEnding,estimate,currency
         today = date.today()
         cutoff = today + timedelta(days=_LOOKAHEAD_DAYS)
@@ -61,6 +66,10 @@ class EarningsCalendarFetcher(BaseFetcher):
         upcoming: list[dict] = []
         try:
             reader = csv.DictReader(StringIO(csv_text))
+            # Verify this is actually an earnings CSV, not some other AV response.
+            if reader.fieldnames and "reportDate" not in reader.fieldnames:
+                logger.warning("Earnings Calendar: unexpected CSV schema — %s", reader.fieldnames)
+                return None
             for row in reader:
                 report_date_str = row.get("reportDate", "")
                 try:
@@ -75,7 +84,8 @@ class EarningsCalendarFetcher(BaseFetcher):
                         "report_date": report_date_str,
                         "estimate": estimate if estimate else "N/A",
                     })
-                if len(upcoming) >= _MAX_EARNINGS:
+                elif report_date > cutoff:
+                    # CSV is sorted ascending by date; once past the window, stop.
                     break
         except Exception as exc:
             logger.warning("Earnings Calendar: CSV parse error — %s", exc)
