@@ -54,6 +54,7 @@ from ..db import (
     update_stock_watchlist,
     update_watchlist,
 )
+from ..fetchers.earnings_calendar import EarningsCalendarFetcher
 from ..fetchers.market_overview import fetch_market_overview, has_partial_failure
 from ..main import run_pipeline
 from ..market_data.refresh import refresh_universe
@@ -990,3 +991,15 @@ async def wheel_rebuild_curve(req: Request):
             return {"rows_written": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Earnings Calendar ─────────────────────────────────────────────────────────
+
+@app.get("/api/earnings-calendar")
+async def get_earnings_calendar():
+    """Return upcoming earnings for the next 7 days (Alpha Vantage source)."""
+    fetcher = EarningsCalendarFetcher()
+    signal = await fetcher.fetch()
+    if signal is None:
+        return {"upcoming": [], "count": 0, "lookahead_days": 7, "error": "fetch_failed"}
+    return signal.metadata
