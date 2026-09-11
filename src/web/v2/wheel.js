@@ -39,6 +39,7 @@ window.WheelView = (() => {
         const portfolio = data.portfolio_curve || [];
         const spy = data.spy_curve || [];
         const stats = data.stats;
+        const liveValue = data.live_value;
 
         if (!portfolio.length) {
             return `<div class="list-message">No equity curve data — run a trade sync to generate</div>`;
@@ -89,6 +90,7 @@ window.WheelView = (() => {
             <div style="display:flex;gap:16px;justify-content:center;padding:6px 0;font-size:12px;color:var(--tv-muted)">
                 <span><span style="display:inline-block;width:12px;height:2px;background:#3b82f6;vertical-align:middle;margin-right:4px"></span>Portfolio</span>
                 <span><span style="display:inline-block;width:12px;height:2px;background:#94a3b8;vertical-align:middle;margin-right:4px;border-top:1px dashed #94a3b8"></span>SPY</span>
+                ${liveValue != null ? `<span style="color:#22c55e"><span style="display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:50%;vertical-align:middle;margin-right:4px"></span>Live: ${fmtMoney(liveValue)}</span>` : ''}
             </div>
         </div>
         <div style="padding:0 14px;cursor:pointer" onclick="(function(e){var d=document.getElementById('whl-perf-stats');var c=e.currentTarget.querySelector('.whl-stats-chevron');if(d.style.display==='none'){d.style.display='block';c.style.transform='rotate(90deg)';}else{d.style.display='none';c.style.transform='rotate(0deg)';}})(event)">
@@ -101,7 +103,7 @@ window.WheelView = (() => {
         ${statsHtml}`;
     }
 
-    function mountPerfChart(portfolio, spy) {
+    function mountPerfChart(portfolio, spy, liveValue) {
         const container = document.getElementById('whl-chart');
         if (!container || !window.LightweightCharts || !portfolio.length) return;
         const chart = window.LightweightCharts.createChart(container, {
@@ -116,6 +118,16 @@ window.WheelView = (() => {
             lineColor: '#3b82f6', topColor: 'rgba(59,130,246,0.25)', bottomColor: 'rgba(59,130,246,0.0)', lineWidth: 2,
         });
         eqSeries.setData(portfolio.map(d => ({ time: d.date, value: d.pct })));
+        if (liveValue != null && portfolio.length) {
+            const last = portfolio[portfolio.length - 1];
+            eqSeries.setMarkers([{
+                time: last.date,
+                position: 'inBar',
+                color: '#22c55e',
+                shape: 'circle',
+                text: fmtMoney(liveValue),
+            }]);
+        }
         if (spy.length) {
             const spySeries = chart.addLineSeries({ color: '#94a3b8', lineWidth: 1, lineStyle: 2 });
             spySeries.setData(spy.map(d => ({ time: d.date, value: d.pct })));
@@ -129,6 +141,44 @@ window.WheelView = (() => {
     function dteColor(dte) {
         if (dte == null) return 'var(--tv-muted)';
         return dte <= 7 ? 'var(--tv-red)' : dte <= 14 ? 'var(--tv-yellow)' : 'var(--tv-muted)';
+    }
+
+    // ── Monthly Realized P&L ──
+
+    const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    function renderMonthlyRealized(data) {
+        const months = (data && data.months) || [];
+        if (!months.length) return `<div class="list-message">No realized trades closed this year yet</div>`;
+
+        const yearTotal = months.reduce((sum, m) => sum + m.net, 0);
+        const maxAbs = Math.max(1, ...months.map(m => Math.abs(m.net)));
+
+        const rows = months.map(m => {
+            const monthLabel = MONTH_NAMES[parseInt(m.month.slice(5, 7), 10) - 1];
+            const pct = (Math.abs(m.net) / maxAbs) * 50;
+            const isPos = m.net >= 0;
+            const fillStyle = isPos
+                ? `left:50%;width:${pct}%`
+                : `right:50%;width:${pct}%`;
+            return `
+            <div class="mre-row">
+                <span class="mre-month">${monthLabel}</span>
+                <div class="mre-track">
+                    <div class="mre-center"></div>
+                    <div class="mre-fill ${isPos ? 'green' : 'red'}" style="${fillStyle}"></div>
+                </div>
+                <span class="mre-val" style="color:${moneyColor(m.net)}">${signedMoney(m.net)}</span>
+            </div>
+            <div class="mre-sub">opts ${signedMoney(m.options_net)} · shares ${signedMoney(m.equity_net)}</div>`;
+        }).join('');
+
+        return `
+        <div style="display:flex;align-items:baseline;justify-content:space-between;padding:10px 14px 6px">
+            <span style="font-size:13px;font-weight:600;color:var(--tv-muted)">Realized YTD</span>
+            <span style="font-family:ui-monospace,'SF Mono','Menlo',monospace;font-size:16px;font-weight:600;color:${moneyColor(yearTotal)}">${signedMoney(yearTotal)}</span>
+        </div>
+        ${rows}`;
     }
 
     // ── Stats cards ──
@@ -341,6 +391,11 @@ window.WheelView = (() => {
             </div>
             <div id="whl-perf-section"><div class="list-message loading">Loading…</div></div>
 
+            <div class="section-header" style="padding-top:4px">
+                <span class="section-title">Monthly Realized</span>
+            </div>
+            <div id="whl-monthly-realized"><div class="list-message loading">Loading…</div></div>
+
             <div id="whl-stats"><div class="list-message loading">Loading…</div></div>
 
             <div class="section-header" style="padding-top:8px">
@@ -365,18 +420,21 @@ window.WheelView = (() => {
             fetch(`${base}/wheel/positions`).then(r => r.json()),
             fetch(`${base}/wheel/tickers`).then(r => r.json()),
             fetch(`${base}/wheel/equity-curve`).then(r => r.json()).catch(() => null),
-        ]).then(([stats, posData, tickerData, curveData]) => {
+            fetch(`${base}/wheel/realized-monthly`).then(r => r.json()).catch(() => null),
+        ]).then(([stats, posData, tickerData, curveData, monthlyData]) => {
             if (!document.getElementById('whl-stats')) return;
             const positions = posData.positions || [];
             document.getElementById('whl-stats').innerHTML    = renderStats(stats);
             document.getElementById('whl-holdings').innerHTML  = renderHoldings(positions);
             document.getElementById('whl-trades').innerHTML    = renderOpenTrades(positions);
             document.getElementById('whl-perf').innerHTML      = renderSymbolPerf(tickerData.tickers || []);
+            const monthlyEl = document.getElementById('whl-monthly-realized');
+            if (monthlyEl) monthlyEl.innerHTML = renderMonthlyRealized(monthlyData);
 
             const perfSection = document.getElementById('whl-perf-section');
             if (perfSection && curveData) {
                 perfSection.innerHTML = renderPerfChart(curveData);
-                mountPerfChart(curveData.portfolio_curve || [], curveData.spy_curve || []);
+                mountPerfChart(curveData.portfolio_curve || [], curveData.spy_curve || [], curveData.live_value ?? null);
             } else if (perfSection) {
                 perfSection.innerHTML = '';
             }

@@ -69,14 +69,20 @@ def ensure_wheel_tables(conn: sqlite3.Connection) -> None:
             created_at TEXT    NOT NULL DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS wt_equity_curve (
-            date       TEXT PRIMARY KEY,
-            equity     REAL NOT NULL,
-            cash       REAL NOT NULL,
-            deposits   REAL NOT NULL DEFAULT 0,
-            spy_close  REAL
+            date              TEXT PRIMARY KEY,
+            equity            REAL NOT NULL,
+            cash              REAL NOT NULL,
+            deposits          REAL NOT NULL DEFAULT 0,
+            spy_close         REAL,
+            liquidation_value REAL
         );
     """)
     conn.commit()
+    try:
+        conn.execute("ALTER TABLE wt_equity_curve ADD COLUMN liquidation_value REAL")
+        conn.commit()
+    except Exception:
+        pass
 
 
 def upsert_trade(conn: sqlite3.Connection, trade: dict) -> int:
@@ -472,6 +478,7 @@ def _reconcile_equity(trades: list[dict], positions: dict[str, dict]) -> list[di
         total_cost = 0.0
         realized = 0.0
         first_buy = None
+        last_sell = None
         for leg in legs:
             qty = abs(leg["quantity"] or 0)
             if leg["instruction"] in ("BUY", "BUY_TO_OPEN"):
@@ -485,6 +492,7 @@ def _reconcile_equity(trades: list[dict], positions: dict[str, dict]) -> list[di
                     realized += (leg["net_amount"] or 0) - avg_cost * qty
                     total_cost -= avg_cost * qty
                     shares_held -= qty
+                    last_sell = leg["executed_at"][:10]
 
         pos = positions.get(ticker)
         if shares_held > 0 and pos:
@@ -530,6 +538,7 @@ def _reconcile_equity(trades: list[dict], positions: dict[str, dict]) -> list[di
                 "unrealized_pnl": None,
                 "realized_pnl": round(realized, 2),
                 "first_buy": first_buy,
+                "close_date": last_sell,
                 "status": "CLOSED",
             })
     return result
@@ -610,6 +619,41 @@ def get_ticker_ledger(conn: sqlite3.Connection) -> list[dict]:
     return tickers
 
 
+def get_monthly_realized_pnl(conn: sqlite3.Connection, year: str) -> list[dict]:
+    """Realized (closed) option and stock-sale P&L, grouped by month, for one year.
+
+    Excludes open positions entirely — only trades that have already closed
+    count toward a month's realized net."""
+    months: dict[str, dict] = {}
+
+    def bucket(month: str) -> dict:
+        return months.setdefault(month, {"month": month, "options_net": 0.0, "equity_net": 0.0})
+
+    for ticker in get_ticker_ledger(conn):
+        for trade in ticker["reconciled_trades"]:
+            if trade["status"] != "CLOSED" or not trade.get("close_date"):
+                continue
+            month = trade["close_date"][:7]
+            if month[:4] != year:
+                continue
+            if trade["type"] == "option":
+                bucket(month)["options_net"] += trade["net"]
+            elif trade["type"] == "equity":
+                bucket(month)["equity_net"] += trade.get("realized_pnl") or 0
+
+    result = []
+    for month, vals in sorted(months.items()):
+        options_net = round(vals["options_net"], 2)
+        equity_net = round(vals["equity_net"], 2)
+        result.append({
+            "month": month,
+            "options_net": options_net,
+            "equity_net": equity_net,
+            "net": round(options_net + equity_net, 2),
+        })
+    return result
+
+
 def get_wheel_stats(conn: sqlite3.Connection) -> dict:
     from datetime import date
 
@@ -687,10 +731,19 @@ def write_equity_curve(conn: sqlite3.Connection, rows: list[dict]) -> None:
     conn.execute("DELETE FROM wt_equity_curve")
     conn.executemany(
         """
-        INSERT INTO wt_equity_curve (date, equity, cash, deposits, spy_close)
-        VALUES (:date, :equity, :cash, :deposits, :spy_close)
+        INSERT INTO wt_equity_curve (date, equity, cash, deposits, spy_close, liquidation_value)
+        VALUES (:date, :equity, :cash, :deposits, :spy_close, :liquidation_value)
         """,
-        rows,
+        [{**r, "liquidation_value": r.get("liquidation_value")} for r in rows],
+    )
+    conn.commit()
+
+
+def update_today_liquidation_value(conn: sqlite3.Connection, value: float) -> None:
+    from datetime import date
+    conn.execute(
+        "UPDATE wt_equity_curve SET liquidation_value = ? WHERE date = ?",
+        (round(value, 2), date.today().isoformat()),
     )
     conn.commit()
 
@@ -699,7 +752,7 @@ def read_equity_curve(conn: sqlite3.Connection, since: str) -> list[dict]:
     _prev = conn.row_factory
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT date, equity, cash, deposits, spy_close FROM wt_equity_curve WHERE date >= ? ORDER BY date",
+        "SELECT date, equity, cash, deposits, spy_close, liquidation_value FROM wt_equity_curve WHERE date >= ? ORDER BY date",
         (since,),
     ).fetchall()
     conn.row_factory = _prev

@@ -68,6 +68,7 @@ from ..screener.csp_scanner import (
 from ..screener.options import screen_csp_candidates, screen_leaps_candidates
 from ..screener.stocks import screen_stocks
 from ..wheel_tracker.store import (
+    get_monthly_realized_pnl as wt_get_monthly_realized_pnl,
     get_open_positions as wt_get_positions,
     get_ticker_ledger as wt_get_ticker_ledger,
     get_wheel_stats as wt_get_stats,
@@ -312,7 +313,13 @@ async def get_market_posture():
                 signals.append(s_dict)
 
             def _nan_to_none(v):
-                return None if isinstance(v, float) and math.isnan(v) else v
+                if isinstance(v, float) and math.isnan(v):
+                    return None
+                if isinstance(v, dict):
+                    return {k: _nan_to_none(val) for k, val in v.items()}
+                if isinstance(v, list):
+                    return [_nan_to_none(item) for item in v]
+                return v
 
             data = {
                 "date": date_str,
@@ -959,6 +966,18 @@ def wheel_stats(req: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/wheel/realized-monthly")
+def wheel_realized_monthly(req: Request):
+    from datetime import date
+    try:
+        with closing(sqlite3.connect(settings.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            year = str(date.today().year)
+            return {"year": year, "months": wt_get_monthly_realized_pnl(conn, year)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/wheel/equity-curve")
 def wheel_equity_curve(req: Request):
     from src.wheel_tracker.curve_stats import compute_curve_stats, compute_twr_curve, compute_spy_curve
@@ -970,11 +989,16 @@ def wheel_equity_curve(req: Request):
             ytd_start = f"{date.today().year}-01-01"
             curve = wt_read_curve(conn, ytd_start)
             if not curve:
-                return {"portfolio_curve": [], "spy_curve": [], "stats": None}
+                return {"portfolio_curve": [], "spy_curve": [], "stats": None, "live_value": None, "live_date": None}
+            last = curve[-1]
+            live_value = last.get("liquidation_value")
+            live_date = last["date"] if live_value is not None else None
             return {
                 "portfolio_curve": compute_twr_curve(curve),
                 "spy_curve": compute_spy_curve(curve),
                 "stats": compute_curve_stats(curve),
+                "live_value": live_value,
+                "live_date": live_date,
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

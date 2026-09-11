@@ -11,8 +11,9 @@ def compute_spy_curve(curve: list[dict]) -> list[dict]:
     if first <= 0:
         return []
     return [
-        {"date": r["date"], "pct": round(((r["spy_close"] / first) - 1) * 100, 4) if r["spy_close"] else 0.0}
+        {"date": r["date"], "pct": round(((r["spy_close"] / first) - 1) * 100, 4)}
         for r in curve
+        if r["spy_close"]
     ]
 
 

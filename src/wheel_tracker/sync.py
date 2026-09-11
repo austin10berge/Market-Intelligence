@@ -331,12 +331,30 @@ async def _sync_account(
     return count
 
 
+def _parse_liquidation_value(raw: str) -> float | None:
+    """Extract liquidationValue from a get_account response. Returns None if not found."""
+    data = _parse_schwab_text(raw)
+    if not isinstance(data, dict):
+        return None
+    sa = data.get("securitiesAccount", data)
+    for key in ("currentBalances", "initialBalances"):
+        balances = sa.get(key, {})
+        if isinstance(balances, dict):
+            val = balances.get("liquidationValue")
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
 async def _sync_positions(
     conn: sqlite3.Connection,
     session: ClientSession,
     account_id: str,
-) -> set[str]:
-    """Refresh open positions for one account. Returns set of active symbols."""
+) -> tuple[set[str], float | None]:
+    """Refresh open positions for one account. Returns (active_symbols, liquidation_value)."""
     from datetime import datetime, timezone
 
     refreshed_at = datetime.now(timezone.utc).isoformat()
@@ -355,7 +373,8 @@ async def _sync_positions(
         upsert_position(conn, pos)
         active_symbols.add(pos["symbol"])
     delete_stale_positions(conn, account_id, active_symbols)
-    return active_symbols
+    liq_value = _parse_liquidation_value(raw)
+    return active_symbols, liq_value
 
 
 async def _fetch_deltas(
@@ -437,6 +456,8 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
                     account_ids = _parse_accounts(raw_accounts)
                     logger.info("wheel_tracker: found %d account(s)", len(account_ids))
 
+                    total_liq_value = 0.0
+                    has_liq_value = False
                     for account_id in account_ids:
                         if not account_id:
                             continue
@@ -449,8 +470,11 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
                         imported = await _sync_account(conn, session, account_id, start, today)
                         summary["trades_imported"] += imported
 
-                        active = await _sync_positions(conn, session, account_id)
+                        active, liq_value = await _sync_positions(conn, session, account_id)
                         summary["positions_refreshed"] += len(active)
+                        if liq_value is not None:
+                            total_liq_value += liq_value
+                            has_liq_value = True
 
                         await _fetch_deltas(conn, session, account_id)
                         summary["accounts_synced"] += 1
@@ -468,6 +492,11 @@ async def run_sync(conn: sqlite3.Connection | None = None) -> dict:
                 logger.info("wheel_tracker: equity curve rebuilt (%d rows)", curve_rows)
             except Exception as exc:
                 logger.warning("wheel_tracker: equity curve rebuild failed (non-fatal): %s", exc)
+
+            if has_liq_value:
+                from .store import update_today_liquidation_value
+                update_today_liquidation_value(conn, total_liq_value)
+                logger.info("wheel_tracker: liquidation value stored: $%.2f", total_liq_value)
 
         except Exception as exc:
             logger.error("wheel_tracker sync failed: %s", exc, exc_info=True)
