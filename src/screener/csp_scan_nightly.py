@@ -163,7 +163,7 @@ async def main() -> None:
     candidates_raw = scan_result.get("candidates", [])
     logger.info("Scan returned %d candidates", len(candidates_raw))
 
-    scored = await score_wheel_candidates(candidates_raw, macro_context=macro_str)
+    scored = await score_wheel_candidates(candidates_raw, top_n=10, macro_context=macro_str)
 
     if caps.delta_cap is not None:
         scored = [c for c in scored if (c.get("delta") or 1.0) <= caps.delta_cap]

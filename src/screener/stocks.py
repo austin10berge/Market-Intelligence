@@ -69,6 +69,32 @@ def _to_float(value: object) -> float | None:
         return None
 
 
+def _drop_incomplete_rows(hist: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows whose Close is NaN.
+
+    yfinance appends an in-progress row for the current session with a
+    populated Volume but a NaN Close. Left in place that NaN propagates into
+    current_price, the SMA/BBand tails and every derived *_pct field, and then
+    breaks JSONResponse serialization (allow_nan=False) as an opaque 500.
+    """
+    if "Close" not in hist.columns:
+        return hist
+    return hist[hist["Close"].notna()]
+
+
+def _pct_from(value, base) -> float | None:
+    """Percent difference of `value` against `base`, to one decimal place.
+
+    Returns None when either side is missing or `base` is non-positive, so a
+    missing input can never produce a NaN that escapes into the JSON response.
+    """
+    if base is None or pd.isna(base) or float(base) <= 0:
+        return None
+    if value is None or pd.isna(value):
+        return None
+    return round(((float(value) - float(base)) / float(base)) * 100, 1)
+
+
 def _calculate_rv20(hist: pd.DataFrame) -> float | None:
     """Compute 20-day realized volatility from daily close-to-close returns."""
     closes = hist.get("Close")
@@ -700,6 +726,10 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
                 if info is None or hist is None or hist.empty:
                     continue
 
+                hist = _drop_incomplete_rows(hist)
+                if hist.empty:
+                    continue
+
                 current_price = hist["Close"].iloc[-1]
 
                 pct_1d = 0.0
@@ -825,31 +855,18 @@ def screen_stocks(tickers: list[str] | None = None, persist_history: bool = True
 
                 # Derived fields — computed from already-fetched data
                 high_52wk = _to_float(info.get("fiftyTwoWeekHigh"))
-                pct_from_52wk_high_val: float | None = None
-                if high_52wk and high_52wk > 0 and not pd.isna(current_price):
-                    # NOTE: negative = below high, positive = above high — this is
-                    # the opposite sign convention from csp_scanner.py/features.py's
-                    # pct_from_52wk_high (positive = below high), by design: this
-                    # value only feeds chat.py's signed "+/-X.X%" human-readable
-                    # display. Do not wire this field into a pct_from_52wk_high_max
-                    # gate without flipping the sign to match the scanner convention.
-                    pct_from_52wk_high_val = round(
-                        ((float(current_price) - high_52wk) / high_52wk) * 100, 1
-                    )
+                # NOTE: negative = below high, positive = above high — this is
+                # the opposite sign convention from csp_scanner.py/features.py's
+                # pct_from_52wk_high (positive = below high), by design: this
+                # value only feeds chat.py's signed "+/-X.X%" human-readable
+                # display. Do not wire this field into a pct_from_52wk_high_max
+                # gate without flipping the sign to match the scanner convention.
+                pct_from_52wk_high_val = _pct_from(current_price, high_52wk)
 
                 market_cap_val = _to_float(info.get("marketCap"))
 
-                sma_200_pct_val: float | None = None
-                if sma_200_val is not None and sma_200_val > 0:
-                    sma_200_pct_val = round(
-                        ((float(current_price) - sma_200_val) / sma_200_val) * 100, 1
-                    )
-
-                ema_200_pct_val: float | None = None
-                if ema_200_val is not None and ema_200_val > 0:
-                    ema_200_pct_val = round(
-                        ((float(current_price) - ema_200_val) / ema_200_val) * 100, 1
-                    )
+                sma_200_pct_val = _pct_from(current_price, sma_200_val)
+                ema_200_pct_val = _pct_from(current_price, ema_200_val)
 
                 bb_width_pct_val: float | None = None
                 if (

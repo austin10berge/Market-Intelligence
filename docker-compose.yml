@@ -74,7 +74,9 @@ services:
       ALPACA_TOOLSETS: "options-data,assets,stock-data"
     command: alpaca-mcp-server --transport streamable-http --host 0.0.0.0 --port 8001
     expose:
-      - "8001"  # Internal only — discord-bot reaches it via the Docker network
+      - "8001"  # discord-bot reaches it via the Docker network
+    ports:
+      - "127.0.0.1:8001:8001"  # Loopback-only — lets other host processes (e.g. Hermes) share this one instance instead of running their own
     restart: unless-stopped
     healthcheck:
       # No -f: the MCP endpoint 406s a bare GET (wrong Accept header) even when
@@ -171,6 +173,7 @@ services:
       - ./data:/app/data
       - ~/.claude:/root/.claude
       - ~/.claude.json:/root/.claude.json
+      - /home/dev/.local/bin/claude:/usr/local/bin/claude:ro
     depends_on:
       redis:
         condition: service_healthy

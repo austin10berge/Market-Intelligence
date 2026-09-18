@@ -181,6 +181,39 @@ def _score_candidate(
     return round(composite, 1)
 
 
+def _usable_quote(bid: float, ask: float) -> bool:
+    """True when the book is two-sided with ask strictly above bid.
+
+    A contract with no bid cannot be sold, so it is worthless to a
+    premium-selling strategy however attractive its last trade looks. Alpaca
+    also cannot derive IV or greeks from a one-sided book — `impliedVolatility`
+    and `greeks` arrive as None for exactly these rows, which is a symptom of
+    the missing bid rather than an independent fetch failure. A locked market
+    (bid == ask) is a real, unambiguous price rather than a data error, but we
+    still reject it as the conservative choice; a crossed book (bid > ask) is
+    rejected because it is genuinely invalid.
+    """
+    return bid > 0 and ask > 0 and ask > bid
+
+
+def _mid_price(bid: float, ask: float) -> float:
+    """Midpoint of the bid/ask — the usual limit-order target.
+
+    Preferred over the last trade price, which goes stale for months on
+    illiquid strikes (observed 2026-09-18: a 2026-04-22 print published as a
+    live premium) and can sit above the current ask.
+    """
+    return (bid + ask) / 2
+
+
+def _spread_pct(bid: float, ask: float) -> float:
+    """Bid/ask spread as a percentage of the midpoint — standard for options."""
+    mid = _mid_price(bid, ask)
+    if mid <= 0:
+        return 0.0
+    return ((ask - bid) / mid) * 100
+
+
 def screen_csp_candidates(
     tickers: list[str] | None = None,
     min_dte: int | None = None,
@@ -189,6 +222,7 @@ def screen_csp_candidates(
     max_rsi: float | None = None,
     min_adx: float | None = None,
     max_adx: float | None = None,
+    max_delta: float | None = None,
     precomputed_technicals: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Find CSP candidates with live Alpaca pricing, technical quality filters
@@ -220,6 +254,8 @@ def screen_csp_candidates(
         settings["min_adx"] = min_adx
     if max_adx is not None:
         settings["max_adx"] = max_adx
+    if max_delta is not None:
+        settings["max_delta"] = max_delta
     logger.info(
         "Screening CSP candidates across %d tickers with settings: %s",
         len(tickers),
@@ -421,6 +457,8 @@ def screen_csp_candidates(
         "wide_spread": 0,
         "low_iv": 0,
         "delta_filter": 0,
+        "no_bid": 0,
+        "no_delta": 0,
     }
 
     for c in potential_contracts:
@@ -437,13 +475,29 @@ def screen_csp_candidates(
             continue
 
         quote = snapshot.get("latestQuote", {})
-        trade = snapshot.get("latestTrade", {})
 
-        bid = quote.get("bp", 0.0)
-        ask = quote.get("ap", 0.0)
-        premium = trade.get("p", 0.0)
-        if premium == 0.0:
-            premium = c.get("yf_premium", 0.0)
+        bid = float(quote.get("bp", 0.0) or 0.0)
+        ask = float(quote.get("ap", 0.0) or 0.0)
+
+        # Reject one-sided books before the IV and delta gates below. Those two
+        # fields are None for exactly these contracts, so rejecting here keeps
+        # the later gates meaningful instead of letting a missing value pass.
+        if not _usable_quote(bid, ask):
+            rejected["no_bid"] += 1
+            logger.debug(
+                "No usable quote: %s %s %.0fP — bid=%.2f ask=%.2f",
+                c["symbol"],
+                c["expiration"],
+                c["strike"],
+                bid,
+                ask,
+            )
+            continue
+
+        # Mid, not the last trade. The yf_premium fallback is gone with it: a
+        # two-sided Alpaca quote is now required, and yfinance returns bid=ask=0
+        # outside market hours anyway.
+        premium = _mid_price(bid, ask)
 
         vol = snapshot.get("dailyBar", {}).get("v", 0)
         iv_raw = snapshot.get("impliedVolatility", 0.0)
@@ -464,7 +518,16 @@ def screen_csp_candidates(
 
         min_delta = settings.get("min_delta", 0.15)
         max_delta = settings.get("max_delta", 0.40)
-        if delta is not None and not (min_delta <= delta <= max_delta):
+        if delta is None:
+            rejected["no_delta"] += 1
+            logger.debug(
+                "No delta available: %s %s %.0fP",
+                c["symbol"],
+                c["expiration"],
+                c["strike"],
+            )
+            continue
+        if not (min_delta <= delta <= max_delta):
             rejected["delta_filter"] += 1
             logger.debug(
                 "Delta filter: %s %s %.0fP — delta=%.3f (allowed %.2f-%.2f)",
@@ -479,7 +542,7 @@ def screen_csp_candidates(
 
         # IV floor
         min_iv = settings.get("min_iv", 25.0)
-        if iv > 0 and iv < min_iv:
+        if iv <= 0 or iv < min_iv:
             rejected["low_iv"] += 1
             logger.debug(
                 "Low IV filtered: %s %s %.0fP — iv=%.1f (min=%.0f)",
@@ -516,21 +579,22 @@ def screen_csp_candidates(
             )
             continue
 
-        spread_pct = 0.0
-        if bid > 0 and ask > bid:
-            # Use midpoint-relative spread: standard for options
-            spread_pct = ((ask - bid) / ((ask + bid) / 2)) * 100
-            if spread_pct > settings["max_spread_pct"]:
-                rejected["wide_spread"] += 1
-                logger.debug(
-                    "Wide spread filtered: %s %s %.0fP — spread=%.1f%% (max=%.0f%%)",
-                    c["symbol"],
-                    c["expiration"],
-                    c["strike"],
-                    spread_pct,
-                    settings["max_spread_pct"],
-                )
-                continue
+        # _usable_quote above guarantees a two-sided, uncrossed book, so this
+        # gate now runs on every surviving candidate. Previously a bid of 0 left
+        # spread_pct at 0.0 and skipped the check entirely — the widest possible
+        # markets were the only ones that bypassed the spread filter.
+        spread_pct = _spread_pct(bid, ask)
+        if spread_pct > settings["max_spread_pct"]:
+            rejected["wide_spread"] += 1
+            logger.debug(
+                "Wide spread filtered: %s %s %.0fP — spread=%.1f%% (max=%.0f%%)",
+                c["symbol"],
+                c["expiration"],
+                c["strike"],
+                spread_pct,
+                settings["max_spread_pct"],
+            )
+            continue
 
         safe_dte = max(1, c["dte"])
         annualized_roc = (roc / safe_dte) * 365
@@ -542,7 +606,7 @@ def screen_csp_candidates(
         composite_score = _score_candidate(
             annualized_roc=annualized_roc,
             otm_pct=c["otm_pct"],
-            iv=iv if iv > 0 else 30.0,  # fallback to mid-range if IV unavailable
+            iv=iv,  # guaranteed > 0 by the IV floor above
             rsi=rsi_val,
             adx=adx_val,
             settings=settings,
@@ -555,7 +619,7 @@ def screen_csp_candidates(
             "expiration": c["expiration"],
             "dte": c["dte"],
             "strike": float(c["strike"]),
-            "premium": float(premium),
+            "premium": round(premium, 2),
             "roc_percent": round(roc, 2),
             "annualized_roc": round(annualized_roc, 2),
             "otm_percent": round(c["otm_pct"], 2),
@@ -582,10 +646,13 @@ def screen_csp_candidates(
     results = sorted(best_by_strike.values(), key=lambda x: x["composite_score"], reverse=True)
     logger.info(
         "CSP screen complete: %d contracts evaluated, %d candidates returned. "
-        "Rejected — no_snapshot=%d, delta=%d, low_premium=%d, low_roc=%d, wide_spread=%d, low_iv=%d",
+        "Rejected — no_snapshot=%d, no_bid=%d, no_delta=%d, delta=%d, low_premium=%d, "
+        "low_roc=%d, wide_spread=%d, low_iv=%d",
         len(potential_contracts),
         len(results),
         rejected["no_alpaca_snapshot"],
+        rejected["no_bid"],
+        rejected["no_delta"],
         rejected["delta_filter"],
         rejected["low_premium"],
         rejected["low_roc"],

@@ -47,7 +47,15 @@ docker compose run --rm prewarm
 - **Morning brief at `/brief/`** is served via a bind mount in `docker-compose.local.yml` only. Always start the dashboard with `-f docker-compose.yml -f docker-compose.local.yml`, otherwise the brief mount is dropped and nginx silently serves a static placeholder (still 200, no error).
 - When debugging a live issue: edits must land in the main workspace. Check `docker-compose.local.yml` `x-worktree-src` before assuming a worktree is mounted.
 - **Production is a separate host** (10.0.1.21). `dev-mi.austin10berge.com` is dev only. Diagnose prod bugs against the PROD API (`market.austin10berge.com`), not local containers.
-- Claude has no SSH/prod access. Prepare exact commands for the user to run manually.
+- Claude has SSH access to prod via the `firefly` host alias (`ssh firefly`, user `dev`, passwordless `sudo -n`). Confirmed working 2026-09-11.
+  - The compose project lives at `/root/market-intelligence`, owned by root — every git/docker command there needs `sudo -n` (non-interactive, so it fails fast instead of hanging if a password is ever required).
+  - Prod's `main` branch tracks the same GitHub repo as dev. Deploy flow: push to `origin/main` from dev, then on prod `sudo -n git -C /root/market-intelligence pull origin main`.
+  - Check `sudo -n git -C /root/market-intelligence status --short` and `diff` before pulling — prod sometimes carries its own uncommitted local hotfixes. Stash overlapping files (`git stash push -u -- <files>`) rather than assuming a clean pull.
+  - **Unlike dev, prod's `api` and `dashboard` images bake `src/` in at build time — there is no bind mount.** A restart alone will NOT pick up new code, Python or frontend. Every prod deploy needs a rebuild first:
+    ```bash
+    sudo -n docker compose -f /root/market-intelligence/docker-compose.yml build api dashboard
+    sudo -n docker compose -f /root/market-intelligence/docker-compose.yml up -d --no-build api dashboard
+    ```
 - **Logs without SSH**: Loki is reachable directly from this dev host at `http://10.0.1.25:3100` (no VPN needed) and covers every container in the fleet, including all Market Intelligence services (`market-intelligence-api`, `market-intelligence-pipeline-run-*`, `market-intelligence-prewarm-run-*`, `market-intelligence-discord-bot`, etc. — pipeline/refresh/prewarm runs get a unique `-run-<hash>` suffix per invocation). Query before asking the user to SSH in and tail a file:
   ```bash
   curl -s -G "http://10.0.1.25:3100/loki/api/v1/query_range" \

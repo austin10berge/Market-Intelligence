@@ -120,78 +120,198 @@ def _format_positions_for_note(positions: list[dict]) -> str:
     return "\n".join(rows)
 
 
+# ── AI-infrastructure thesis watchlist ───────────────────────────────────────
+# Jevons Paradox applied to software: AI calls these platforms as infrastructure,
+# driving API consumption even as per-unit efficiency improves.
+# Watch trigger: name appears in CSP scan (wheel-eligible) or moves >10% in a week.
+
+_THESIS_WATCHLIST: dict[str, str] = {
+    # Tier 1 — direct thesis, no AI rerate yet
+    "BAND": "Voice/SMS API backbone; AI agent communication infrastructure",
+    "GTLB": "CI/CD consumption rises with AI code generation; discount to GitHub multiple",
+    "YEXT": "Enterprise AI search/answer layer; massively beaten down",
+    "ESTC": "Native vector search + observability; direct AI infra play",
+    "APPN": "BPM workflow orchestration for AI agents; peak ~$200, no rerate",
+    "FSLY": "Edge compute for AI inference; recovering but not rerated",
+    "API":  "Real-time video/voice SDK (Agora); AI live interactions; extreme value",
+    "DOCU": "AI triggers e-sig/doc workflows; peak $300, no AI rerate",
+    "S":    "AI security (SentinelOne); AI expands attack surface + AI-powered product",
+    # Tier 2 — solid thesis, partial rerate
+    "PATH": "AI+RPA enterprise automation (UiPath); peak $85",
+    "CFLT": "Real-time event streaming for AI agents (Confluent Kafka)",
+    "RPD":  "Security ops platform; heavily beaten down, possible go-private floor",
+    "VRNS": "Data security/governance; AI data access creates urgent need",
+    "BOX":  "Document AI platform; Content API consumption play",
+    "HUBS": "CRM + marketing; AI personalizes at 100x volume through HubSpot",
+    "DT":   "APM/observability (Dynatrace); AI workloads multiply monitoring complexity",
+    "TENB": "Vulnerability management API; AI expands scannable attack surface",
+    "MQ":   "Card-issuing API (Marqeta); AI fintech apps issue cards on demand",
+    "KVYO": "Marketing delivery layer; AI-generated messages route through Klaviyo",
+}
+
+
+def _fetch_watchlist_snapshot(scan_symbols: set[str]) -> list[dict]:
+    """Fetch price + 52-week metrics for the thesis watchlist. Runs in a thread."""
+    import yfinance as yf
+
+    symbols = list(_THESIS_WATCHLIST.keys())
+    rows: list[dict] = []
+    try:
+        hist = yf.download(
+            symbols,
+            period="1y",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+        close = (
+            hist["Close"] if len(symbols) > 1
+            else hist[["Close"]].rename(columns={"Close": symbols[0]})
+        )
+        for sym in symbols:
+            try:
+                series = close[sym].dropna() if sym in close.columns else None
+                if series is None or series.empty:
+                    raise ValueError("no data")
+                price = float(series.iloc[-1])
+                hi52 = float(series.max())
+                lo52 = float(series.min())
+                vs_hi = (price - hi52) / hi52 * 100
+                vs_lo = (price - lo52) / lo52 * 100
+                w1_chg = (
+                    (price - float(series.iloc[-6])) / float(series.iloc[-6]) * 100
+                    if len(series) >= 6 else None
+                )
+                rows.append({
+                    "symbol": sym,
+                    "price": round(price, 2),
+                    "vs_52w_hi": round(vs_hi, 1),
+                    "vs_52w_lo": round(vs_lo, 1),
+                    "w1_chg": round(w1_chg, 1) if w1_chg is not None else None,
+                    "in_scan": sym in scan_symbols,
+                    "thesis": _THESIS_WATCHLIST[sym],
+                })
+            except Exception:
+                rows.append({
+                    "symbol": sym, "price": None, "vs_52w_hi": None,
+                    "vs_52w_lo": None, "w1_chg": None,
+                    "in_scan": sym in scan_symbols, "thesis": _THESIS_WATCHLIST[sym],
+                })
+    except Exception as exc:
+        logger.warning("Watchlist snapshot failed: %s", exc)
+        rows = [
+            {
+                "symbol": sym, "price": None, "vs_52w_hi": None,
+                "vs_52w_lo": None, "w1_chg": None,
+                "in_scan": sym in scan_symbols, "thesis": _THESIS_WATCHLIST[sym],
+            }
+            for sym in symbols
+        ]
+    return rows
+
+
+def _format_watchlist_for_note(rows: list[dict]) -> str:
+    lines = [
+        "| Ticker | Price | vs 52W Hi | vs 52W Lo | 1W Chg | In Scan | Thesis |",
+        "|--------|-------|-----------|-----------|--------|---------|--------|",
+    ]
+    for r in rows:
+        price = f"${r['price']:.2f}" if r["price"] is not None else "—"
+        vs_hi = f"{r['vs_52w_hi']:+.1f}%" if r["vs_52w_hi"] is not None else "—"
+        vs_lo = f"{r['vs_52w_lo']:+.1f}%" if r["vs_52w_lo"] is not None else "—"
+        w1 = f"{r['w1_chg']:+.1f}%" if r["w1_chg"] is not None else "—"
+        in_scan = "✓ **YES**" if r["in_scan"] else "—"
+        thesis = r["thesis"][:65]
+        lines.append(
+            f"| {r['symbol']} | {price} | {vs_hi} | {vs_lo} | {w1} | {in_scan} | {thesis} |"
+        )
+    return "\n".join(lines)
+
+
+def _format_watchlist_for_prompt(rows: list[dict]) -> str:
+    scan_hits = [r for r in rows if r["in_scan"] and r["price"] is not None]
+    big_movers = [r for r in rows if r["w1_chg"] is not None and abs(r["w1_chg"]) >= 10]
+    lines = ["AI-infrastructure thesis watchlist (Jevons Paradox):"]
+    for r in rows:
+        if r["price"] is None:
+            continue
+        scan_flag = " [IN SCAN — wheel-eligible]" if r["in_scan"] else ""
+        move_flag = (
+            f" [ALERT: {r['w1_chg']:+.1f}% this week]"
+            if r["w1_chg"] is not None and abs(r["w1_chg"]) >= 10 else ""
+        )
+        lines.append(
+            f"- {r['symbol']} ${r['price']} ({r['vs_52w_hi']:+.1f}% from 52w hi)"
+            f"{scan_flag}{move_flag} — {r['thesis']}"
+        )
+    if scan_hits:
+        lines.append(
+            f"\nSCAN HITS this week: {', '.join(r['symbol'] for r in scan_hits)}"
+            " — these passed CSP filters; flag in trading plan."
+        )
+    if big_movers:
+        lines.append(
+            f"NOTABLE MOVES: {', '.join(r['symbol'] for r in big_movers)}"
+            " — flag any with relevant catalyst."
+        )
+    return "\n".join(lines)
+
+
 # ── Wheel scan parameters (applied every trade-review run) ───────────────────
+# min_market_cap_b: lowered to 1.5 (default 10.0) so beaten-down thesis names
+#   ($2–9B range: GTLB, PATH, CFLT, ESTC, S, APPN, FSLY, BOX, MQ …) enter the scan.
+# max_vol_pct: raised to 85.0 (was 65.0) — thesis plays are expected to have
+#   elevated IV; capping at 65 was excluding exactly the names we want to find.
+# max_beta: raised to 3.0 (default 2.4) — high-growth beaten-down names are
+#   more volatile; the thesis is speculative by design.
 
 _WHEEL_SCAN_PARAMS = ScannerParams(
+    min_market_cap_b=1.5,
+    max_vol_pct=85.0,
+    max_beta=3.0,
     adr20_pct_min=3.5,
-    max_vol_pct=65.0,
     min_days_to_earnings=20,
+    max_rsi=70.0,
+    min_adx=0.0,
+    max_adx=100.0,
+    min_fcf_b=None,
+    max_debt_to_equity=None,
+    min_revenue_growth=None,
+    min_earnings_growth=None,
 )
 
-# ── Exhibit 2D: 30-day macro forecast ────────────────────────────────────────
+# ── Exhibits 2D + 2E: combined forecast + wheel trading plan (one LLM call) ───
 
-_FORECAST_SYSTEM = """\
-You are a macroeconomic analyst and market strategist. \
+_COMBINED_SYSTEM = """\
+You are a macroeconomic analyst and professional options trader \
+specializing in the Cash-Secured Put and Covered Call Wheel strategy. \
 Speak in the third person. You do not mention your credentials. \
 Do not use the word "provided" — use "recent" or "latest" instead. \
-Do not recommend specific stocks or ETFs.\
+Do not recommend buying stock outright — only wheel-eligible options strategies. \
+Do not recommend specific stocks or ETFs in the forecast section.\
 """
 
-
-def _build_forecast_prompt(macro_context: str) -> str:
-    today_str = date.today().strftime("%B %d, %Y")
-    return (
-        f"Here is context to update your knowledge to the current date:\n\n"
-        f"{macro_context}\n\n"
-        f"Today is {today_str}.\n\n"
-        "Provide a complete expected timeline of the most important economic, "
-        "technological, and political events for the next 30 days in the USA. "
-        "Include not only scheduled events and known forecasts, but also best "
-        "expectations about their realization.\n\n"
-        "Output a markdown table with columns: Timeframe | Event | "
-        "Market Expectation | Your Forecast | Implication for Options Premium Sellers.\n\n"
-        "Include forecasts for: interest rates (Fed decisions), inflation (CPI), "
-        "tariffs, government spending/budget, market sentiment, consumer confidence, "
-        "labor market (jobs report), S&P 500 levels and returns, VIX trajectory, "
-        "Gold prices, BTC prices, and any major sector or tech developments.\n\n"
-        "First, state your expectation for S&P 500 level and return by end of month "
-        "(today's level is in the market snapshot above). "
-        "Then output the 30-day table.\n\n"
-        "Keep your entire response under 800 words. Be concise."
-    )
+_PLAN_DELIMITER      = "---PLAN---"
+_DISCOVERY_DELIMITER = "---DISCOVERY---"
 
 
-async def _generate_forecast(macro_context: str) -> str:
-    logger.info("Macro note: generating 30-day forecast (Exhibit 2D)")
-    result = await synthesize(_FORECAST_SYSTEM, _build_forecast_prompt(macro_context))
-    if not result:
-        return "_LLM forecast unavailable._"
-    max_chars = 6000
-    if len(result) > max_chars:
-        truncated = result[:max_chars]
-        last_break = truncated.rfind("\n\n")
-        truncated = truncated[:last_break] if last_break > max_chars // 2 else truncated
-        result = truncated.rstrip() + "\n\n_[output truncated]_"
-    return result
+def _truncate(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    truncated = text[:max_chars]
+    last_break = truncated.rfind("\n\n")
+    truncated = truncated[:last_break] if last_break > max_chars // 2 else truncated
+    return truncated.rstrip() + "\n\n_[output truncated]_"
 
 
-# ── Exhibit 2E: regime assessment + wheel trading plan ───────────────────────
-
-_REGIME_SYSTEM = """\
-You are a professional options trader specializing in the Cash-Secured Put \
-and Covered Call Wheel strategy. \
-Speak in the third person. You do not mention your credentials. \
-Do not use the word "provided" — use "recent" or "latest" instead. \
-Do not recommend buying stock outright — only wheel-eligible options strategies.\
-"""
-
-
-def _build_regime_prompt(
-    forecast: str,
+def _build_combined_prompt(
+    macro_context: str,
     snapshot: dict,
     top_candidates: list[dict],
     open_positions: list[dict],
+    watchlist_rows: list[dict] | None = None,
 ) -> str:
+    today_str = date.today().strftime("%B %d, %Y")
     spy_str = format_spy_vix_str(snapshot)
 
     def _fmt(v: object, suffix: str = "", dec: int = 1) -> str:
@@ -214,22 +334,41 @@ def _build_regime_prompt(
         rsi = _fmt(c.get("rsi"), dec=0)
         score = c.get("wheel_score") or c.get("composite_score", "N/A")
         thesis = c.get("wheel_thesis", "")
+        thesis_tag = " [THESIS]" if sym in _THESIS_WATCHLIST else ""
         cand_lines.append(
-            f"- {sym} | {sector} | IV:{iv} ADR:{adr} AnnROC:{ann_roc} "
+            f"- {sym}{thesis_tag} | {sector} | IV:{iv} ADR:{adr} AnnROC:{ann_roc} "
             f"Δ{delta} {dte}DTE {strike}P | Beta:{beta} RSI:{rsi} WheelScore:{score}"
             + (f" | {thesis}" if thesis else "")
         )
     cands_str = "\n".join(cand_lines) or "No candidates from scan."
-
     positions_str = _format_positions_for_prompt(open_positions)
+    watchlist_str = _format_watchlist_for_prompt(watchlist_rows) if watchlist_rows else ""
 
     return (
-        f"30-day macro forecast:\n\n{forecast}\n\n"
-        f"Current market: {spy_str}\n\n"
-        f"Current open wheel positions:\n{positions_str}\n\n"
+        f"Here is context to update your knowledge to the current date:\n\n"
+        f"{macro_context}\n\n"
+        f"Today is {today_str}. Current market: {spy_str}\n\n"
         f"Top wheel candidates from scan:\n{cands_str}\n\n"
-        "Based on the macro forecast and market conditions above, provide a complete "
-        "monthly wheel trading plan for the next 30 days. "
+        f"Current open wheel positions:\n{positions_str}\n\n"
+        + (f"{watchlist_str}\n\n" if watchlist_str else "")
+        + "## Part 1 — 30-Day Macro Forecast\n\n"
+        "Provide a complete expected timeline of the most important economic, "
+        "technological, and political events for the next 30 days in the USA. "
+        "Include not only scheduled events and known forecasts, but also best "
+        "expectations about their realization.\n\n"
+        "Output a markdown table with columns: Timeframe | Event | "
+        "Market Expectation | Your Forecast | Implication for Options Premium Sellers.\n\n"
+        "Include forecasts for: interest rates (Fed decisions), inflation (CPI), "
+        "tariffs, government spending/budget, market sentiment, consumer confidence, "
+        "labor market (jobs report), S&P 500 levels and returns, VIX trajectory, "
+        "Gold prices, BTC prices, and any major sector or tech developments.\n\n"
+        "First, state your expectation for S&P 500 level and return by end of month "
+        "(today's level is in the market snapshot above). "
+        "Then output the 30-day table. Keep Part 1 under 800 words.\n\n"
+        f"After Part 1, output exactly this line on its own: {_PLAN_DELIMITER}\n\n"
+        "## Part 2 — Monthly Wheel Trading Plan\n\n"
+        "Based on the macro forecast you just wrote and the market conditions above, "
+        "provide a complete monthly wheel trading plan for the next 30 days. "
         "Output exactly the following sections:\n\n"
         "**Regime:** [Bull / Sideways / Bear] — [one sentence rationale]\n\n"
         "**SPX Month-end Expectation:** [specific level and % return]\n\n"
@@ -242,35 +381,91 @@ def _build_regime_prompt(
         "**Thesis / Edge:** [2-3 sentences: why selling premium has edge this month]\n\n"
         "**Risks:**\n1. ...\n2. ...\n3. ...\n\n"
         "**Top Candidates:**\n"
-        "| Ticker | Score | Sector | Ann ROC% | Thesis (one sentence) |\n"
-        "|--------|-------|--------|----------|-----------------------|\n"
-        "[one row per candidate, max 10 rows]\n\n"
+        "| Ticker | Score | Sector | Ann ROC% | Type | Thesis (one sentence) |\n"
+        "|--------|-------|--------|----------|------|-----------------------|\n"
+        "[one row per candidate, max 10 rows; set Type = 'Wheel' for standard names "
+        "or 'Thesis' for any candidate tagged [THESIS] above — thesis candidates are "
+        "speculative, expect higher IV and beta, recommend 0.15–0.20 delta and "
+        "smaller position size vs standard wheel names]\n\n"
         "**Open Position Actions:**\n"
         "| Ticker | Type | Strike | Expiry | DTE | uPnL | Action |\n"
         "|--------|------|--------|--------|-----|------|--------|\n"
         "[one row per open position; Action = Hold / Roll / Close with brief reason]\n\n"
-        "Keep your entire response under 1200 words. Be direct and specific."
+        "Keep Part 2 under 1200 words. Be direct and specific.\n\n"
+        f"After Part 2, output exactly this line on its own: {_DISCOVERY_DELIMITER}\n\n"
+        "## Part 3 — New Thesis Candidate Discovery\n\n"
+        "Using the AI-infrastructure / Jevons Paradox thesis above "
+        "(AI calls existing software platforms as infrastructure, driving API and "
+        "consumption revenue even as per-unit efficiency improves), identify 3–5 NEW "
+        "companies NOT already on the watchlist above that may fit this thesis. "
+        "Draw on any recent news or catalysts in the macro context you received.\n\n"
+        "Criteria for inclusion:\n"
+        "- Software, data, developer-tools, or communications company with an "
+        "API/consumption-driven revenue model\n"
+        "- Meaningfully below its all-time high (ideally ≥40% off peak)\n"
+        "- Has NOT yet rerated to an AI-infrastructure multiple in the market\n"
+        "- Bonus: a recent catalyst connects it to AI adoption or AI use of its platform\n\n"
+        "Be contrarian and open-minded — avoid names the market has already rerated. "
+        "Smaller-cap or overlooked names are welcome.\n\n"
+        "Output a markdown table with columns:\n"
+        "Ticker | Company | Why it fits the AI-infrastructure thesis | "
+        "Recent catalyst or risk | Est. drawdown from ATH\n\n"
+        "Keep Part 3 to 3–5 rows only."
     )
 
 
-async def _generate_regime_plan(
-    forecast: str,
+async def _generate_forecast_and_plan(
+    macro_context: str,
     snapshot: dict,
     top_candidates: list[dict],
     open_positions: list[dict],
-) -> str:
-    logger.info("Macro note: generating regime + trading plan (Exhibit 2E)")
-    prompt = _build_regime_prompt(forecast, snapshot, top_candidates, open_positions)
-    result = await synthesize(_REGIME_SYSTEM, prompt)
+    watchlist_rows: list[dict] | None = None,
+) -> tuple[str, str, str]:
+    """Generate Exhibits 2D, 2E, and 2F in one LLM call.
+
+    Returns:
+        (forecast_text, plan_text, discovery_text) ready to drop into the note template.
+    """
+    logger.info("Macro note: generating forecast + plan + discovery (Exhibits 2D+2E+2F)")
+    prompt = _build_combined_prompt(
+        macro_context, snapshot, top_candidates, open_positions, watchlist_rows
+    )
+    result = await synthesize(_COMBINED_SYSTEM, prompt)
+
+    fallback_forecast  = "_LLM forecast unavailable._"
+    fallback_plan      = "_LLM regime assessment unavailable._"
+    fallback_discovery = "_LLM discovery unavailable._"
+
     if not result:
-        return "_LLM regime assessment unavailable._"
-    max_chars = 8000
-    if len(result) > max_chars:
-        truncated = result[:max_chars]
-        last_break = truncated.rfind("\n\n")
-        truncated = truncated[:last_break] if last_break > max_chars // 2 else truncated
-        result = truncated.rstrip() + "\n\n_[output truncated]_"
-    return result
+        return fallback_forecast, fallback_plan, fallback_discovery
+
+    # Split on discovery delimiter first (it comes last), then plan delimiter.
+    if _DISCOVERY_DELIMITER in result:
+        body, discovery = result.split(_DISCOVERY_DELIMITER, maxsplit=1)
+        discovery = discovery.strip()
+    else:
+        body      = result
+        discovery = fallback_discovery
+        logger.warning("Macro note: discovery delimiter missing from LLM output")
+
+    if _PLAN_DELIMITER in body:
+        parts    = body.split(_PLAN_DELIMITER, maxsplit=1)
+        forecast = parts[0].strip()
+        plan     = parts[1].strip()
+    else:
+        logger.warning("Macro note: plan delimiter missing — attempting heuristic split")
+        for heading in ("**Regime:**", "## Part 2", "## Monthly"):
+            if heading in body:
+                idx      = body.index(heading)
+                forecast = body[:idx].strip()
+                plan     = body[idx:].strip()
+                break
+        else:
+            logger.warning("Macro note: could not split output — treating all as plan")
+            forecast = fallback_forecast
+            plan     = body.strip()
+
+    return _truncate(forecast, 6000), _truncate(plan, 8000), _truncate(discovery, 2000)
 
 
 # ── Note renderer ─────────────────────────────────────────────────────────────
@@ -283,6 +478,8 @@ def _render_note(
     open_positions: list[dict],
     target_week: date,
     candidate_count: int,
+    watchlist_rows: list[dict] | None = None,
+    discovery_text: str = "",
 ) -> str:
     iso_cal = target_week.isocalendar()
     month_str = f"Week {iso_cal.week}, {iso_cal.year}"
@@ -300,6 +497,13 @@ def _render_note(
 
     expiry_rows = _expiry_table_rows()
     pos_rows = _format_positions_for_note(open_positions)
+    watchlist_section = (
+        "\n\n---\n\n## AI Infrastructure Thesis Watchlist\n\n"
+        "> Thesis: AI calls these software platforms as infrastructure (Jevons Paradox).\n"
+        "> **Watch triggers:** ✓ in _In Scan_ column = wheel-eligible entry signal. "
+        "1W Chg >±10% = investigate catalyst.\n\n"
+        + _format_watchlist_for_note(watchlist_rows)
+    ) if watchlist_rows else ""
 
     return f"""\
 # Trade Memo — {month_str}
@@ -345,6 +549,17 @@ def _render_note(
 ## Monthly Wheel Trading Plan (Exhibit 2E)
 
 {regime_plan}
+{watchlist_section}
+{f"""
+
+---
+
+## New Thesis Candidates — Discovery (Exhibit 2F)
+
+> AI calls existing software as infrastructure (Jevons Paradox). LLM-suggested names
+> outside the static watchlist, refreshed each week from current news + macro context.
+
+{discovery_text}""" if discovery_text and "unavailable" not in discovery_text else ""}
 
 ---
 
@@ -371,9 +586,10 @@ async def generate_macro_note(
     Pipeline:
       1. CSP scan (ADR≥3.5%, IV≤65%, earnings>20d) + macro context + positions (parallel)
       2. Score all scan candidates individually (Exhibit 2B financials + per-stock LLM)
-      3. 30-day macro forecast (Exhibit 2D)
-      4. Regime + trading plan (Exhibit 2E) using LLM-scored candidates
-      5. Render + write complete note
+         + fetch thesis watchlist snapshot (parallel with scoring)
+      3. 30-day macro forecast (Exhibit 2D) + regime plan (Exhibit 2E)
+         + new thesis candidate discovery (Exhibit 2F) — one combined LLM call
+      4. Render + write complete note
 
     Args:
         out_dir:     Output directory. Defaults to ./data/trade-memos/.
@@ -409,19 +625,25 @@ async def generate_macro_note(
     )
 
     # Step 3: Score candidates (Exhibit 2B per-stock financials + individual LLM)
-    logger.info("Macro note: scoring %d candidates via wheel scorer", len(scan_candidates))
-    top_candidates = await score_wheel_candidates(scan_candidates, macro_context=macro_str)
+    # Run watchlist snapshot in parallel with scoring — no dependency between them.
+    scan_symbols = {c.get("symbol", "") for c in scan_candidates}
+    logger.info(
+        "Macro note: scoring %d candidates + fetching watchlist snapshot", len(scan_candidates)
+    )
+    top_candidates, watchlist_rows = await asyncio.gather(
+        score_wheel_candidates(scan_candidates, top_n=10, macro_context=macro_str),
+        asyncio.to_thread(_fetch_watchlist_snapshot, scan_symbols),
+    )
 
-    # Step 4: 30-day macro forecast (Exhibit 2D)
-    forecast = await _generate_forecast(macro_str)
+    # Steps 4+5+6: forecast (2D) + regime plan (2E) + discovery (2F) — one combined call
+    forecast, regime_plan, discovery_text = await _generate_forecast_and_plan(
+        macro_str, snapshot, top_candidates, open_positions, watchlist_rows
+    )
 
-    # Step 5: Regime + trading plan (Exhibit 2E) — uses LLM-scored candidates
-    regime_plan = await _generate_regime_plan(forecast, snapshot, top_candidates, open_positions)
-
-    # Step 6: Render + write
+    # Step 7: Render + write
     note = _render_note(
         snapshot, wiki, forecast, regime_plan, open_positions,
-        target_week, len(scan_candidates),
+        target_week, len(scan_candidates), watchlist_rows, discovery_text,
     )
     out_file.write_text(note, encoding="utf-8")
     logger.info("Macro note written: %s (%d bytes)", out_file, len(note.encode()))

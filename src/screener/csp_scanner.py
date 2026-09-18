@@ -26,6 +26,8 @@ import math
 import re
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import date as _date
+from datetime import timedelta as _timedelta
 from typing import TypedDict
 
 import pandas as pd
@@ -47,7 +49,7 @@ logger = logging.getLogger(__name__)
 # ── Default pre-filter values ─────────────────────────────────────────────────
 
 DEFAULT_MIN_MARKET_CAP_B = 10.0
-DEFAULT_MAX_PRICE        = 150.0
+DEFAULT_MAX_PRICE        = 500.0
 DEFAULT_MIN_BETA         = 0.8
 DEFAULT_MAX_BETA         = 2.4
 DEFAULT_MIN_VOL_PCT      = 30.0
@@ -182,6 +184,9 @@ class ScannerParams:
     volume_ratio_max:        float | None = None   # e.g. 1.15 (ratio vs 20d avg)
     pct_from_52wk_high_max:  float | None = None   # e.g. 12.0 (% below 52wk high)
     adr20_pct_max:           float | None = None   # e.g. 4.0
+    adr20_pct_min:           float | None = None   # e.g. 3.5 — wheel: require minimum daily range
+    max_vol_pct:             float | None = None   # e.g. 65.0 — wheel: exclude lottery-ticket IV
+    min_days_to_earnings:    int   | None = None   # e.g. 30 — exclude if earnings within N days
     price_vs_ema200_pct_min: float | None = None   # e.g. 5.0 (% above EMA200)
     # Sorted list of active condition IDs — order doesn't affect logic
     conditions: list[str] = field(default_factory=list)
@@ -191,6 +196,7 @@ class ScannerParams:
     watchlist_only: bool = False
     # Sector filter — empty list means no filter (all sectors pass)
     sectors: list[str] = field(default_factory=list)
+    max_delta: float = 0.40
 
     def cache_key_suffix(self) -> str:
         """Return a short deterministic hash of the params for cache keying."""
@@ -227,6 +233,9 @@ class ScannerParams:
         volume_ratio_max: float | None = None,
         pct_from_52wk_high_max: float | None = None,
         adr20_pct_max: float | None = None,
+        adr20_pct_min: float | None = None,
+        max_vol_pct: float | None = None,
+        min_days_to_earnings: int | None = None,
         price_vs_ema200_pct_min: float | None = None,
         restrict_to_watchlist_universe: bool = False,
         watchlist_only: bool = False,
@@ -268,6 +277,11 @@ class ScannerParams:
             volume_ratio_max     = volume_ratio_max,
             pct_from_52wk_high_max  = pct_from_52wk_high_max,
             adr20_pct_max        = adr20_pct_max,
+            adr20_pct_min        = adr20_pct_min,
+            max_vol_pct          = max_vol_pct,
+            min_days_to_earnings = (
+                int(min_days_to_earnings) if min_days_to_earnings is not None else None
+            ),
             price_vs_ema200_pct_min = price_vs_ema200_pct_min,
             restrict_to_watchlist_universe = restrict_to_watchlist_universe,
             watchlist_only   = watchlist_only,
@@ -716,7 +730,8 @@ def apply_vol_filter(
         )
 
         if iv is not None:
-            if iv >= params.min_vol_pct:
+            iv_too_high = params.max_vol_pct is not None and iv > params.max_vol_pct
+            if iv >= params.min_vol_pct and not iv_too_high:
                 row["vol_gate"] = "iv"
                 passing_tickers.append(symbol)
                 passing_rows.append(row)
@@ -944,10 +959,14 @@ def apply_technical_conditions(
         params.volume_ratio_max is not None,
         params.pct_from_52wk_high_max is not None,
         params.adr20_pct_max is not None,
+        params.adr20_pct_min is not None,
         params.price_vs_ema200_pct_min is not None,
     ])
 
-    needs_indicators = bool(conditions) or rsi_filter_active or adx_filter_active or numeric_tech_gates
+    needs_indicators = (
+        bool(conditions) or rsi_filter_active or adx_filter_active
+        or numeric_tech_gates or params.min_days_to_earnings is not None
+    )
 
     if not needs_indicators:
         tickers = [r["symbol"] for r in vol_rows]
@@ -1039,13 +1058,39 @@ def apply_technical_conditions(
             _gate_max("volume_ratio",        params.volume_ratio_max),
             _gate_max("pct_from_52wk_high",  params.pct_from_52wk_high_max),
             _gate_max("adr20_pct",           params.adr20_pct_max),
+            _gate_min("adr20_pct",           params.adr20_pct_min),
             _gate_min("price_vs_ema200_pct", params.price_vs_ema200_pct_min),
         ])
+
+        # Earnings proximity check — exclude if next earnings is within min_days_to_earnings
+        earnings_passed = True
+        if params.min_days_to_earnings is not None:
+            try:
+                _today = _date.today()
+                _cutoff = _today + _timedelta(days=params.min_days_to_earnings)
+                cal = call_with_timeout(
+                    lambda: yf.Ticker(symbol).calendar, label=f"calendar:{symbol}"
+                )
+                if isinstance(cal, dict):
+                    _dates = cal.get("Earnings Date", [])
+                    if not isinstance(_dates, list):
+                        _dates = [_dates]
+                    for _d in _dates:
+                        try:
+                            _edate = pd.Timestamp(_d).date()
+                            if _today <= _edate <= _cutoff:
+                                earnings_passed = False
+                                failed_gates.append(f"earnings_within_{params.min_days_to_earnings}d")
+                                break
+                        except Exception:
+                            pass
+            except Exception as exc:
+                logger.debug("Earnings calendar fetch failed for %s: %s", symbol, exc)
 
         row["technical_indicators"] = indicators
         row["technical_conditions"] = results
 
-        if all_passed and rsi_passed and adx_passed and numeric_passed:
+        if all_passed and rsi_passed and adx_passed and numeric_passed and earnings_passed:
             passing_tickers.append(symbol)
             passing_rows.append(row)
         else:
@@ -1193,16 +1238,24 @@ def run_csp_scan(params: ScannerParams | None = None) -> dict:
         max_rsi=params.max_rsi,
         min_adx=params.min_adx,
         max_adx=params.max_adx,
+        max_delta=params.max_delta,
         precomputed_technicals=precomputed_technicals,
     )
 
-    # Merge fundamental fields (fcf, forward_pe) into each candidate
+    # Merge fundamental + technical fields into each candidate for downstream scoring
     fundamentals_by_symbol = {r["symbol"]: r for r in tech_rows}
     for c in candidates:
         fund = fundamentals_by_symbol.get(c["symbol"], {})
         c["fcf"]        = fund.get("fcf")
         c["forward_pe"] = fund.get("forward_pe")
         c["peg_ratio"]  = fund.get("peg_ratio")
+        c["beta"]       = fund.get("beta")
+        c["sector"]     = fund.get("sector")
+        tech_ind = fund.get("technical_indicators") or {}
+        c["sma200"]              = tech_ind.get("sma200")
+        c["adr20_pct"]           = tech_ind.get("adr20_pct")
+        c["bb_pct_from_lower"]   = tech_ind.get("bb_pct_from_lower")
+        c["price_vs_ema200_pct"] = tech_ind.get("price_vs_ema200_pct")
 
     filter_summary: FilterSummary = {
         "combined_unique":           len(universe),

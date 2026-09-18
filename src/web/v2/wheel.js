@@ -192,9 +192,9 @@ window.WheelView = (() => {
         return `
         <div class="whl-stats-grid">
             <div class="whl-stat">
-                <div class="whl-stat-label">Net Premium YTD</div>
+                <div class="whl-stat-label">Net Premium Traded YTD</div>
                 <div class="whl-stat-val" style="color:${premColor}">${fmtMoney(s.premium_ytd)}</div>
-                <div class="whl-stat-sub">MTD ${fmtMoney(s.premium_mtd)}</div>
+                <div class="whl-stat-sub">MTD ${fmtMoney(s.premium_mtd)} · by trade date</div>
             </div>
             <div class="whl-stat">
                 <div class="whl-stat-label">Net Returns YTD</div>
@@ -215,16 +215,29 @@ window.WheelView = (() => {
 
     // ── Open Holdings (equity positions) ──
 
+    // Schwab classifies ETFs as COLLECTIVE_INVESTMENT, not EQUITY. Both are
+    // share positions the wheel writes calls against, so both belong here.
+    // MUTUAL_FUND is excluded on purpose — that is the SWVXX cash sweep.
+    const HOLDING_ASSET_TYPES = ['EQUITY', 'COLLECTIVE_INVESTMENT'];
+
     function renderHoldings(positions) {
-        const equities = positions.filter(p => p.asset_type === 'EQUITY');
-        if (!equities.length) return `<div class="list-message">No equity holdings</div>`;
+        const equities = positions.filter(p => HOLDING_ASSET_TYPES.includes(p.asset_type));
+        if (!equities.length) return `<div class="list-message">No share holdings</div>`;
         return equities.map((p, i) => {
             const qty = Math.abs(p.quantity || 0);
             const avgCost = p.average_price || 0;
             const curPrice = p.current_price || 0;
             const costBasis = qty * avgCost;
             const curValue = p.market_value || (qty * curPrice);
-            const unrealized = p.unrealized_pnl ?? (curValue - costBasis);
+            // Schwab's unrealized_pnl normally equals curValue - costBasis exactly.
+            // A stale or half-written snapshot can break that, and the card would
+            // then print a gain next to a cost basis that implies a loss. Prefer
+            // the number consistent with the two figures shown beside it.
+            const computed = curValue - costBasis;
+            const stored = p.unrealized_pnl;
+            const unrealized = (stored == null || Math.abs(stored - computed) > 1)
+                ? computed
+                : stored;
             const pnlColor = moneyColor(unrealized);
             return `
             <div class="option-card${unrealized >= 0 ? ' up' : ' down'}" style="--row-delay:${i*30}ms">
@@ -392,7 +405,7 @@ window.WheelView = (() => {
             <div id="whl-perf-section"><div class="list-message loading">Loading…</div></div>
 
             <div class="section-header" style="padding-top:4px">
-                <span class="section-title">Monthly Realized</span>
+                <span class="section-title">Monthly Realized · by close date</span>
             </div>
             <div id="whl-monthly-realized"><div class="list-message loading">Loading…</div></div>
 

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 # Load .env from the project root (one level up from discord_bot/)
@@ -49,21 +49,15 @@ class MarketIntelligenceBot(commands.Bot):
 
     async def on_ready(self) -> None:
         logger.info(f"✅ Logged in as {self.user} (ID: {self.user.id})")
-        asyncio.create_task(self._check_claude_auth())
+        self._claude_auth_loop.start()
 
-    async def _check_claude_auth(self) -> None:
-        # TODO: Claude OAuth tokens in the isolated discord-bot-config expire
-        # (~30 days). When they do, all claude -p calls silently fail and the
-        # bot falls back to Gemini (or the static fallback). This check fires
-        # on every restart so the logs immediately show auth state rather than
-        # discovering it on the first user message.
-        #
+    @tasks.loop(hours=24)
+    async def _claude_auth_loop(self) -> None:
+        # OAuth tokens in the isolated discord-bot-config expire (~30 days).
+        # Runs once immediately on startup, then every 24h, so expiry is caught
+        # proactively rather than discovered on the first failing user message.
+        # Loki alert watches for "CLAUDE AUTH EXPIRED" in this container's logs.
         # To re-auth: docker exec -it market-intelligence-discord-bot claude
-        # Then follow the OAuth URL (opens on any browser/device).
-        #
-        # Long-term: add a Loki alert on "Not logged in" log lines, or mount
-        # the host's real ~/.claude credentials instead of the isolated copy
-        # (trade-off: gives the bot access to the operator's full Claude config).
         try:
             proc = await asyncio.create_subprocess_exec(
                 "claude", "-p", "--output-format", "json",
