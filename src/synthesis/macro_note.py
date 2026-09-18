@@ -293,6 +293,7 @@ Do not recommend specific stocks or ETFs in the forecast section.\
 
 _PLAN_DELIMITER      = "---PLAN---"
 _DISCOVERY_DELIMITER = "---DISCOVERY---"
+_DISCOVERY_FALLBACK  = "_LLM discovery unavailable._"
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -434,7 +435,7 @@ async def _generate_forecast_and_plan(
 
     fallback_forecast  = "_LLM forecast unavailable._"
     fallback_plan      = "_LLM regime assessment unavailable._"
-    fallback_discovery = "_LLM discovery unavailable._"
+    fallback_discovery = _DISCOVERY_FALLBACK
 
     if not result:
         return fallback_forecast, fallback_plan, fallback_discovery
@@ -559,7 +560,7 @@ def _render_note(
 > AI calls existing software as infrastructure (Jevons Paradox). LLM-suggested names
 > outside the static watchlist, refreshed each week from current news + macro context.
 
-{discovery_text}""" if discovery_text and "unavailable" not in discovery_text else ""}
+{discovery_text}""" if discovery_text and discovery_text != _DISCOVERY_FALLBACK else ""}
 
 ---
 

@@ -62,6 +62,7 @@ from src.market_data.store import (
     bulk_upsert_ohlcv,
 )
 from src.screener.csp_scanner import (
+    DEFAULT_MAX_PRICE,
     apply_fundamental_filter,
     run_csp_scan,
     ScannerParams,
@@ -182,7 +183,7 @@ class TestApplyFundamentalFilterUsesStore:
         # Seed a ticker that fails market_cap (too low) and one that fails price (too high)
         bulk_upsert_fundamentals([
             {"symbol": "LOWCAP", "market_cap_b": 1.0, "price": 100.0, "beta": 1.2, "iv_pct": 35.0},
-            {"symbol": "HIPRCE", "market_cap_b": 50.0, "price": 200.0, "beta": 1.2, "iv_pct": 35.0},
+            {"symbol": "HIPRCE", "market_cap_b": 50.0, "price": DEFAULT_MAX_PRICE + 50.0, "beta": 1.2, "iv_pct": 35.0},
             {"symbol": "BADBETA", "market_cap_b": 50.0, "price": 100.0, "beta": 0.1, "iv_pct": 35.0},
         ])
 

@@ -120,16 +120,20 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
 
     Server-side errors (5xx, e.g. "high demand") and other unexpected
     exceptions (network blips) are retried with backoff.
-    429 RESOURCE_EXHAUSTED (per-minute quota) is retried after a fixed wait.
-    Other 4xx client errors (bad auth, daily quota) are not retried.
+    429 RESOURCE_EXHAUSTED (per-minute quota) is retried after a fixed wait,
+    on its own budget so it does not use up the server-error retries.
+    A 429 for the per-day quota and other 4xx client errors (bad auth) are not
+    retried — they will not clear within the request, so waiting only delays
+    the Claude CLI fallback.
     """
     from google import genai
     from google.genai import errors as genai_errors
 
     client = genai.Client(api_key=settings.gemini_api_key)
     rate_limit_attempts = 0
+    server_retries = 0
 
-    for attempt in range(_GEMINI_RETRIES + 1):
+    while True:
         try:
             await _gemini_pace()
             response = await asyncio.to_thread(
@@ -152,6 +156,11 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
         except genai_errors.ClientError as exc:
             exc_str = str(exc)
             is_rate_limit = "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str
+            # The QuotaFailure detail names the quota, e.g.
+            # GenerateRequestsPerDayPerProjectPerModel-FreeTier.
+            if is_rate_limit and "PerDay" in exc_str:
+                logger.warning("LLM: Gemini daily quota exhausted (not retrying)")
+                return None
             if is_rate_limit and rate_limit_attempts < _GEMINI_RATE_LIMIT_RETRIES:
                 rate_limit_attempts += 1
                 logger.warning(
@@ -166,14 +175,15 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
             return None
 
         except Exception as exc:
-            if attempt < _GEMINI_RETRIES:
+            if server_retries < _GEMINI_RETRIES:
+                server_retries += 1
                 logger.warning(
                     "LLM: Gemini call failed (attempt %d/%d), retrying: %s",
-                    attempt + 1,
+                    server_retries,
                     _GEMINI_RETRIES + 1,
                     exc,
                 )
-                await asyncio.sleep(_GEMINI_RETRY_BACKOFF_S * (attempt + 1))
+                await asyncio.sleep(_GEMINI_RETRY_BACKOFF_S * server_retries)
                 continue
             logger.exception(
                 "LLM: Gemini call failed after %d attempts: %s", _GEMINI_RETRIES + 1, exc

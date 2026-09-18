@@ -10,7 +10,14 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from src.screener.wheel_scorer import _parse_score_and_report
-from src.synthesis.macro_note import _generate_forecast, _generate_regime_plan, _render_note, find_latest_note, generate_macro_note
+from src.synthesis.macro_note import (
+    _DISCOVERY_DELIMITER,
+    _PLAN_DELIMITER,
+    _generate_forecast_and_plan,
+    _render_note,
+    find_latest_note,
+    generate_macro_note,
+)
 
 
 # ── _parse_score_and_report ───────────────────────────────────────────────────
@@ -174,35 +181,72 @@ class TestRenderNote:
 
 # ── LLM fallback paths ────────────────────────────────────────────────────────
 
-class TestLlmFallbacks:
-    async def test_forecast_returns_fallback_when_synthesize_empty(self):
+class TestGenerateForecastAndPlan:
+    async def _run(self, llm_output: str) -> tuple[str, str, str]:
         with patch("src.synthesis.macro_note.synthesize", new_callable=AsyncMock) as mock_syn:
-            mock_syn.return_value = ""
-            result = await _generate_forecast("macro context here")
-        assert "_LLM forecast unavailable._" in result
+            mock_syn.return_value = llm_output
+            return await _generate_forecast_and_plan("macro context", {}, [], [])
 
-    async def test_regime_returns_fallback_when_synthesize_empty(self):
-        snapshot = {"spy_price": 550.0, "vix": 15.0}
-        with patch("src.synthesis.macro_note.synthesize", new_callable=AsyncMock) as mock_syn:
-            mock_syn.return_value = ""
-            result = await _generate_regime_plan("forecast text", snapshot, [], [])
-        assert "_LLM regime assessment unavailable._" in result
+    async def test_all_fallbacks_when_synthesize_empty(self):
+        forecast, plan, discovery = await self._run("")
+        assert "_LLM forecast unavailable._" in forecast
+        assert "_LLM regime assessment unavailable._" in plan
+        assert "_LLM discovery unavailable._" in discovery
 
-    async def test_forecast_truncates_very_long_output(self):
-        long_text = "A sentence. " * 1000
-        with patch("src.synthesis.macro_note.synthesize", new_callable=AsyncMock) as mock_syn:
-            mock_syn.return_value = long_text
-            result = await _generate_forecast("macro context")
-        assert len(result) < len(long_text)
-        assert "[output truncated]" in result
+    async def test_splits_on_both_delimiters(self):
+        out = (
+            f"Forecast body\n{_PLAN_DELIMITER}\nPlan body\n"
+            f"{_DISCOVERY_DELIMITER}\n| NOW | ServiceNow |"
+        )
+        forecast, plan, discovery = await self._run(out)
+        assert forecast == "Forecast body"
+        assert plan == "Plan body"
+        assert discovery == "| NOW | ServiceNow |"
 
-    async def test_regime_truncates_very_long_output(self):
-        long_text = "B sentence. " * 2000
-        with patch("src.synthesis.macro_note.synthesize", new_callable=AsyncMock) as mock_syn:
-            mock_syn.return_value = long_text
-            result = await _generate_regime_plan("forecast", {}, [], [])
-        assert len(result) < len(long_text)
-        assert "[output truncated]" in result
+    async def test_missing_discovery_delimiter_keeps_forecast_and_plan(self):
+        forecast, plan, discovery = await self._run(f"Forecast\n{_PLAN_DELIMITER}\nPlan")
+        assert forecast == "Forecast"
+        assert plan == "Plan"
+        assert "_LLM discovery unavailable._" in discovery
+
+    async def test_missing_plan_delimiter_splits_on_regime_heading(self):
+        forecast, plan, _ = await self._run("Forecast text\n\n**Regime:** sideways\nPlan text")
+        assert forecast == "Forecast text"
+        assert plan.startswith("**Regime:** sideways")
+
+    async def test_unsplittable_output_goes_to_plan(self):
+        forecast, plan, _ = await self._run("One block with no markers")
+        assert "_LLM forecast unavailable._" in forecast
+        assert plan == "One block with no markers"
+
+    async def test_truncates_very_long_sections(self):
+        long_forecast = "A sentence. " * 1000
+        long_plan = "B sentence. " * 2000
+        forecast, plan, _ = await self._run(f"{long_forecast}{_PLAN_DELIMITER}{long_plan}")
+        assert len(forecast) < len(long_forecast)
+        assert "[output truncated]" in forecast
+        assert len(plan) < len(long_plan)
+        assert "[output truncated]" in plan
+
+
+class TestRenderDiscovery:
+    _args = ({"spy_price": 550.0, "vix": 15.0}, "", "forecast", "plan", [], date(2026, 9, 7), 5)
+
+    def test_discovery_section_rendered(self):
+        note = _render_note(*self._args, discovery_text="| NOW | ServiceNow | fits |")
+        assert "Exhibit 2F" in note
+        assert "| NOW | ServiceNow | fits |" in note
+
+    def test_discovery_section_hidden_for_fallback(self):
+        note = _render_note(*self._args, discovery_text="_LLM discovery unavailable._")
+        assert "Exhibit 2F" not in note
+
+    def test_discovery_section_kept_when_a_row_says_unavailable(self):
+        """Only the fallback sentinel hides the section — not the word in real content."""
+        text = "| NOW | ServiceNow | fits | Est. drawdown unavailable |"
+        note = _render_note(*self._args, discovery_text=text)
+        assert "Exhibit 2F" in note
+        assert text in note
 
 
 # ── ISO-week naming ───────────────────────────────────────────────────────────
@@ -259,15 +303,11 @@ class TestGenerateMacroNoteWeekPath:
                     new_callable=AsyncMock,
                     return_value=[],
                 ),
+                patch("src.synthesis.macro_note._fetch_watchlist_snapshot", return_value=[]),
                 patch(
-                    "src.synthesis.macro_note._generate_forecast",
+                    "src.synthesis.macro_note._generate_forecast_and_plan",
                     new_callable=AsyncMock,
-                    return_value="forecast text",
-                ),
-                patch(
-                    "src.synthesis.macro_note._generate_regime_plan",
-                    new_callable=AsyncMock,
-                    return_value="regime plan text",
+                    return_value=("forecast text", "regime plan text", "discovery text"),
                 ),
             ):
                 result = await generate_macro_note(out_dir=out_dir, target_week=target)
