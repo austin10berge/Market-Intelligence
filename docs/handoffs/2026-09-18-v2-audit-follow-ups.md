@@ -5,7 +5,7 @@
 **Branch:** `main`
 **Read first:** `docs/superpowers/plans/2026-09-18-v2-audit-fixes.md` — the plan for the work that *was* done, with the original audit evidence.
 
-## What the 2026-09-18 session already fixed (committed to `main`, NOT pushed, NOT deployed to prod)
+## What the 2026-09-18 session already fixed (on `origin/main` as of `1848b37`, NOT deployed to prod)
 
 > **Provenance — read this before you `git blame`.** These fixes landed in commit **`999e0c4`**, titled *"feat: morning brief pre-scan, wheel scorer, and watchlist technicals fix"*. A different, concurrent session made that commit and swept this session's files into it along with its own morning-brief work. Its message calls the scanner, options and stocks changes "previously-uncommitted morning brief pipeline work". **That description is wrong for the files below.** They are the v2 audit fixes, specified in `docs/superpowers/plans/2026-09-18-v2-audit-fixes.md`. The one exception is the `max_delta` parameter in `src/screener/options.py`, which belongs to the other session. `git blame` on these files points at `999e0c4`; use this table, not that commit message, to find out why a line changed.
 
@@ -45,10 +45,10 @@ curl -s -o /dev/null -w "%{http_code}\n" https://market.austin10berge.com/api/sc
 ```
 Caution: that endpoint recomputes the whole screener on every call while the bug is live, because the NaN also stops the result from caching. Call it once, not in a loop.
 
-**⚠️ Pushing `main` ships more than these fixes.** On 2026-09-18 local `main` was 2 commits ahead of `origin/main` (`999e0c4`, `a6a4786`). Both commits also carry a concurrent session's morning-brief work, and `999e0c4`'s own message lists **known test failures it introduced**: `test_synthesis_macro` (collection error), `test_llm_synthesis::TestCallGemini` (3), and `test_csp_scanner_integration` (1). A clean checkout of the pre-existing `HEAD` plus only the audit fixes passed with **0 failures**. So those failures come from the other work, not from the fixes. Decide whether that work is ready for prod **before** you push. The audit fixes cannot be pushed on their own without rewriting those two commits.
+**Status at the end of 2026-09-18:** the fixes are **pushed** (`origin/main` = `1848b37`) and the full suite is **green**: 768 passed, 0 failed, 0 errors. `1848b37` fixed the test failures that `999e0c4` had introduced. The fixes are **not deployed**: a read-only GET of prod's `/v2/wheel.js` still showed the old label `Net Premium YTD` and none of the fix markers. `origin/main` also carries the morning-brief work from `999e0c4`, so deploying ships that work too.
 
 **Deploy (from CLAUDE.md — follow it exactly):**
-1. Push from dev: `git push origin main`
+1. Confirm `origin/main` is at `1848b37` or later: `git fetch origin main && git log --oneline -1 origin/main`
 2. On prod, check for local hotfixes first: `ssh firefly 'sudo -n git -C /root/market-intelligence status --short'`. Stash any overlap (`git stash push -u -- <files>`) rather than assuming a clean pull.
 3. `ssh firefly 'sudo -n git -C /root/market-intelligence pull origin main'`
 4. **Prod bakes `src/` into the image — a restart alone does NOT pick up code.** Rebuild, then start:
@@ -179,6 +179,6 @@ It also emits `"premium": float(premium)` unrounded — cosmetic only, because e
 - **Measure scanner candidate counts during market hours only.** The same code returned 13 candidates after the close and 40 during the session. Two-sided quotes thin out after hours, and yfinance returns `bid = ask = 0` then.
 - **Dev's wheel data is frozen at 2026-08-27.** The nightly pipeline runs only on prod (host `finance` in Loki), never on `ai-dev`. For true wheel numbers, read prod's API read-only. For fixtures, dev's stale data is useful: it contains an ETF holding (DRAM) and internally inconsistent P&L rows.
 - **More than one session may be working in this tree at once.** On 2026-09-18 a concurrent session edited `src/screener/csp_morning_scan.py` at 15:10 UTC, then at 15:29 UTC committed everything in the working tree, including another session's in-progress files. Run `git status`, `git diff` and `git log -3` before you touch a file or commit, and stage only your own hunks. If `options.py` or another file mixes your hunks with someone else's, build the staged version by applying your own patch to `git show HEAD:<file>`, then check that the leftover diff is only the other hunks.
-- **Test baseline on `main` at `a6a4786`:** 733 passed, 4 failed, 1 collection error. The 4 failures are in `test_csp_scanner_integration.py` (1) and `test_llm_synthesis.py::TestCallGemini` (3); the collection error is `test_synthesis_macro.py`. **None are caused by the 2026-09-18 audit fixes.** A clean tree of `cdc8040` plus only the audit fixes passed with 0 failures. `999e0c4`'s own commit message attributes all five to its morning-brief work ("tests not yet updated for the behavior changes").
+- **Test baseline on `main` at `1848b37`: 768 passed, 0 failed, 0 errors** (`--ignore=tests/test_stock_screener.py`). Treat any failure as new. History: `999e0c4` briefly left 4 failures and 1 collection error, all from its morning-brief work. A clean tree of `cdc8040` plus only the audit fixes passed with 0 failures. `1848b37` fixed those tests.
 - **A clean checkout of `cdc8040` alone could not import `src.screener.wheel_scorer`**: `csp_scan_nightly.py` imported a file that was not committed yet. `999e0c4` fixed this by committing `wheel_scorer.py`. If you bisect across that range, expect `tests/test_csp_scan_nightly.py` to fail collection on the older side.
 - **UI verification uses the Playwright MCP at 390×844** (the user's phone layout). Resize before any screenshot. Always test on `dev-mi.austin10berge.com`.
